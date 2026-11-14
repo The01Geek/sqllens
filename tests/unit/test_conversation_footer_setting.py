@@ -79,7 +79,8 @@ def _patch_impl(
     """Replace the impl with a stub that returns ``returns`` as the answer or raises."""
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         if raises is not None:
             raise raises

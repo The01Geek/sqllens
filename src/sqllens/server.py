@@ -258,6 +258,13 @@ _RESERVED_META_PREFIX = "io.modelcontextprotocol/"
 
 
 def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dict[str, Any]:
+    """The bounded request metadata of :func:`_bounded_request_metadata`, without its flag."""
+    return _bounded_request_metadata(ctx, count_declared_keys=count_declared_keys)[0]
+
+
+def _bounded_request_metadata(
+    ctx: Context, *, count_declared_keys: bool = False
+) -> tuple[dict[str, Any], bool]:
     """Extract caller-supplied per-request metadata from the MCP request.
 
     The calling application asserts per-request identity via the MCP request's
@@ -277,6 +284,10 @@ def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dic
     Invalid or oversized trees are discarded as a whole. These bounds apply
     after the MCP transport has parsed the request, not to HTTP body parsing.
 
+    Returns ``(metadata, discarded)``. ``discarded`` is ``True`` only when the
+    tree failed these bounds, so a rule-set refusal can say SQL Lens dropped
+    it; every other ``{}`` below, no ``_meta`` included, reports ``False``.
+
     Fail-secure: any failure to read the request context yields ``{}`` — a
     dynamic RLS rule then sees its key as missing and blocks the query (static
     rules are unaffected), rather than the tool crashing or, worse, a request
@@ -289,7 +300,7 @@ def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dic
         # The MCP SDK raises ValueError when no request is active. This
         # expected case needs no traceback; actual extraction faults do.
         logger.debug("no active request context; returning empty metadata")
-        return {}
+        return {}, False
     except Exception:
         # Genuinely unexpected: a future SDK swapping to ``LookupError`` /
         # ``RequestContextNotAvailableError``, a ``contextvars`` change, an
@@ -301,14 +312,14 @@ def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dic
             "failed to read request_context.meta; returning empty metadata",
             exc_info=True,
         )
-        return {}
+        return {}, False
     if meta is None:
-        return {}
+        return {}, False
     # Keep metadata diagnostics content-free, including unexpected SDK/helper
     # faults: exception messages and tracebacks can contain metadata values.
     if not isinstance(meta, dict):
         logger.warning("invalid or oversized request metadata; returning empty metadata")
-        return {}
+        return {}, False
     try:
         forwarded = {
             key: value
@@ -318,19 +329,19 @@ def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dic
         }
     except Exception:
         logger.warning("failed to read request metadata; returning empty metadata")
-        return {}
+        return {}, False
     try:
         if len(forwarded) > 64 or (count_declared_keys and len(meta) > 64):
             raise JsonBoundsError("request metadata key limit")
         bounded, _ = copy_bounded_json(forwarded)
-        return bounded
+        return bounded, False
     except JsonBoundsError:
         # A rejected tree is never partially forwarded to dynamic RLS rules.
         logger.warning("invalid or oversized request metadata; returning empty metadata")
-        return {}
+        return {}, True
     except Exception:
         logger.warning("unexpected failure bounding request metadata; returning empty metadata")
-        return {}
+        return {}, False
 
 
 def build_server(cfg: Config) -> MCPServer:
@@ -454,7 +465,7 @@ def build_server(cfg: Config) -> MCPServer:
         (after the MCP SDK's ``Error executing tool query_database:`` prefix) instead of
         an answer produced without saved memory.
         """
-        metadata = _request_metadata(
+        metadata, metadata_discarded = _bounded_request_metadata(
             ctx, count_declared_keys=cfg.rule_sets.loaded is not None
         )
         # Mint a stable id when the caller did not supply one, so the resolved
@@ -467,6 +478,7 @@ def build_server(cfg: Config) -> MCPServer:
                     cfg,
                     question,
                     metadata=metadata,
+                    metadata_discarded=metadata_discarded,
                     conversation_id=conversation_id,
                     profile=profile,
                     profile_store=profile_store,

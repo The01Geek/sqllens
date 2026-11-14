@@ -53,7 +53,7 @@ from sqlglot.errors import ErrorLevel
 from sqlglot.optimizer.scope import traverse_scope
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
-from sqllens.rule_sets import LoadedRuleSets, current_rule_set_selection
+from sqllens.rule_sets import LoadedRuleSets, current_rule_set_selection, refusal_log_fields
 from sqllens.safety.readonly import (
     UnsafeSqlError,
     _parse_statements,
@@ -662,12 +662,17 @@ class RuleSetGuardRunner(SqlRunner):
         try:
             rewritten = self._rewrite(args.sql)
         except RuleSetRefusal as exc:
-            logger.warning("rule-set guard refused a statement: %s", exc.detail)
+            logger.warning(
+                "rule-set guard refused a statement: %s; %s",
+                exc.detail,
+                refusal_log_fields(exc.kind),
+            )
             raise
         except Exception as exc:
             logger.warning(
-                "rule-set guard raised an unexpected %s; failing closed",
+                "rule-set guard raised an unexpected %s; failing closed; %s",
                 type(exc).__name__,
+                refusal_log_fields(KIND_UNCHECKED),
                 exc_info=True,
             )
             raise RuleSetRefusal(KIND_UNCHECKED, f"{type(exc).__name__}: {exc}") from exc
@@ -772,8 +777,14 @@ class RefusalRedactingRunner(SqlRunner):
             # Already logged with its full reason by RuleSetGuardRunner.
             raise
         except (UnsafeSqlError, RlsError) as exc:
-            if not _logged_by_guard(exc):
-                logger.warning("guard refused a statement: %s", exc)
+            text = redacted_refusal_text(exc)
+            fields = refusal_log_fields(text.partition(": ")[2])
+            if _logged_by_guard(exc):
+                # The guard logged the cause with its traceback; repeating its
+                # text here would log the reason twice.
+                logger.warning("guard refused a statement; %s", fields)
+            else:
+                logger.warning("guard refused a statement: %s; %s", exc, fields)
             redacted = type(exc).__new__(type(exc))
-            Exception.__init__(redacted, redacted_refusal_text(exc))
+            Exception.__init__(redacted, text)
             raise redacted from None

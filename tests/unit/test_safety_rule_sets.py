@@ -885,8 +885,8 @@ async def test_whole_row_parse_failure_is_redacted_end_to_end(tmp_path, selected
 
 
 @pytest.mark.asyncio
-async def test_guard_logged_unexpected_error_writes_one_warning(monkeypatch, caplog) -> None:
-    """A guard's fail-closed path already logs the cause; the redactor adds no second record."""
+async def test_guard_logged_unexpected_error_logs_its_cause_once(monkeypatch, caplog) -> None:
+    """A guard's fail-closed path logs the cause; the redactor adds only class and key names."""
     from sqllens.safety import whole_row
 
     def boom(sql: str, dialect: str | None = None) -> None:
@@ -899,20 +899,25 @@ async def test_guard_logged_unexpected_error_writes_one_warning(monkeypatch, cap
             await _run(RefusalRedactingRunner(inner), "SELECT name FROM customers")
     assert str(info.value) == guard.REDACTED_GUARD_ERROR
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warnings) == 1
-    assert warnings[0].exc_info is not None
-    assert "customers.email" in str(warnings[0].exc_info[1])
+    cause, refusal = warnings
+    assert cause.exc_info is not None
+    assert "customers.email" in str(cause.exc_info[1])
+    assert refusal.exc_info is None
+    assert "customers.email" not in refusal.getMessage()
+    assert f'class="{guard.KIND_UNCHECKED}"' in refusal.getMessage()
 
 
 @pytest.mark.asyncio
 async def test_relation_check_parse_failure_is_not_logged_twice(caplog) -> None:
-    """The relation check logs its own ParseError fail-closed path; the redactor adds nothing."""
+    """The relation check logs its own ParseError fail-closed path; the redactor omits its text."""
     error = RlsError("row-level security could not verify relation types; query blocked")
     error.__cause__ = sqlglot.errors.ParseError("bad")
     with caplog.at_level(logging.WARNING, logger="sqllens.safety.rule_sets"):
         with pytest.raises(RlsError):
             await _run(RefusalRedactingRunner(_Raises(error)), "SELECT 1")
-    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+    (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert "relation types" not in record.getMessage()
+    assert "the query's relations could not be verified" in record.getMessage()
 
 
 @pytest.mark.parametrize(

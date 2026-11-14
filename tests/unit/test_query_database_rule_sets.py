@@ -311,11 +311,11 @@ def test_query_database_counts_declared_meta_keys_only_under_rule_sets(
 
     seen: list[bool] = []
 
-    def record(ctx, *, count_declared_keys: bool = False) -> dict[str, object]:
+    def record(ctx, *, count_declared_keys: bool = False) -> tuple[dict[str, object], bool]:
         seen.append(count_declared_keys)
         raise RuntimeError("stop before the agent runs")
 
-    monkeypatch.setattr(server_module, "_request_metadata", record)
+    monkeypatch.setattr(server_module, "_bounded_request_metadata", record)
 
     for cfg in (
         rule_set_config(tmp_path),
