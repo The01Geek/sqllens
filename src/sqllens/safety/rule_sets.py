@@ -714,6 +714,17 @@ _PARSE_REFUSAL_MARKERS = (
 )
 
 
+_REDACTED_PREFIXES = ("refusing to execute query: ", "refusing to execute SQL: ")
+
+
+def _refusal_kind(text: str) -> str:
+    """The kind a ``REDACTED_*`` text names, without its refusal prefix."""
+    for prefix in _REDACTED_PREFIXES:
+        if text.startswith(prefix):
+            return text.removeprefix(prefix)
+    return text
+
+
 def redacted_refusal_text(exc: Exception) -> str:
     """The client-facing text for a guard refusal: its kind, naming nothing in the database."""
     if isinstance(exc, RuleSetRefusal):
@@ -778,7 +789,7 @@ class RefusalRedactingRunner(SqlRunner):
             raise
         except (UnsafeSqlError, RlsError) as exc:
             text = redacted_refusal_text(exc)
-            fields = refusal_log_fields(text.partition(": ")[2])
+            fields = refusal_log_fields(_refusal_kind(text))
             if _logged_by_guard(exc):
                 # The guard logged the cause with its traceback; repeating its
                 # text here would log the reason twice.

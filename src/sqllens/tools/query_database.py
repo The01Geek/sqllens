@@ -660,7 +660,13 @@ async def query_database_impl_with_widgets(
     keys_token = set_kept_metadata_keys(tuple(kept))
     try:
         try:
-            selection = select_rule_set(rule_sets, kept)
+            try:
+                selection = select_rule_set(rule_sets, kept)
+            except RuleSetRequestError as e:
+                identity = {
+                    "rule_set": e.rule_set, "account_id": e.account_id, "user_id": e.user_id
+                }
+                raise
             identity = {
                 "rule_set": selection.name,
                 "account_id": selection.account_id,
@@ -672,10 +678,6 @@ async def query_database_impl_with_widgets(
                 profile_store=profile_store, agent=agent,
             )
         except RuleSetRequestError as e:
-            if not identity:
-                identity = {
-                    "rule_set": e.rule_set, "account_id": e.account_id, "user_id": e.user_id
-                }
             outcome = f"refused: {e.refusal_class}"
             logger.warning(
                 "rule-set request refused: %s",

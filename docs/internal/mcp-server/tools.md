@@ -32,7 +32,7 @@ def build_server(cfg: Config) -> MCPServer:
         question: str, ctx: Context, conversation_id: str | None = None
     ) -> str | CallToolResult:
         """Ask a question; return an ordered list of text/table/chart blocks."""
-        metadata = _request_metadata(
+        metadata, metadata_discarded = _bounded_request_metadata(
             ctx, count_declared_keys=cfg.rule_sets.loaded is not None
         )
         # Mint a stable id when the caller omits one, so the resolved id can be
@@ -41,7 +41,8 @@ def build_server(cfg: Config) -> MCPServer:
         try:
             markdown, blocks, query_info, memory_info, agent_trace = (
                 await query_database_impl_with_widgets(
-                    cfg, question, metadata=metadata, conversation_id=conversation_id
+                    cfg, question, metadata=metadata,
+                    metadata_discarded=metadata_discarded, conversation_id=conversation_id,
                 )
             )
         except AgentRunError as exc:

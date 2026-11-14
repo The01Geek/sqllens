@@ -193,7 +193,7 @@ The classes are the five request classes above, `this conversation was started u
 rule-set audit: {"outcome": "served", "rule_set": "2", "account_id": "5", "user_id": 7}
 ```
 
-`outcome` is `served`, `refused: <class>` for a refusal before the assistant runs, or `failed` for any other ending, including a turn that ends on a guard refusal and a call the client cancelled. The line names only the rule set, account ID and user ID that passed their checks: a request refused as `user ID invalid` names the rule set and account but no user, and one refused as `rule set not confirmed` names the account and user but not the set. A call the MCP SDK rejects for malformed arguments never reaches SQL Lens and writes no line.
+`outcome` is `served`, `refused: <class>` for a refusal before the assistant runs, or `failed` for any other ending, including a turn that ends on a guard refusal and a call the client cancelled. The line names only the rule set, account ID and user ID that passed their checks, which are checked in the order of the five request classes above; a set counts as passed only when it is confirmed. A refusal as `rule-set key missing` or `no such rule set` names none of them; `account not bound` names the set; `user ID invalid` names the set and account; `rule set not confirmed` names the account and user but not the set; and every other ending names all three. A call the MCP SDK rejects for malformed arguments never reaches SQL Lens and writes no line.
 
 The audit line is written whatever `[agent.audit] enabled` says; that setting does not control it. With no rule-set file configured, neither kind of line is written.
 
