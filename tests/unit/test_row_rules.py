@@ -453,6 +453,23 @@ def test_a_scoped_table_read_by_the_model_without_its_listing_is_refused(tmp_pat
     assert info.value.kind == guard.KIND_UNLISTED_TABLE
 
 
+async def test_a_set_whose_row_rules_were_not_compiled_is_refused(tmp_path: Path) -> None:
+    loaded = _load(tmp_path)
+    loaded.compiled.clear()
+    recorder = _Recorder()
+    token = set_rule_set_selection(RuleSetSelection("2", "5", 7))
+    try:
+        with pytest.raises(RuleSetRefusal) as info:
+            await RuleSetGuardRunner(recorder, loaded).run_sql(
+                RunSqlToolArgs(sql="SELECT name FROM customers"),
+                ToolContext.model_construct(metadata={}),
+            )
+    finally:
+        reset_rule_set_selection(token)
+    assert info.value.kind == guard.KIND_UNCHECKED
+    assert recorder.calls == []
+
+
 def test_a_row_rule_needs_a_user_id(tmp_path: Path) -> None:
     spec = _load(tmp_path).guard_spec("2")
     with pytest.raises(ValueError, match="user ID"):

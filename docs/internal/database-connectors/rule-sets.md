@@ -18,7 +18,7 @@ How a rule-set file limits each `query_database` request to one application role
 - `[[rule_sets]]`: `name` (a decimal string, unique), `scope`, `source`, and one or more `[[rule_sets.tables]]`. Each table has `name`, `columns` (one or more, distinct), optional `predicate_columns` that may not overlap `columns` (columns only row rules read), and an optional `row_rule` (below).
 - `source` is provenance, validated and never sent to the model. `confirmed_against_production` (Boolean) is required; when `role_id` is set it must equal the set's `name`.
 
-`load_rule_sets` raises `RuleSetFileError`; a format violation names each problem by its record path. It also refuses a `database.url` whose scheme is not `mysql` or `mysql+<driver>`, a `binding.database` that differs, byte for byte, from the database the URL's path names, and a row rule that raises any exception while it is compiled.
+`load_rule_sets` raises `RuleSetFileError` for an unreadable file, a file that is not UTF-8 text, or invalid TOML; a format violation names each problem by its record path. It also refuses a `database.url` whose scheme is not `mysql` or `mysql+<driver>`, a `binding.database` that differs, byte for byte, from the database the URL's path names, and a row rule that raises any exception while it is compiled.
 
 ## Row rules
 

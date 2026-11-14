@@ -157,7 +157,7 @@ row_rule = { kind = "all_of", rules = [
 ] }
 ```
 
-**Column types.** Each `compare` column, and each `owner_via` `link_user_column` (which is compared with the integer user ID), must have a MySQL type its `value_type` accepts. SQL Lens checks this with the existence check, and refuses to start, naming the column, on any other type. This stops MySQL from converting one side of a comparison, which could make a hidden row match.
+**Column types.** Each `compare` column, and each `owner_via` `link_user_column` (which is compared with the integer user ID), must have a MySQL type its `value_type` accepts. SQL Lens checks this with the existence check: on any other type the server refuses to start, naming the column, or, when it could not check at startup, refuses requests until the type matches. This stops MySQL from converting one side of a comparison, which could make a hidden row match.
 
 | `value_type` | Accepted MySQL types (`DATA_TYPE`) |
 |---|---|
@@ -166,7 +166,7 @@ row_rule = { kind = "all_of", rules = [
 | `string` | `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`, `enum` |
 | `boolean` | `tinyint`, `smallint`, `mediumint`, `int`, `bigint` |
 
-The check runs once per server process, so a column dropped or retyped later is not noticed until the server restarts.
+Once the check has passed, it does not run again in that server process, so a column dropped or retyped later is not noticed until the server restarts.
 
 ## Asking a Question Under a Rule Set
 

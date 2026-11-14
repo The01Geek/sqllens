@@ -636,6 +636,10 @@ class _Compiler:
         raise TypeError(f"unknown row-rule node {type(node).__name__}")
 
 
+def _listed_columns(rule_set: RuleSet) -> dict[str, tuple[str, ...]]:
+    return {table.name: tuple(table.columns) for table in rule_set.tables}
+
+
 @dataclass(frozen=True)
 class GuardSpec:
     """What the rule-set guard enforces for one set.
@@ -676,12 +680,23 @@ class LoadedRuleSets:
         rule_set = self.rule_set(name)
         if rule_set is None:
             raise KeyError(name)
-        return {table.name: tuple(table.columns) for table in rule_set.tables}
+        return _listed_columns(rule_set)
 
     def guard_spec(self, name: str) -> GuardSpec:
-        """Rule set ``name``'s listed tables and compiled row rules; ``KeyError`` if absent."""
+        """Rule set ``name``'s listed tables and compiled row rules; ``KeyError`` if absent.
+
+        Raises ``RuntimeError`` when a table of the set has a row rule with no
+        compiled rule, so the guard refuses rather than serving the table
+        unfiltered.
+        """
         tables = self.tables_for(name)
-        return GuardSpec(tables=tables, rules=MappingProxyType(dict(self.compiled.get(name, {}))))
+        rule_set = self.rule_set(name)
+        compiled = self.compiled.get(name, {})
+        if rule_set is not None and any(
+            table.row_rule is not None and table.name not in compiled for table in rule_set.tables
+        ):
+            raise RuntimeError(f"rule set {name!r} has a row rule that was not compiled")
+        return GuardSpec(tables=tables, rules=MappingProxyType(dict(compiled)))
 
     @property
     def unconfirmed(self) -> list[str]:
@@ -760,7 +775,7 @@ def _compile_all(path: Path, rule_set_file: RuleSetFile) -> dict[str, dict[str, 
     for set_index, rule_set in enumerate(rule_set_file.rule_sets):
         compiler = _Compiler(rule_set)
         rules: dict[str, CompiledRule] = {}
-        tables = {table.name: tuple(table.columns) for table in rule_set.tables}
+        tables = _listed_columns(rule_set)
         for table_index, table in enumerate(rule_set.tables):
             if table.row_rule is None:
                 continue
@@ -1069,7 +1084,7 @@ def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
     for table, column, value_type in dict.fromkeys(typed):
         data_type = columns.get(table, {}).get(column)
         if kinds.get(table) != "BASE TABLE" or data_type is None:
-            continue  # already reported as missing above
+            continue
         if data_type not in VALUE_TYPE_DATA_TYPES[value_type]:
             problems.append(
                 f"column {table}.{column} has type {data_type!r}, which a row rule's "
