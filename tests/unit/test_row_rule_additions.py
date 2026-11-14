@@ -51,7 +51,11 @@ def _null(kind: str, column: str = "deleted_at", **extra: Any) -> dict[str, Any]
 
 
 def _document(orders_rule: Any = None, *, tags_link: str = "order_tags") -> Document:
-    """The example set, ``orders`` with a ``deleted_at`` predicate column and ``orders_rule``."""
+    """The example set, ``orders`` with a ``deleted_at`` predicate column and ``orders_rule``.
+
+    The ``tags`` rule's ``link.table`` is set to ``tags_link``: the listed
+    ``order_tags`` by default, or a name the set does not list.
+    """
     document = row_rule_document()
     orders = _table(document, "orders")
     orders["predicate_columns"] = ["status", "deleted_at"]
@@ -263,6 +267,25 @@ def test_parent_rule_tests_the_same_parent_row_as_its_own_rule(tmp_path: Path) -
         "(`a1`.`sales_rep_id` = 7 OR EXISTS(SELECT 1 FROM `customer_reps` AS `a2` WHERE "
         "`a2`.`customer_id` = `a1`.`id` AND `a2`.`user_id` = 7))) AND `a1`.`region_id` = 1)"
     )
+
+
+def test_parent_rule_binds_the_user_id_at_the_parent_slot(tmp_path: Path) -> None:
+    document = _document(_inherit_customers(user_id_compare("sales_rep_id")))
+    rule = _load(tmp_path, document).guard_spec("2").rules["orders"]
+    assert _where_sql(rule).endswith("AND `a1`.`sales_rep_id` = 7)")
+
+
+def test_a_cycle_through_a_listed_link_table_is_refused(tmp_path: Path) -> None:
+    document = _document()
+    _table(document, "order_tags")["row_rule"] = {
+        "kind": "inherit", "column": "tag_id", "parent_table": "tags", "parent_column": "id",
+    }
+    with pytest.raises(RuleSetFileError, match="cycle through tables"):
+        _load(tmp_path, document)
+
+
+def test_an_unlisted_link_table_adds_no_cycle_edge(tmp_path: Path) -> None:
+    assert "tags" in _load(tmp_path, _document(tags_link="tag_links")).guard_spec("2").rules
 
 
 def test_parent_rule_on_a_parent_without_a_row_rule(tmp_path: Path) -> None:
@@ -493,6 +516,7 @@ def test_catalog_check_passes_with_every_addition(tmp_path: Path) -> None:
             "table 'tag_links' differs in letter case",
         ),
         (lambda t, c: c["orders"].pop("deleted_at"), "column orders.deleted_at does not exist"),
+        (lambda t, c: c["customers"].pop("region_id"), "column customers.region_id does not exist"),
         (
             lambda t, c: c["customers"].update(region_id="varchar"),
             "column customers.region_id has type 'varchar'",

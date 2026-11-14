@@ -328,13 +328,17 @@ AllOfRule.model_rebuild()
 InheritRule.model_rebuild()
 
 _COLUMN_LOCAL = (CompareRule, IsNullRule, IsNotNullRule, AnyOfRule, AllOfRule)
+# The ``kind`` of each ``_COLUMN_LOCAL`` record, in the same order, for refusal messages.
+_COLUMN_LOCAL_KINDS = "compare, is_null, is_not_null, any_of, all_of"
 
 
 def _rule_nodes(rule: RowRule, path: str) -> Iterator[tuple[RowRule, str]]:
-    """Every node of ``rule`` with its record path, iteratively (children after parents).
+    """Every node of ``rule`` except ``parent_rule`` subtrees, with its record path.
 
-    An ``inherit`` node's ``parent_rule`` is not walked: its nodes read the
-    parent table, not the table ``rule`` belongs to.
+    Walked iteratively, children after parents. An ``inherit`` node's
+    ``parent_rule`` is deliberately not walked: its nodes read the parent
+    table, not the table ``rule`` belongs to, so a caller that needs them
+    walks ``node.parent_rule`` itself.
     """
     stack = [(rule, path)]
     while stack:
@@ -430,13 +434,9 @@ class RuleSet(_Record):
                             node.parent_rule, f"{path}.parent_rule"
                         ):
                             if not isinstance(local, _COLUMN_LOCAL):
-                                allowed = ", ".join(
-                                    kind.model_fields["kind"].annotation.__args__[0]
-                                    for kind in _COLUMN_LOCAL
-                                )
                                 raise ValueError(
                                     f"{local_path}: parent_rule cannot hold a "
-                                    f"{local.kind!r} node, only {allowed}"
+                                    f"{local.kind!r} node, only {_COLUMN_LOCAL_KINDS}"
                                 )
                             if not isinstance(local, AnyOfRule | AllOfRule):
                                 column(node.parent_table, local.column, local_path)
@@ -1110,8 +1110,8 @@ def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
     must exist with exactly that name, byte for byte, as a ``BASE TABLE``;
     every listed column and predicate column, and each unlisted link table's
     two named columns, must exist on it with exactly that name. Every
-    ``compare`` column's
-    ``DATA_TYPE`` must be one :data:`VALUE_TYPE_DATA_TYPES` accepts for its
+    ``compare`` column's ``DATA_TYPE`` (a ``parent_rule``'s ``compare``
+    columns read on its ``parent_table``) must be one :data:`VALUE_TYPE_DATA_TYPES` accepts for its
     ``value_type``, and every ``owner_via`` ``link_user_column``'s one it
     accepts for ``integer``. Raises ``RuleSetCatalogError`` naming each
     mismatch; a catalog read that fails raises the driver's exception.

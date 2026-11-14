@@ -107,7 +107,7 @@ Names are compared exactly, letter case included, everywhere: in the file, again
 
 ### Row rules
 
-A table's `row_rule` decides which of its rows the role sees. A row is visible only when its rule is true, and a comparison that reads `NULL` is never true, so it never makes a row visible. A rule is one node; every node has a `kind` and exactly the fields its kind defines, and an unknown field is an error.
+A table's `row_rule` decides which of its rows the role sees. A row is visible only when its rule is true. A `compare` that reads `NULL` is never true, so it never makes a row visible; use `is_null` to match a `NULL` column. A rule is one node; every node has a `kind` and exactly the fields its kind defines, and an unknown field is an error.
 
 | `kind` | Fields | A row is visible when |
 |---|---|---|
