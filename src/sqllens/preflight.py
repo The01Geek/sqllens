@@ -166,6 +166,16 @@ def _check_rule_set_catalog(connection: object, rule_sets: LoadedRuleSets) -> No
     except RuleSetCatalogError as exc:
         raise PreflightError("database", str(exc)) from exc
     except Exception as exc:
+        import pymysql
+
+        if not isinstance(exc, pymysql.MySQLError):
+            # Not a driver error, so not a failed information_schema read; do
+            # not point the operator at connection settings or privileges.
+            raise PreflightError(
+                "database",
+                f"{type(exc).__name__}: the rule-set catalog check failed with an "
+                "internal error (not a database error).",
+            ) from exc
         raise PreflightError(
             "database",
             f"{type(exc).__name__}: the rule-set catalog check could not read "
