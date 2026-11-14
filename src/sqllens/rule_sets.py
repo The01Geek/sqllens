@@ -528,12 +528,24 @@ def mysql_connect_kwargs(url: str) -> dict[str, Any]:
     }
 
 
+_CATALOG_CONNECT_TIMEOUT_SECONDS = 5
+# Bounds each socket read and write of the request-time check. The check runs
+# under the catalog lock, so a stalled read would otherwise hold every later
+# rule-set request; a timeout raises, and the caller refuses the request.
+_CATALOG_IO_TIMEOUT_SECONDS = 30
+
+
 def _check_catalog_blocking(url: str, loaded: LoadedRuleSets) -> None:
     import contextlib
 
     import pymysql
 
-    connection = pymysql.connect(**mysql_connect_kwargs(url), connect_timeout=5)
+    connection = pymysql.connect(
+        **mysql_connect_kwargs(url),
+        connect_timeout=_CATALOG_CONNECT_TIMEOUT_SECONDS,
+        read_timeout=_CATALOG_IO_TIMEOUT_SECONDS,
+        write_timeout=_CATALOG_IO_TIMEOUT_SECONDS,
+    )
     with contextlib.closing(connection):
         check_catalog(connection, loaded)
 

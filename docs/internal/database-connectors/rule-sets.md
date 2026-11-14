@@ -41,7 +41,7 @@ The resulting `RuleSetSelection` is published in a context variable (`set_rule_s
 Inside the conversation turn lock, two more checks run before the agent:
 
 - **Conversation owner.** When the request carries a `conversation_id` that the store holds, `_check_conversation_owner` compares the stored owner (`BoundedConversationStore.owner_id`) with the resolved user. A mismatch refuses with `REFUSED_CONVERSATION_OWNER`; a store without `owner_id`, or a resolver or store that raises, fails closed with the sanitized internal error.
-- **Catalog confirmation.** `ensure_catalog_confirmed` runs `check_catalog` on a fresh connection unless it has already passed once in this process (a pass in preflight counts). A failure logs the cause at WARNING and refuses with `REFUSED_CATALOG_UNCONFIRMED`, naming no table or column; the next request tries again.
+- **Catalog confirmation.** `ensure_catalog_confirmed` runs `check_catalog` on a fresh connection (5-second connect timeout, 30-second read and write timeouts, since the check holds the catalog lock) unless it has already passed once in this process (a pass in preflight counts). A failure logs the cause at WARNING and refuses with `REFUSED_CATALOG_UNCONFIRMED`, naming no table or column; the next request tries again.
 
 ## Catalog existence check
 

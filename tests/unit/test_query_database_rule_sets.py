@@ -253,6 +253,27 @@ async def test_catalog_check_error_refuses_and_retries(
     assert cfg.rule_sets.loaded is not None and cfg.rule_sets.loaded.catalog.confirmed is False
 
 
+def test_request_time_catalog_check_bounds_every_socket_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The check runs under the catalog lock: an unbounded read would hold
+    # every later rule-set request instead of refusing it.
+    import pymysql
+
+    seen: dict[str, Any] = {}
+
+    def fake_connect(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        raise pymysql.err.OperationalError(2013, "Lost connection during query")
+
+    monkeypatch.setattr(pymysql, "connect", fake_connect)
+    with pytest.raises(pymysql.err.OperationalError):
+        rule_sets_module._check_catalog_blocking("mysql+pymysql://u:p@h:3306/db", None)
+    assert seen["connect_timeout"] > 0
+    assert seen["read_timeout"] > 0
+    assert seen["write_timeout"] > 0
+
+
 async def test_class_refusal_wins_over_catalog_refusal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
