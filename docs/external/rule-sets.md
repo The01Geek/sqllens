@@ -194,7 +194,7 @@ Here `customers` must also declare `region_id`. A reader that knows only the six
 | `string` | `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`, `enum` |
 | `boolean` | `tinyint`, `smallint`, `mediumint`, `int`, `bigint` |
 
-Once the check has passed, it does not run again in that server process, so a column dropped or retyped later is not noticed until the server restarts. **Restart SQL Lens after renaming or dropping any table or column a rule set names**, unlisted link tables included. Until it restarts, a query that reaches the renamed or dropped name fails with the database's own error, and that error text can name the table and column.
+Once the check has passed, it does not run again in that server process, so a column dropped or retyped later is not noticed until the server restarts. **Restart SQL Lens after renaming or dropping any table or column a rule set names**, unlisted link tables included. Until it restarts, a query that reaches a renamed or dropped table is refused before it runs, and a query that reaches a renamed or dropped column fails with the database's own error, whose text can name the table and column.
 
 ## Asking a Question Under a Rule Set
 
