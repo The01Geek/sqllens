@@ -1,8 +1,8 @@
 # Per-role rule sets
 
-<!-- verified-against: 97783a1 2026-11-14 -->
+<!-- verified-against: 631e028 2026-11-14 -->
 
-How a rule-set file limits each `query_database` request to one application role's tables and columns: loading and validating the file, selecting a set per request, the catalog existence check, and the SQL guard that enforces the selected set. Read it before changing `src/sqllens/rule_sets.py`, `src/sqllens/safety/rule_sets.py`, or anything they wire into. For row predicates from `[[rls]]`, read [row-level-security.md](row-level-security.md) instead. MySQL only.
+How a rule-set file limits each `query_database` request to one application role's tables, columns and rows: loading and validating the file and its row rules, selecting a set per request, the catalog existence and type check, and the SQL guard that enforces the selected set. Read it before changing `src/sqllens/rule_sets.py`, `src/sqllens/safety/rule_sets.py`, or anything they wire into. For row predicates from `[[rls]]`, read [row-level-security.md](row-level-security.md) instead. MySQL only.
 
 ## Turning it on
 
@@ -15,10 +15,32 @@ How a rule-set file limits each `query_database` request to one application role
 - `format_version` must be `1`.
 - `[binding]`: `database` (an identifier) and `account_ids` (one or more distinct decimal strings).
 - `[metadata]`: the three `_meta` key names that carry `rule_set`, `account_id` and `user_id`. They must be distinct and none may be a key in `RESERVED_METADATA_KEYS`.
-- `[[rule_sets]]`: `name` (a decimal string, unique), `scope`, `source`, and one or more `[[rule_sets.tables]]`. Each table has `name`, `columns` (one or more, distinct), and optional `predicate_columns` that may not overlap `columns`. A `row_rule` key fails the load with `ROW_RULE_MESSAGE`; row rules are not supported yet.
+- `[[rule_sets]]`: `name` (a decimal string, unique), `scope`, `source`, and one or more `[[rule_sets.tables]]`. Each table has `name`, `columns` (one or more, distinct), optional `predicate_columns` that may not overlap `columns` (columns only row rules read), and an optional `row_rule` (below).
 - `source` is provenance, validated and never sent to the model. `confirmed_against_production` (Boolean) is required; when `role_id` is set it must equal the set's `name`.
 
-`load_rule_sets` raises `RuleSetFileError`; a format violation names each problem by its record path. It also refuses a `database.url` whose scheme is not `mysql` or `mysql+<driver>`, and a `binding.database` that differs, byte for byte, from the database the URL's path names.
+`load_rule_sets` raises `RuleSetFileError` for an unreadable file, a file that is not UTF-8 text, or invalid TOML; a format violation names each problem by its record path. It also refuses a `database.url` whose scheme is not `mysql` or `mysql+<driver>`, a `binding.database` that differs, byte for byte, from the database the URL's path names, and a row rule that raises any exception while it is compiled.
+
+## Row rules
+
+A table's `row_rule` is one node of the version-1 row-rule language, a pydantic discriminated union on `kind` (`RowRule`). Every node record is a strict `_Record`. A row is visible only when its rule is true; a comparison that reads `NULL` is never true.
+
+| `kind` | Record | Visible when |
+| --- | --- | --- |
+| `compare` | `CompareRule`: `column`, `operator`, `value_type`, and exactly one of `value` or `request` | the row's `column` compares true with the value |
+| `any_of` / `all_of` | `AnyOfRule` / `AllOfRule`: non-empty `rules` | at least one / every child is true |
+| `owner_via` | `OwnerViaRule`: `id_column`, `link_table`, `link_row_column`, `link_user_column` | a `link_table` row links the row's `id_column` to the request's user ID; the link table's own row rule is not applied |
+| `inherit` | `InheritRule`: `column`, `parent_table`, `parent_column` | a `parent_table` row that passes the parent's own rule (any row, for a parent with none) has `parent_column` equal to `column` |
+| `referenced_by` | `ReferencedByRule`: `id_column`, `source_table`, and `source_column`, or `source_id_column` plus `link` | a `source_table` row passing its own rule references the row directly, or through a `link.table` row that also passes its own rule |
+
+Load-time checks:
+
+- On the node (`CompareRule._operand`, `ReferencedByRule._variant`): `operator` is one of `=`, `!=`, `<`, `<=`, `>`, `>=`, `in`; `value_type` is one of `integer`, `float`, `string`, `boolean`; a static `value` has exactly that TOML type (`type() is`, so a Boolean is never an integer; a float must be finite); `in` takes a non-empty array (duplicates allowed), every other operator one scalar; `boolean` allows only `=`, `!=` and `in`; `request` is only `"user_id"`, with `value_type = "integer"` and an operator other than `in`; `referenced_by` has exactly one variant.
+- On the set (`RuleSet._check_row_rules`): every column a node reads on the current table is declared there (`columns` or `predicate_columns`); `inherit.parent_table`, `referenced_by.source_table` and `referenced_by.link.table` are listed and their named columns declared on them; an `owner_via` link table that is listed must declare both link columns. An unlisted link table is allowed: its two named columns are internal-only declarations, and the model still cannot query it.
+- `RuleSet._check_acyclic`: the visibility graph (an edge from a table to each `inherit`, `referenced_by` source and link table its rule names, nested nodes included; `owner_via` adds none) must be acyclic, self-edges included. It removes tables with no remaining edge until none is removed; whatever remains is a cycle.
+
+`_compile_all` then compiles each rule once per set into a `CompiledRule`: a sqlglot condition built only with expression builders and `exp.and_`/`exp.or_`, in which `inherit`, `referenced_by` and `owner_via` become `EXISTS` subqueries carrying the parent's or source's own compiled rule. Every column is qualified with an alias slot (`s0` is the scoped table, `s1` onwards each table read inside the rule) and the user ID is a placeholder; `CompiledRule.instantiate` fills both per statement. A `float` value is written by `float_literal_text` as a 17-significant-digit exponent-form literal (`5.0000000000000000e-01`), which MySQL reads as a double and which reads back as the same double. `prove_compiled_rule` then generates and re-parses the rule's derived table and requires the same tree; any exception in either step fails the load, naming the rule's record path.
+
+A file whose tables hold no `row_rule` compiles nothing and loads and serves exactly as without row rules.
 
 ## Startup signals
 
@@ -45,7 +67,16 @@ Inside the conversation turn lock, two more checks run before the agent:
 
 ## Catalog existence check
 
-`check_catalog` reads `information_schema.TABLES` and `COLUMNS` for `DATABASE()`. Every listed table must exist as a `BASE TABLE` with exactly the listed name, and every listed column and predicate column must exist on it with exactly the listed name. A mismatch, including one of letter case only, raises `RuleSetCatalogError` naming each problem.
+`check_catalog` reads `information_schema.TABLES` and `COLUMNS` (with `DATA_TYPE`) for `DATABASE()`. Every listed table, and every unlisted `owner_via` link table, must exist as a `BASE TABLE` with exactly that name; every listed column and predicate column, and each unlisted link table's two named columns, must exist on it with exactly that name. Every `compare` column's `DATA_TYPE` must be one `VALUE_TYPE_DATA_TYPES` accepts for its `value_type`, and every `owner_via` `link_user_column` (compared with the integer user ID) one it accepts for `integer`:
+
+| `value_type` | Accepted `DATA_TYPE` |
+| --- | --- |
+| `integer` | `tinyint`, `smallint`, `mediumint`, `int`, `bigint` |
+| `float` | `float`, `double` |
+| `string` | `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`, `enum` |
+| `boolean` | `tinyint`, `smallint`, `mediumint`, `int`, `bigint` |
+
+The mapping keeps MySQL from converting one side of a comparison: a string column compared with a number compares as floating point, so `'1a'` would equal `1`, and a `DECIMAL` column compared with an exponent-form literal compares as a double rather than as the column's exact decimal. A mismatch, including one of letter case only, raises `RuleSetCatalogError` naming each problem. The check passes once per process, so a column dropped or retyped afterwards is not caught until restart.
 
 ## Agent wiring while a file is configured
 
@@ -62,6 +93,17 @@ Inside the conversation turn lock, two more checks run before the agent:
 `RuleSetGuardRunner` (`src/sqllens/safety/rule_sets.py`) parses each statement with sqlglot under the MySQL dialect and refuses anything it cannot carry through: no selection, an unparseable statement, anything other than one `SELECT` (including `SELECT ... INTO`), a table the set does not list, a schema- or database-qualified table, a catalog relation other than the three rewritten views below (another `information_schema` view, or anything in the `mysql`, `performance_schema` or `sys` schemas), a table function, `JSON_TABLE` or `DUAL`, a `PARTITION` list or index hint, column aliases on a table, and a denied function. Otherwise it rewrites each listed table reference into a derived table selecting exactly that table's listed `columns`, so MySQL rejects any other column as unknown.
 
 A reference to `information_schema.TABLES`, `COLUMNS` or `KEY_COLUMN_USAGE`, in any letter case, becomes a derived table over that view (`_catalog_body`). It keeps a row only when its `TABLE_SCHEMA` is `DATABASE()` and its table (for `COLUMNS` and `KEY_COLUMN_USAGE`, its table and column) is listed in the set; a `KEY_COLUMN_USAGE` row must also have a `NULL` referenced schema, table and column, or a referenced schema, table and column that pass the same test. Each comparison is written twice: a plain one (`TABLE_SCHEMA = SCHEMA()`, `TABLE_NAME IN (...)`) that lets MySQL look the schema and tables up in its data dictionary instead of reading every schema, and a binary one (`CAST(... AS BINARY)`) that makes names match byte for byte, as the catalog existence check does. `DATABASE()` appears as its synonym `SCHEMA()`, and the filter is one literal list per comparison. The derived table projects every field of the view under its own name, from field lists written into `_CATALOG_VIEWS` for MySQL 8.0 and checked against 8.0 and 8.4 by the connector test `test_star_returns_every_field_of_the_view`. On a server whose view lacks a listed field, every rule-set schema lookup fails with MySQL's unknown-column error; a field the server adds is left out of `SELECT *`. In both cases nothing outside the kept fields is exposed; only the 25 fields in `_CATALOG_VIEWS` carry values and every other field is `NULL`. It ends in `LIMIT 18446744073709551615`, which stops MySQL from merging it into the outer query or pushing the model's conditions into it, so a model expression never runs on a hidden row. `build_agent` passes `skip_catalog_views=True` to `RlsGuardRunner` while a rule-set file is configured, so `apply_rls` never matches an `[[rls]]` rule against these three MySQL `information_schema` views by their own names, and a rule on an application table named `tables`, `columns` or `key_column_usage` leaves these derived tables alone; an alias still goes through the RLS alias backstop. The re-walk accepts a catalog view only inside a derived table whose body generates the same MySQL text as the one `_catalog_body` builds for that view and the selected set.
+
+### Tables with a row rule
+
+`RuleSetGuardRunner` gets the selected set's `GuardSpec` (`LoadedRuleSets.guard_spec`: listed tables and compiled rules) and the selection's normalized `user_id`. `guard_spec` raises `RuntimeError` when a table of the set has a `row_rule` but no compiled rule; `_rewrite` does not catch it, so the statement never runs unfiltered. A reference to a table with a row rule becomes `_scoped_body`'s derived table: `SELECT <listed columns> FROM <table> AS <guard alias> WHERE <rule> LIMIT 18446744073709551615`. A table without a row rule keeps the plain derived table above, which MySQL may merge into the model's query.
+
+- **Why the `LIMIT`.** A filtered derived table alone is not enough: MySQL can merge it into the outer query or push the model's conditions into it, and then an expression the model wrote (for example one that overflows) could run on a hidden row and reveal it through its error. The `LIMIT` blocks both merging and derived-condition pushdown, so MySQL builds the visible rows first. The cost is that each scoped reference is built in full before the model's own filters apply, and that work counts against the statement timeout. The guard cannot use `NO_MERGE` hints instead, because it removes every optimizer hint.
+- **Guard aliases.** Every table reference the guard writes inside a filtered derived table carries the alias `<prefix><k>_<slot>`, where `k` counts scoped references in the statement and `_choose_prefix` picks `sl<n>_` so that no identifier in the model's statement and no table the set or its rules name starts with it, ignoring letter case. Every column in the derived table's select list and filter is qualified with these aliases. MySQL resolves a qualified column in outer query blocks when the inner block lacks it, so a bare table-name qualifier could bind a column dropped after the existence check to a model alias of the same name; with guard aliases it fails as an unknown column (1054). The guard does not redact that database error.
+- **CTE renaming.** MySQL resolves a table name to a CTE of the same name before the base table, so a model CTE named after a table a filter reads (`WITH customers AS (…)`) would stand in for that table inside the filter. While the selected set has any row rule, `_rename_ctes` renames every CTE the statement defines, in any query block, to `<prefix>c<n>`, and points every reference that scope analysis resolves to it at the new name; a reference without an alias gets the old name as its alias, so the model's column qualifiers keep resolving. Renaming rather than refusing colliding names keeps a caller from learning which unlisted names a filter reads, and no CTE name changes whether a statement runs.
+- **Proof.** Both re-walks call `_proven_scoped_tables`: a table with a row rule under a base alias `<prefix><k>_0` must sit in a derived table whose body has exactly the tree `_scoped_body` builds for that table, `k` and the user ID, compared structurally (`_shape`) rather than as text, since `(a OR b) AND c` built without its parentheses generates the same text as `a OR (b AND c)`. Every table inside a proven body counts as guard-built; a table with a row rule found anywhere else, or a `k` used twice, is refused with `KIND_UNCHECKED`. An unexpected exception (one that is not a `RuleSetRefusal`) while building or proving the filter is refused the same way, with text that names no table or column; a `RuleSetRefusal` raised on that path keeps its own kind.
+
+Flat `[[rls]]` keeps applying alongside row rules: it runs on the guard's output and matches table names case-insensitively, so it adds its predicates inside the filtered derived tables and inside the rule's `EXISTS` subqueries over link, parent and source tables too (a flat rule on an unlisted `owner_via` link table narrows which rows `owner_via` makes visible). A flat rule on a table without a row rule still sits in the mergeable derived table, so a model expression can still run on a row only a flat rule hides. The system prompt says nothing about row rules.
 
 The guard regenerates MySQL SQL without comments or optimizer hints, re-parses and re-checks that output, and passes it inward with `require_base_tables=True`; the inner runners and MySQL never see the model's text. The function denylist and relation check apply whatever `[[rls]]` and `database.read_only` say.
 

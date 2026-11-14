@@ -1,10 +1,8 @@
 # Per-Role Rule Sets
 
-Rule sets let you mirror your application's own roles inside SQL Lens. You write one rule-set file that lists, for each role, the tables and columns that role may read. Each question then names the role it is asked under, and SQL Lens limits the answer to that role's tables and columns. This page explains how to turn rule sets on, how to write the file, and what the assistant sees when a request is refused.
+Rule sets let you mirror your application's own roles inside SQL Lens. You write one rule-set file that lists, for each role, the tables and columns that role may read and, through row rules, which rows of a table it may see. Each question then names the role it is asked under, and SQL Lens limits the answer to that role's tables, columns and rows. This page explains how to turn rule sets on, how to write the file, and what the assistant sees when a request is refused.
 
-Rule sets are for MySQL only, and they are for operators who run SQL Lens on behalf of an application whose users already have roles. If you only need to narrow answers to certain rows, read [Row-Level Security](row-level-security.md) instead. Without `[rule_sets] file` in your configuration, nothing on this page applies and SQL Lens behaves exactly as before.
-
-**Note:** This is the first part of the feature. Row rules inside a rule-set file are not supported yet, and a file that contains one does not load.
+Rule sets are for MySQL only, and they are for operators who run SQL Lens on behalf of an application whose users already have roles. If you only need to narrow answers to certain rows, with a fixed value or a per-request value your application supplies, and do not need per-role table and column limits, read [Row-Level Security](row-level-security.md) instead. Without `[rule_sets] file` in your configuration, nothing on this page applies and SQL Lens behaves exactly as before.
 
 ## Turning Rule Sets On
 
@@ -64,7 +62,7 @@ What each part means:
 - `[[rule_sets]] name`: The role identifier, a decimal string, unique within the file. A request names this value to select the set.
 - `[[rule_sets]] scope`: A short description of what the role may see. It is for the people reading the file.
 - `[rule_sets.source]`: Where the rule set came from. `confirmed_against_production` (`true` or `false`) is required; `true` records that you checked the set against your production permissions, and a set left at `false` loads but is refused (see below). `role_id`, `role_name`, `role_copy`, `permission_list_version`, `global_switches`, `permission_fingerprint`, `application_commit` and `generated_on` are optional. When you set `role_id`, it must equal the set's `name`. None of this is ever sent to the model.
-- `[[rule_sets.tables]]`: One block per table the role may read, with `columns` listing every column it may read. `predicate_columns` names columns that are reserved for future row rules; they may not also appear in `columns`.
+- `[[rule_sets.tables]]`: One block per table the role may read, with `columns` listing every column it may read. `predicate_columns` names columns that only row rules read; the assistant cannot read them, and they may not also appear in `columns`. An optional `row_rule` limits which rows of the table the role sees (see [Row rules](#row-rules)).
 
 Every key is checked, and an unknown key makes the file fail to load. When a value is wrong, the error names the exact place in the file.
 
@@ -101,11 +99,74 @@ Two value rules recur below:
 | `[[rule_sets.tables]]` | `name` | identifier | Required. |
 | `[[rule_sets.tables]]` | `columns` | array of identifiers | Required. At least one, no duplicates. |
 | `[[rule_sets.tables]]` | `predicate_columns` | array of identifiers | Optional, empty by default. No duplicates, and none may also be in `columns`. |
-| `[[rule_sets.tables]]` | `row_rule` | — | Not supported yet. Its presence makes the file fail to load. |
+| `[[rule_sets.tables]]` | `row_rule` | table | Optional. One row-rule node (see [Row rules](#row-rules)). |
 
 Names are compared exactly, letter case included, everywhere: in the file, against the database, and against request fields.
 
-**Warning:** Every table and column you list must exist in the connected database with exactly that spelling, down to letter case. SQL Lens checks this when the server starts, or on the first request if it could not check at startup, and refuses requests until it matches.
+**Warning:** Every table and column you list, and every table and column a row rule reads, must exist in the connected database with exactly that spelling, down to letter case. SQL Lens checks this when the server starts, or on the first request if it could not check at startup, and refuses requests until it matches.
+
+### Row rules
+
+A table's `row_rule` decides which of its rows the role sees. A row is visible only when its rule is true, and a comparison that reads `NULL` is never true, so it never makes a row visible. A rule is one node; every node has a `kind` and exactly the fields its kind defines, and an unknown field is an error.
+
+| `kind` | Fields | A row is visible when |
+|---|---|---|
+| `compare` | `column`, `operator`, `value_type`, and exactly one of `value` or `request` | the row's `column` compares true with the value |
+| `any_of` | `rules`: a non-empty array of nodes | at least one of them is true |
+| `all_of` | `rules`: a non-empty array of nodes | every one of them is true |
+| `owner_via` | `id_column`, `link_table`, `link_row_column`, `link_user_column` | a row of `link_table` has `link_row_column` equal to the row's `id_column` and `link_user_column` equal to the request's user ID. The link table's own row rule, if any, is not applied. |
+| `inherit` | `column`, `parent_table`, `parent_column` | a row of `parent_table` with `parent_column` equal to the row's `column` is visible under the parent's own row rule (any matching parent row counts when the parent has no rule) |
+| `referenced_by` | `id_column`, `source_table`, and either `source_column` (direct), or `source_id_column` plus `link = { table, source_column, target_column }` (through a link table) | direct: a visible `source_table` row has `source_column` equal to the row's `id_column`. Through a link: a visible `source_table` row and a visible `link.table` row, with the link row's `source_column` equal to the source row's `source_id_column` and its `target_column` equal to the row's `id_column`. |
+
+The rules for `compare`:
+
+- `operator` is one of `=`, `!=`, `<`, `<=`, `>`, `>=`, `in`.
+- `value_type` is one of `integer`, `float`, `string`, `boolean`, and a `value` must have exactly that TOML type: `true` is not an integer, `1` is not a Boolean or a float, and a float must be finite.
+- `in` takes a non-empty array of values (duplicates are allowed); every other operator takes one value. A `boolean` rule allows only `=`, `!=` and `in`.
+- `request = "user_id"` compares with the request's user ID instead of a fixed `value`. It needs `value_type = "integer"` and an operator other than `in`; no other `request` value exists.
+- Text comparisons follow the column's own collation, as your application's queries do, so under MySQL 8's default case-insensitive collation `status != "void"` also hides `VOID`.
+
+Which columns and tables a rule may name:
+
+- Every column a node reads on its own table must be declared on that table, in `columns` or `predicate_columns`.
+- `inherit.parent_table`, `referenced_by.source_table` and `referenced_by.link.table` must be tables listed in the same set, with the columns the rule names declared on them.
+- `owner_via.link_table` may be a table the set does not list. Its two named columns are then declared by the rule alone: SQL Lens reads them only inside the row rule, and the assistant still cannot query that table. When the link table is listed, both link columns must be declared on it.
+- Rules may not depend on each other in a cycle. Following each `inherit` parent and each `referenced_by` source and link table from table to table, nested nodes included, must never lead back to a table already on the path, including the table itself. `owner_via` does not count.
+
+A rule that breaks any of these makes the file fail to load, with an error naming the place in the file.
+
+For example, a sales rep sees the customers assigned to them directly or through a `customer_reps` link table, and those customers' orders that are not void:
+
+```toml
+[[rule_sets.tables]]
+name = "customers"
+columns = ["id", "name"]
+predicate_columns = ["sales_rep_id"]
+row_rule = { kind = "any_of", rules = [
+  { kind = "compare", column = "sales_rep_id", operator = "=", value_type = "integer", request = "user_id" },
+  { kind = "owner_via", id_column = "id", link_table = "customer_reps", link_row_column = "customer_id", link_user_column = "user_id" },
+] }
+
+[[rule_sets.tables]]
+name = "orders"
+columns = ["id", "customer_id", "total"]
+predicate_columns = ["status"]
+row_rule = { kind = "all_of", rules = [
+  { kind = "inherit", column = "customer_id", parent_table = "customers", parent_column = "id" },
+  { kind = "compare", column = "status", operator = "!=", value_type = "string", value = "void" },
+] }
+```
+
+**Column types.** Each `compare` column, and each `owner_via` `link_user_column` (which is compared with the integer user ID), must have a MySQL type its `value_type` accepts. SQL Lens checks this with the existence check: on any other type the server refuses to start, naming the column, or, when it could not check at startup, refuses requests until the type matches. This stops MySQL from converting one side of a comparison, which could make a hidden row match.
+
+| `value_type` | Accepted MySQL types (`DATA_TYPE`) |
+|---|---|
+| `integer` | `tinyint`, `smallint`, `mediumint`, `int`, `bigint` |
+| `float` | `float`, `double` |
+| `string` | `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`, `enum` |
+| `boolean` | `tinyint`, `smallint`, `mediumint`, `int`, `bigint` |
+
+Once the check has passed, it does not run again in that server process, so a column dropped or retyped later is not noticed until the server restarts.
 
 ## Asking a Question Under a Rule Set
 
@@ -138,7 +199,8 @@ The messages name only what class of problem occurred. They never name a table, 
 
 ## What Changes While Rule Sets Are On
 
-- **Answers are limited to the selected set.** SQL Lens rewrites every query so it can read only the tables and columns the selected set lists. A query that reaches for an unlisted table is refused before it runs; one that reads an unlisted column fails in MySQL as an unknown column (see below).
+- **Answers are limited to the selected set.** SQL Lens rewrites every query so it can read only the tables and columns the selected set lists, and of a table with a row rule only the rows the rule makes visible to the request's user. A query that reaches for an unlisted table is refused before it runs; one that reads an unlisted column fails in MySQL as an unknown column (see below).
+- **Queries over a table with a row rule can be slower.** MySQL builds that table's visible rows in full before applying the query's own conditions, so no expression in the query ever runs on a hidden row. On a very large table this work can reach the statement timeout.
 - **Nothing is saved to memory.** The assistant saves no questions and no notes while a rule-set file is configured, whatever your `[memory]` settings say, because memory is shared by every rule set. Loading memory with `sqllens import-memory`, and the memory administration tools, are not affected.
 - **A conversation belongs to one identity.** When a follow-up question carries a conversation identifier, the rule set, account and user must be the same ones that started the conversation. A follow-up under a different identity is refused.
 - **`sqllens verify-memory` is not available.** It prints `sqllens verify-memory does not support rule sets yet; run it against a config without [rule_sets] file` and stops. Run it against a configuration that has no `[rule_sets] file`.
@@ -199,7 +261,7 @@ The audit line is written whatever `[agent.audit] enabled` says; that setting do
 
 ## Limits
 
-Rule sets limit which tables and columns a query can read. They do not separate everything else, so plan around these limits:
+Rule sets limit which tables and columns a query can read and, through row rules, which rows. They do not separate everything else, so plan around these limits:
 
 - **Memory is shared by every rule set.** Nothing is saved to memory while rule sets are on, but memory you load yourself (with `sqllens import-memory` or the memory administration tools) is searched for every request. Table and column names, SQL literal values, notes and chart data in curated memory can reach any role. Load only what every role may see.
 - **The administration tools act for every rule set.** The memory and profile administration tools are not limited by rule sets. Register them only where end users' assistants cannot call them.
@@ -240,7 +302,11 @@ SQL Lens could not confirm the file against the database — usually because the
 
 **The configuration does not load and the error mentions `row_rule`**
 
-Row rules are not supported yet. Remove the whole rule set from the file, not only its row rules, so no role is silently widened.
+The error names the place in the file and the problem, such as a column not declared on its table, a table the set does not list, a value of the wrong type, or rules that depend on each other in a cycle. Fix that rule; see [Row rules](#row-rules).
+
+**Startup fails because a column "has type …, which a row rule's value_type … does not accept"**
+
+The column's MySQL type is not one the rule's `value_type` accepts (see the column-type table under [Row rules](#row-rules)). Change the rule's `value_type` to match the column, or compare a different column.
 
 ## See Also
 

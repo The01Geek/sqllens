@@ -4,11 +4,13 @@
 """Per-role rule sets: the version-1 rule-set file, request selection and catalog check.
 
 A rule-set file names, for one MySQL database, which tables and columns each
-application role may read. ``Config`` loads and validates the file named by
-``[rule_sets] file`` (see :func:`load_rule_sets`); ``query_database`` selects
-one set per request from three ``_meta`` keys (:func:`select_rule_set`); and
-:func:`check_catalog` confirms that every listed table and column exists in
-the connected database. The SQL guard that enforces a selected set lives in
+application role may read, and which rows of a table through its optional
+``row_rule``. ``Config`` loads and validates the file named by
+``[rule_sets] file`` and compiles each row rule (see :func:`load_rule_sets`);
+``query_database`` selects one set per request from three ``_meta`` keys
+(:func:`select_rule_set`); and :func:`check_catalog` confirms that every table
+and column the file names exists in the connected database with a type its
+row rules can compare. The SQL guard that enforces a selected set lives in
 :mod:`sqllens.safety.rule_sets`.
 """
 
@@ -19,12 +21,14 @@ import contextvars
 import datetime
 import json
 import logging
+import math
 import re
 import tomllib
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any
+from types import MappingProxyType
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -39,6 +43,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from sqlglot import expressions as exp
 
 from sqllens.config import RESERVED_METADATA_KEYS
 
@@ -60,12 +65,6 @@ VERIFY_MEMORY_UNSUPPORTED_MESSAGE = (
     "sqllens verify-memory does not support rule sets yet; run it against a config "
     "without [rule_sets] file"
 )
-
-ROW_RULE_MESSAGE = (
-    "row rules are not supported yet; remove the whole rule set from the file, "
-    "never only its row rules"
-)
-
 
 def _no_duplicates(values: list[Any], what: str) -> None:
     seen: set[Any] = set()
@@ -166,18 +165,176 @@ class Source(_Record):
         return value
 
 
+# --- row rules ----------------------------------------------------------------
+
+ValueType = Literal["integer", "float", "string", "boolean"]
+Operator = Literal["=", "!=", "<", "<=", ">", ">=", "in"]
+
+# MySQL ``INFORMATION_SCHEMA.COLUMNS.DATA_TYPE`` values each ``value_type`` may
+# compare. A type added here lets MySQL convert one side of a comparison
+# (a string column compared with a number reads '1a' as 1), which can show a
+# row the rule hides.
+VALUE_TYPE_DATA_TYPES: Mapping[str, frozenset[str]] = MappingProxyType({
+    "integer": frozenset({"tinyint", "smallint", "mediumint", "int", "bigint"}),
+    "float": frozenset({"float", "double"}),
+    "string": frozenset({"char", "varchar", "tinytext", "text", "mediumtext", "longtext", "enum"}),
+    "boolean": frozenset({"tinyint", "smallint", "mediumint", "int", "bigint"}),
+})
+
+_SCALAR_TYPES: Mapping[str, type] = MappingProxyType(
+    {"integer": int, "float": float, "string": str, "boolean": bool}
+)
+
+
+def _check_scalar(value: object, value_type: str) -> None:
+    # ``type() is``: a TOML Boolean is a Python bool, which isinstance counts as an int.
+    if type(value) is not _SCALAR_TYPES[value_type]:
+        raise ValueError(f"value {value!r} is not a TOML {value_type}")
+    if value_type == "float" and not math.isfinite(value):  # type: ignore[arg-type]
+        raise ValueError(f"value {value!r} is not a finite float")
+
+
+class CompareRule(_Record):
+    """Visible when the row's ``column`` compares true with a static value or the user ID."""
+
+    kind: Literal["compare"]
+    column: Identifier
+    operator: Operator
+    value_type: ValueType
+    value: Any = None
+    request: StrictStr | None = None
+
+    @model_validator(mode="after")
+    def _operand(self) -> CompareRule:
+        has_value = "value" in self.model_fields_set
+        if has_value == (self.request is not None):
+            raise ValueError("compare needs exactly one of value or request")
+        if self.value_type == "boolean" and self.operator not in ("=", "!=", "in"):
+            raise ValueError(f"operator {self.operator!r} cannot compare a boolean")
+        if self.request is not None:
+            if self.request != "user_id":
+                raise ValueError(f"request {self.request!r} is not 'user_id'")
+            if self.value_type != "integer":
+                raise ValueError("request = 'user_id' needs value_type = 'integer'")
+            if self.operator == "in":
+                raise ValueError("request = 'user_id' cannot use operator 'in'")
+            return self
+        if self.operator == "in":
+            if not isinstance(self.value, list) or not self.value:
+                raise ValueError("operator 'in' needs a non-empty array value")
+            for item in self.value:
+                _check_scalar(item, self.value_type)
+        else:
+            _check_scalar(self.value, self.value_type)
+        return self
+
+
+class AnyOfRule(_Record):
+    """Visible when at least one child rule is true."""
+
+    kind: Literal["any_of"]
+    rules: list[RowRule] = Field(min_length=1)
+
+
+class AllOfRule(_Record):
+    """Visible when every child rule is true."""
+
+    kind: Literal["all_of"]
+    rules: list[RowRule] = Field(min_length=1)
+
+
+class OwnerViaRule(_Record):
+    """Visible when a ``link_table`` row links the row's ``id_column`` to the request's user."""
+
+    kind: Literal["owner_via"]
+    id_column: Identifier
+    link_table: Identifier
+    link_row_column: Identifier
+    link_user_column: Identifier
+
+
+class InheritRule(_Record):
+    """Visible when a visible ``parent_table`` row has ``parent_column`` equal to ``column``."""
+
+    kind: Literal["inherit"]
+    column: Identifier
+    parent_table: Identifier
+    parent_column: Identifier
+
+
+class ReferencedByLink(_Record):
+    table: Identifier
+    source_column: Identifier
+    target_column: Identifier
+
+
+class ReferencedByRule(_Record):
+    """Visible when a visible ``source_table`` row references the row, directly or by a link."""
+
+    kind: Literal["referenced_by"]
+    id_column: Identifier
+    source_table: Identifier
+    source_column: Identifier | None = None
+    source_id_column: Identifier | None = None
+    link: ReferencedByLink | None = None
+
+    @model_validator(mode="after")
+    def _variant(self) -> ReferencedByRule:
+        direct = self.source_column is not None
+        linked = self.source_id_column is not None or self.link is not None
+        if direct == linked:
+            raise ValueError(
+                "referenced_by needs exactly one variant: source_column, or "
+                "source_id_column with link"
+            )
+        if linked and (self.source_id_column is None or self.link is None):
+            raise ValueError("referenced_by through a link needs both source_id_column and link")
+        return self
+
+
+RowRule = Annotated[
+    CompareRule | AnyOfRule | AllOfRule | OwnerViaRule | InheritRule | ReferencedByRule,
+    Field(discriminator="kind"),
+]
+
+AnyOfRule.model_rebuild()
+AllOfRule.model_rebuild()
+
+
+def _rule_nodes(rule: RowRule, path: str) -> Iterator[tuple[RowRule, str]]:
+    """Every node of ``rule`` with its record path, iteratively (children after parents)."""
+    stack = [(rule, path)]
+    while stack:
+        node, node_path = stack.pop()
+        yield node, node_path
+        if isinstance(node, AnyOfRule | AllOfRule):
+            children = list(enumerate(node.rules))
+            stack.extend((child, f"{node_path}.rules[{i}]") for i, child in reversed(children))
+
+
+def _rule_edges(rule: RowRule) -> list[str]:
+    """The tables whose own row rule ``rule`` depends on (``owner_via`` adds none)."""
+    edges: list[str] = []
+    for node, _ in _rule_nodes(rule, ""):
+        if isinstance(node, InheritRule):
+            edges.append(node.parent_table)
+        elif isinstance(node, ReferencedByRule):
+            edges.append(node.source_table)
+            if node.link is not None:
+                edges.append(node.link.table)
+    return edges
+
+
 class TableRule(_Record):
-    """One table a rule set lets a request read, and its readable columns."""
+    """One table a rule set lets a request read, its readable columns and its row rule."""
 
     name: Identifier
     columns: list[Identifier] = Field(min_length=1)
     predicate_columns: list[Identifier] = Field(default_factory=list)
-    row_rule: Any = None
+    row_rule: RowRule | None = None
 
     @model_validator(mode="after")
     def _columns(self) -> TableRule:
-        if "row_rule" in self.model_fields_set:
-            raise ValueError(ROW_RULE_MESSAGE)
         _no_duplicates(self.columns, "column")
         _no_duplicates(self.predicate_columns, "predicate column")
         overlap = sorted(set(self.columns) & set(self.predicate_columns))
@@ -199,7 +356,67 @@ class RuleSet(_Record):
                 f"source.role_id {self.source.role_id!r} must equal the rule set's name"
             )
         _no_duplicates([table.name for table in self.tables], "table name")
+        self._check_row_rules()
+        self._check_acyclic()
         return self
+
+    def _check_row_rules(self) -> None:
+        declared = {
+            table.name: {*table.columns, *table.predicate_columns} for table in self.tables
+        }
+
+        def listed(name: str, where: str) -> None:
+            if name not in declared:
+                raise ValueError(f"{where}: table {name!r} is not listed in this rule set")
+
+        def column(table: str, name: str, where: str) -> None:
+            if name not in declared[table]:
+                raise ValueError(f"{where}: column {name!r} is not declared on table {table!r}")
+
+        for index, table in enumerate(self.tables):
+            if table.row_rule is None:
+                continue
+            for node, path in _rule_nodes(table.row_rule, f"tables[{index}].row_rule"):
+                if isinstance(node, CompareRule):
+                    column(table.name, node.column, path)
+                elif isinstance(node, OwnerViaRule):
+                    column(table.name, node.id_column, path)
+                    if node.link_table in declared:
+                        column(node.link_table, node.link_row_column, path)
+                        column(node.link_table, node.link_user_column, path)
+                elif isinstance(node, InheritRule):
+                    column(table.name, node.column, path)
+                    listed(node.parent_table, path)
+                    column(node.parent_table, node.parent_column, path)
+                elif isinstance(node, ReferencedByRule):
+                    column(table.name, node.id_column, path)
+                    listed(node.source_table, path)
+                    if node.link is None:
+                        column(node.source_table, node.source_column or "", path)
+                    else:
+                        column(node.source_table, node.source_id_column or "", path)
+                        listed(node.link.table, path)
+                        column(node.link.table, node.link.source_column, path)
+                        column(node.link.table, node.link.target_column, path)
+
+    def _check_acyclic(self) -> None:
+        """Refuse a visibility-graph cycle: drop tables with no edge left until none drops."""
+        edges = {
+            table.name: set(_rule_edges(table.row_rule))
+            for table in self.tables
+            if table.row_rule is not None
+        }
+        remaining = dict(edges)
+        removed = True
+        while removed:
+            removed = False
+            for name, targets in list(remaining.items()):
+                if not targets & remaining.keys():
+                    del remaining[name]
+                    removed = True
+        if remaining:
+            names = ", ".join(repr(name) for name in sorted(remaining))
+            raise ValueError(f"row rules form a cycle through tables {names}")
 
     @property
     def confirmed(self) -> bool:
@@ -232,6 +449,209 @@ class RuleSetFileError(ValueError):
     """The rule-set file is missing, unreadable, malformed or inconsistent with config."""
 
 
+# --- row-rule compilation ------------------------------------------------------
+
+_COMPARISONS: Mapping[str, type[exp.Binary]] = MappingProxyType({
+    "=": exp.EQ, "!=": exp.NEQ, "<": exp.LT, "<=": exp.LTE, ">": exp.GT, ">=": exp.GTE,
+})
+
+_USER_ID = "user_id"
+
+
+def _slot_name(slot: int) -> str:
+    return f"s{slot}"
+
+
+def _slot_column(slot: int, column: str) -> exp.Column:
+    return exp.column(
+        exp.to_identifier(column, quoted=True),
+        table=exp.to_identifier(_slot_name(slot), quoted=True),
+    )
+
+
+def _number(text: str) -> exp.Expression:
+    # The parser reads a leading minus as Neg over a positive literal; the
+    # re-walk compares trees, so the builder must produce that shape too.
+    if text.startswith("-"):
+        return exp.Neg(this=exp.Literal.number(text[1:]))
+    return exp.Literal.number(text)
+
+
+def float_literal_text(value: float) -> str:
+    """``value`` as a 17-significant-digit exponent-form literal, e.g. ``5.0000000000000000e-01``.
+
+    MySQL reads a literal in exponent form as a double, and 17 significant
+    digits read back as the same double.
+    """
+    return f"{value:.16e}"
+
+
+def _literal(value: Any, value_type: str) -> exp.Expression:
+    if value_type == "boolean":
+        return exp.Boolean(this=value)
+    if value_type == "string":
+        return exp.Literal.string(value)
+    if value_type == "float":
+        return _number(float_literal_text(value))
+    return _number(str(value))
+
+
+def _exists(table: str, slot: int, condition: exp.Expression) -> exp.Exists:
+    source = exp.Table(
+        this=exp.to_identifier(table, quoted=True),
+        alias=exp.TableAlias(this=exp.to_identifier(_slot_name(slot), quoted=True)),
+    )
+    body = (
+        exp.Select(expressions=[exp.Literal.number(1)])
+        .from_(source, copy=False)
+        .where(condition, copy=False)
+    )
+    return exp.Exists(this=body)
+
+
+@dataclass(frozen=True)
+class CompiledRule:
+    """A table's row rule as a sqlglot condition over alias slots and the user ID.
+
+    The condition qualifies every column with a slot identifier (``s0`` is the
+    scoped table itself, ``s1`` onwards each table read inside the rule) and
+    holds the user ID as a placeholder; :meth:`instantiate` fills both per
+    statement. ``tables`` names every table the filter reads.
+    """
+
+    condition: exp.Expression
+    slots: int
+    tables: frozenset[str]
+
+    def instantiate(self, aliases: Sequence[str], user_id: int) -> exp.Expression:
+        if len(aliases) != self.slots:
+            raise ValueError(f"rule needs {self.slots} aliases, got {len(aliases)}")
+        names = {_slot_name(slot): alias for slot, alias in enumerate(aliases)}
+        tree = self.condition.copy()
+        for node in list(tree.walk()):
+            if isinstance(node, exp.Placeholder):
+                node.replace(exp.Literal.number(user_id))
+            elif isinstance(node, exp.Column):
+                node.set("table", exp.to_identifier(names[node.table], quoted=True))
+            elif isinstance(node, exp.TableAlias):
+                node.set("this", exp.to_identifier(names[node.name], quoted=True))
+        return tree
+
+
+class _Compiler:
+    def __init__(self, rule_set: RuleSet) -> None:
+        self._rules = {table.name: table.row_rule for table in rule_set.tables}
+        self._slots = 0
+        self._tables: set[str] = set()
+
+    def _new_slot(self, table: str) -> int:
+        self._tables.add(table)
+        slot = self._slots
+        self._slots += 1
+        return slot
+
+    def compile(self, table: str) -> CompiledRule:
+        rule = self._rules[table]
+        if rule is None:
+            raise ValueError(f"table {table!r} has no row rule")
+        self._slots = 0
+        self._tables = set()
+        base = self._new_slot(table)
+        condition = self._node(rule, base)
+        return CompiledRule(condition=condition, slots=self._slots, tables=frozenset(self._tables))
+
+    def _own_rule(self, table: str, slot: int, condition: exp.Expression) -> exp.Expression:
+        rule = self._rules.get(table)
+        return condition if rule is None else exp.and_(condition, self._node(rule, slot))
+
+    def _node(self, node: RowRule, slot: int) -> exp.Expression:
+        if isinstance(node, CompareRule):
+            column = _slot_column(slot, node.column)
+            if node.request is not None:
+                return _COMPARISONS[node.operator](
+                    this=column, expression=exp.Placeholder(this=_USER_ID)
+                )
+            if node.operator == "in":
+                return exp.In(
+                    this=column, expressions=[_literal(v, node.value_type) for v in node.value]
+                )
+            return _COMPARISONS[node.operator](
+                this=column, expression=_literal(node.value, node.value_type)
+            )
+        if isinstance(node, AnyOfRule):
+            return exp.or_(*(self._node(child, slot) for child in node.rules))
+        if isinstance(node, AllOfRule):
+            return exp.and_(*(self._node(child, slot) for child in node.rules))
+        if isinstance(node, OwnerViaRule):
+            link = self._new_slot(node.link_table)
+            return _exists(node.link_table, link, exp.and_(
+                exp.EQ(
+                    this=_slot_column(link, node.link_row_column),
+                    expression=_slot_column(slot, node.id_column),
+                ),
+                exp.EQ(
+                    this=_slot_column(link, node.link_user_column),
+                    expression=exp.Placeholder(this=_USER_ID),
+                ),
+            ))
+        if isinstance(node, InheritRule):
+            parent = self._new_slot(node.parent_table)
+            match = exp.EQ(
+                this=_slot_column(parent, node.parent_column),
+                expression=_slot_column(slot, node.column),
+            )
+            return _exists(
+                node.parent_table, parent, self._own_rule(node.parent_table, parent, match)
+            )
+        if isinstance(node, ReferencedByRule):
+            if node.link is None:
+                source = self._new_slot(node.source_table)
+                match = exp.EQ(
+                    this=_slot_column(source, node.source_column or ""),
+                    expression=_slot_column(slot, node.id_column),
+                )
+                return _exists(
+                    node.source_table, source, self._own_rule(node.source_table, source, match)
+                )
+            link = self._new_slot(node.link.table)
+            source = self._new_slot(node.source_table)
+            source_match = exp.EQ(
+                this=_slot_column(source, node.source_id_column or ""),
+                expression=_slot_column(link, node.link.source_column),
+            )
+            source_exists = _exists(
+                node.source_table,
+                source,
+                self._own_rule(node.source_table, source, source_match),
+            )
+            link_match = exp.EQ(
+                this=_slot_column(link, node.link.target_column),
+                expression=_slot_column(slot, node.id_column),
+            )
+            return _exists(
+                node.link.table,
+                link,
+                exp.and_(self._own_rule(node.link.table, link, link_match), source_exists),
+            )
+        raise TypeError(f"unknown row-rule node {type(node).__name__}")
+
+
+def _listed_columns(rule_set: RuleSet) -> dict[str, tuple[str, ...]]:
+    return {table.name: tuple(table.columns) for table in rule_set.tables}
+
+
+@dataclass(frozen=True)
+class GuardSpec:
+    """What the rule-set guard enforces for one set.
+
+    ``tables`` maps each listed table to its listed ``columns``; ``rules``
+    maps each table with a row rule to its compiled rule.
+    """
+
+    tables: Mapping[str, tuple[str, ...]]
+    rules: Mapping[str, CompiledRule]
+
+
 @dataclass
 class CatalogConfirmation:
     """Whether the catalog existence check has passed once in this process."""
@@ -247,6 +667,7 @@ class LoadedRuleSets:
     path: Path
     file: RuleSetFile
     catalog: CatalogConfirmation = field(default_factory=CatalogConfirmation)
+    compiled: dict[str, dict[str, CompiledRule]] = field(default_factory=dict)
 
     def rule_set(self, name: str) -> RuleSet | None:
         for rule_set in self.file.rule_sets:
@@ -259,7 +680,23 @@ class LoadedRuleSets:
         rule_set = self.rule_set(name)
         if rule_set is None:
             raise KeyError(name)
-        return {table.name: tuple(table.columns) for table in rule_set.tables}
+        return _listed_columns(rule_set)
+
+    def guard_spec(self, name: str) -> GuardSpec:
+        """Rule set ``name``'s listed tables and compiled row rules; ``KeyError`` if absent.
+
+        Raises ``RuntimeError`` when a table of the set has a row rule with no
+        compiled rule, so the guard refuses rather than serving the table
+        unfiltered.
+        """
+        tables = self.tables_for(name)
+        rule_set = self.rule_set(name)
+        compiled = self.compiled.get(name, {})
+        if rule_set is not None and any(
+            table.row_rule is not None and table.name not in compiled for table in rule_set.tables
+        ):
+            raise RuntimeError(f"rule set {name!r} has a row rule that was not compiled")
+        return GuardSpec(tables=tables, rules=MappingProxyType(dict(compiled)))
 
     @property
     def unconfirmed(self) -> list[str]:
@@ -295,9 +732,10 @@ def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:
 
     Raises ``RuleSetFileError`` for an unreadable file, a file that is not
     UTF-8 text, invalid TOML, a format violation (each problem named by its
-    record path), a ``row_rule``, a ``database_url`` that is not a MySQL URL, or a
+    record path), a ``database_url`` that is not a MySQL URL, a
     ``binding.database`` that differs, byte for byte, from the database the
-    URL's path names.
+    URL's path names, or a row rule that raises any exception while it is
+    compiled (named by its record path).
     """
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -326,7 +764,33 @@ def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:
             f"rule-set file {path}: binding.database {rule_set_file.binding.database!r} "
             "is not the database named in database.url"
         )
-    return LoadedRuleSets(path=path, file=rule_set_file)
+    return LoadedRuleSets(path=path, file=rule_set_file, compiled=_compile_all(path, rule_set_file))
+
+
+def _compile_all(path: Path, rule_set_file: RuleSetFile) -> dict[str, dict[str, CompiledRule]]:
+    """Compile and prove every row rule; any exception fails the load naming the rule."""
+    from sqllens.safety.rule_sets import prove_compiled_rule
+
+    compiled: dict[str, dict[str, CompiledRule]] = {}
+    for set_index, rule_set in enumerate(rule_set_file.rule_sets):
+        compiler = _Compiler(rule_set)
+        rules: dict[str, CompiledRule] = {}
+        tables = _listed_columns(rule_set)
+        for table_index, table in enumerate(rule_set.tables):
+            if table.row_rule is None:
+                continue
+            try:
+                rule = compiler.compile(table.name)
+                prove_compiled_rule(table.name, tables[table.name], rule)
+            except Exception as exc:
+                where = f"rule_sets[{set_index}].tables[{table_index}].row_rule"
+                raise RuleSetFileError(
+                    f"rule-set file {path} is invalid:\n  {where}: the row rule could not "
+                    f"be compiled ({type(exc).__name__}: {exc})"
+                ) from exc
+            rules[table.name] = rule
+        compiled[rule_set.name] = rules
+    return compiled
 
 
 # --- request selection -----------------------------------------------------
@@ -521,14 +985,55 @@ class RuleSetCatalogError(Exception):
     """A listed table or column is not in the connected database as listed."""
 
 
+def _text(value: object) -> str:
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
+def _catalog_reads(loaded: LoadedRuleSets) -> tuple[
+    dict[str, list[str]], list[tuple[str, str, str]]
+]:
+    """The tables and columns to check, in file order, and each typed comparison.
+
+    The first value maps every listed table, then every unlisted ``owner_via``
+    link table, to its columns; the second lists (table, column, value_type)
+    for every ``compare`` column and every ``owner_via`` ``link_user_column``
+    (compared with the integer user ID).
+    """
+    reads: dict[str, list[str]] = {}
+    links: dict[str, list[str]] = {}
+    typed: list[tuple[str, str, str]] = []
+    for rule_set in loaded.file.rule_sets:
+        listed = {table.name for table in rule_set.tables}
+        for table in rule_set.tables:
+            reads.setdefault(table.name, []).extend([*table.columns, *table.predicate_columns])
+            if table.row_rule is None:
+                continue
+            for node, _ in _rule_nodes(table.row_rule, ""):
+                if isinstance(node, CompareRule):
+                    typed.append((table.name, node.column, node.value_type))
+                elif isinstance(node, OwnerViaRule):
+                    typed.append((node.link_table, node.link_user_column, "integer"))
+                    if node.link_table not in listed:
+                        links.setdefault(node.link_table, []).extend(
+                            [node.link_row_column, node.link_user_column]
+                        )
+    for table, columns in links.items():
+        reads.setdefault(table, []).extend(columns)
+    return reads, typed
+
+
 def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
-    """Confirm every listed table and column exists in the connected database.
+    """Confirm every table and column the file names exists in the connected database.
 
     Reads ``information_schema`` for the connection's current database
     (``DATABASE()``, the database ``database.url`` names). Every table any set
-    lists must exist with exactly the listed name, byte for byte, as a
-    ``BASE TABLE``; every listed column and predicate column must exist on it
-    with exactly the listed name. Raises ``RuleSetCatalogError`` naming each
+    lists, and every unlisted ``owner_via`` link table, must exist with exactly
+    that name, byte for byte, as a ``BASE TABLE``; every listed column and
+    predicate column, and each unlisted link table's two named columns, must
+    exist on it with exactly that name. Every ``compare`` column's
+    ``DATA_TYPE`` must be one :data:`VALUE_TYPE_DATA_TYPES` accepts for its
+    ``value_type``, and every ``owner_via`` ``link_user_column``'s one it
+    accepts for ``integer``. Raises ``RuleSetCatalogError`` naming each
     mismatch; a catalog read that fails raises the driver's exception.
     """
     cursor = connection.cursor()
@@ -537,58 +1042,54 @@ def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
             "SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES "
             "WHERE TABLE_SCHEMA = DATABASE()"
         )
-        kinds = {str(row[0]): str(row[1]) for row in cursor.fetchall()}
+        kinds = {_text(row[0]): _text(row[1]) for row in cursor.fetchall()}
         cursor.execute(
-            "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS "
+            "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS "
             "WHERE TABLE_SCHEMA = DATABASE()"
         )
-        columns: dict[str, set[str]] = {}
+        columns: dict[str, dict[str, str]] = {}
         for row in cursor.fetchall():
-            columns.setdefault(str(row[0]), set()).add(str(row[1]))
+            columns.setdefault(_text(row[0]), {})[_text(row[1])] = _text(row[2]).lower()
     finally:
         cursor.close()
 
+    reads, typed = _catalog_reads(loaded)
     problems: list[str] = []
-    # A table may be listed by several sets with different columns, so each
-    # (table, column) pair is checked, and each table's own problem once.
-    checked_tables: set[str] = set()
-    checked_columns: set[tuple[str, str]] = set()
-    for rule_set in loaded.file.rule_sets:
-        for table in rule_set.tables:
-            first_listing = table.name not in checked_tables
-            checked_tables.add(table.name)
-            kind = kinds.get(table.name)
-            if kind is None:
-                if not first_listing:
-                    continue
-                folded = [name for name in kinds if name.lower() == table.name.lower()]
-                if folded:
-                    problems.append(
-                        f"table {table.name!r} differs in letter case from the database's "
-                        f"{folded[0]!r}"
-                    )
-                else:
-                    problems.append(f"table {table.name!r} does not exist")
+    for table, wanted in reads.items():
+        kind = kinds.get(table)
+        if kind is None:
+            folded = [name for name in kinds if name.lower() == table.lower()]
+            if folded:
+                problems.append(
+                    f"table {table!r} differs in letter case from the database's {folded[0]!r}"
+                )
+            else:
+                problems.append(f"table {table!r} does not exist")
+            continue
+        if kind != "BASE TABLE":
+            problems.append(f"table {table!r} is a {kind.lower()}, not a base table")
+            continue
+        present = columns.get(table, {})
+        for column in dict.fromkeys(wanted):
+            if column in present:
                 continue
-            if kind != "BASE TABLE":
-                if first_listing:
-                    problems.append(
-                        f"table {table.name!r} is a {kind.lower()}, not a base table"
-                    )
-                continue
-            present = columns.get(table.name, set())
-            for column in [*table.columns, *table.predicate_columns]:
-                if column in present or (table.name, column) in checked_columns:
-                    continue
-                checked_columns.add((table.name, column))
-                folded = [name for name in present if name.lower() == column.lower()]
-                if folded:
-                    problems.append(
-                        f"column {table.name}.{column} differs in letter case from the "
-                        f"database's {folded[0]!r}"
-                    )
-                else:
-                    problems.append(f"column {table.name}.{column} does not exist")
+            folded = [name for name in present if name.lower() == column.lower()]
+            if folded:
+                problems.append(
+                    f"column {table}.{column} differs in letter case from the "
+                    f"database's {folded[0]!r}"
+                )
+            else:
+                problems.append(f"column {table}.{column} does not exist")
+    for table, column, value_type in dict.fromkeys(typed):
+        data_type = columns.get(table, {}).get(column)
+        if kinds.get(table) != "BASE TABLE" or data_type is None:
+            continue
+        if data_type not in VALUE_TYPE_DATA_TYPES[value_type]:
+            problems.append(
+                f"column {table}.{column} has type {data_type!r}, which a row rule's "
+                f"value_type {value_type!r} does not accept"
+            )
     if problems:
         raise RuleSetCatalogError(
             "the rule-set file does not match the database: " + "; ".join(problems)

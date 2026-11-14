@@ -13,9 +13,16 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
+from sqllens import rule_sets as rule_sets_module
 from sqllens.cli import app
 
-from ._rule_set_fixtures import MYSQL_URL, example_document, to_toml
+from ._rule_set_fixtures import (
+    MYSQL_URL,
+    example_document,
+    row_rule_document,
+    scale_document,
+    to_toml,
+)
 
 runner = CliRunner()
 
@@ -51,6 +58,33 @@ def test_validate_accepts_a_valid_file(tmp_path: Path) -> None:
     assert "Warning:" not in result.stderr
 
 
+@pytest.mark.parametrize("document", [row_rule_document, scale_document])
+def test_validate_and_serve_accept_row_rules(tmp_path: Path, document) -> None:
+    cfg = _write(tmp_path, document())
+    result = runner.invoke(app, ["validate", "-c", str(cfg)])
+    assert result.exit_code == 0, result.output
+    with patch("sqllens.server.run") as run:
+        served = runner.invoke(app, ["serve", "-c", str(cfg), "--no-preflight"])
+    assert served.exit_code == 0, served.output
+    run.assert_called_once()
+
+
+def test_the_scale_document_has_the_real_file_shape() -> None:
+    from sqllens.rule_sets import RuleSet
+
+    sets = [RuleSet.model_validate(s) for s in scale_document()["rule_sets"]]
+    tables = [table for rule_set in sets for table in rule_set.tables]
+    rules = [table.row_rule for table in tables if table.row_rule is not None]
+    kinds = {
+        node.kind
+        for rule in rules
+        for node, _ in rule_sets_module._rule_nodes(rule, "")
+    }
+    assert (len(sets), len(tables), len(rules)) == (10, 1300, 270)
+    assert kinds == {"compare", "any_of", "all_of", "owner_via", "inherit", "referenced_by"}
+    assert max(len(list(rule_sets_module._rule_nodes(rule, ""))) for rule in rules) == 21
+
+
 def test_validate_warns_once_per_unconfirmed_set(tmp_path: Path) -> None:
     document = example_document()
     document["rule_sets"].append({**document["rule_sets"][1], "name": "8"})
@@ -66,8 +100,11 @@ def test_validate_warns_once_per_unconfirmed_set(tmp_path: Path) -> None:
     [
         (lambda d: d["rule_sets"][0]["tables"][0].update(columns=["id", "name", "id"]),
          "rule_sets[0].tables[0]: duplicate column 'id'"),
-        (lambda d: d["rule_sets"][0]["tables"][0].update(row_rule={"column": "rep_id"}),
-         "remove the whole rule set"),
+        (lambda d: d["rule_sets"][0]["tables"][0].update(row_rule={
+            "kind": "compare", "column": "nosuch", "operator": "=",
+            "value_type": "integer", "value": 1,
+        }),
+         "rule_sets[0]: tables[0].row_rule: column 'nosuch' is not declared on table 'customers'"),
         (lambda d: d["binding"].update(database="primary"),
          "is not the database named in database.url"),
         (lambda d: d["metadata"].update(rule_set="ui_features_available"), "reserved"),
