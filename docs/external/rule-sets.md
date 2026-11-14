@@ -112,11 +112,17 @@ A table's `row_rule` decides which of its rows the role sees. A row is visible o
 | `kind` | Fields | A row is visible when |
 |---|---|---|
 | `compare` | `column`, `operator`, `value_type`, and exactly one of `value` or `request` | the row's `column` compares true with the value |
+| `is_null` | `column` | the row's `column` is `NULL` |
+| `is_not_null` | `column` | the row's `column` is not `NULL` |
 | `any_of` | `rules`: a non-empty array of nodes | at least one of them is true |
 | `all_of` | `rules`: a non-empty array of nodes | every one of them is true |
 | `owner_via` | `id_column`, `link_table`, `link_row_column`, `link_user_column` | a row of `link_table` has `link_row_column` equal to the row's `id_column` and `link_user_column` equal to the request's user ID. The link table's own row rule, if any, is not applied. |
-| `inherit` | `column`, `parent_table`, `parent_column` | a row of `parent_table` with `parent_column` equal to the row's `column` is visible under the parent's own row rule (any matching parent row counts when the parent has no rule) |
-| `referenced_by` | `id_column`, `source_table`, and either `source_column` (direct), or `source_id_column` plus `link = { table, source_column, target_column }` (through a link table) | direct: a visible `source_table` row has `source_column` equal to the row's `id_column`. Through a link: a visible `source_table` row and a visible `link.table` row, with the link row's `source_column` equal to the source row's `source_id_column` and its `target_column` equal to the row's `id_column`. |
+| `inherit` | `column`, `parent_table`, `parent_column`, and optionally `parent_rule` | a row of `parent_table` with `parent_column` equal to the row's `column` is visible under the parent's own row rule (any matching parent row counts when the parent has no rule). With `parent_rule`, that same parent row must also pass `parent_rule`. |
+| `referenced_by` | `id_column`, `source_table`, and either `source_column` (direct), or `source_id_column` plus `link = { table, source_column, target_column }` (through a link table) | direct: a visible `source_table` row has `source_column` equal to the row's `id_column`. Through a link: a visible `source_table` row and a `link.table` row, with the link row's `source_column` equal to the source row's `source_id_column` and its `target_column` equal to the row's `id_column`. When `link.table` is listed in the set, the link row must also be visible under its own row rule; when it is not listed, link rows are read with no row rule. |
+
+`is_null` and `is_not_null` have exactly the fields `kind` and `column`. They can appear anywhere a node can, including inside `any_of` and `all_of`. TOML has no null value, so use them, not `compare`, to test for `NULL`; for example, `{ kind = "is_null", column = "deleted_at" }` hides soft-deleted rows.
+
+`parent_rule` is one node over `parent_table`'s declared columns. It may hold only `compare`, `is_null`, `is_not_null`, `any_of` and `all_of` nodes, at any depth, so it tests the parent row alone and adds no dependency between tables.
 
 The rules for `compare`:
 
@@ -129,9 +135,9 @@ The rules for `compare`:
 Which columns and tables a rule may name:
 
 - Every column a node reads on its own table must be declared on that table, in `columns` or `predicate_columns`.
-- `inherit.parent_table`, `referenced_by.source_table` and `referenced_by.link.table` must be tables listed in the same set, with the columns the rule names declared on them.
-- `owner_via.link_table` may be a table the set does not list. Its two named columns are then declared by the rule alone: SQL Lens reads them only inside the row rule, and the assistant still cannot query that table. When the link table is listed, both link columns must be declared on it.
-- Rules may not depend on each other in a cycle. Following each `inherit` parent and each `referenced_by` source and link table from table to table, nested nodes included, must never lead back to a table already on the path, including the table itself. `owner_via` does not count.
+- `inherit.parent_table` and `referenced_by.source_table` must be tables listed in the same set, with the columns the rule names declared on them. Every column a `parent_rule` names must be declared on `parent_table`.
+- A rule may read a table the set does not list in exactly two places: `owner_via.link_table` and `referenced_by.link.table`. Such a link table's two named columns are declared by the rule alone: SQL Lens reads them only inside the row rule, with no row rule of the link table's own, and the assistant still cannot query that table or see it in the catalog. When the link table is listed, its two named columns must be declared on it.
+- Rules may not depend on each other in a cycle. Following each `inherit` parent, each `referenced_by` source and each listed `referenced_by` link table from table to table, nested nodes included, must never lead back to a table already on the path, including the table itself. `owner_via`, `parent_rule` and an unlisted link table do not count.
 
 A rule that breaks any of these makes the file fail to load, with an error naming the place in the file.
 
@@ -157,6 +163,28 @@ row_rule = { kind = "all_of", rules = [
 ] }
 ```
 
+Adding a soft-delete test and a parent condition, a rep sees only orders that are not deleted and whose customer is in region 1, and the products of their customers through a `customer_products` table the role may not query:
+
+```toml
+[[rule_sets.tables]]
+name = "orders"
+columns = ["id", "customer_id", "total"]
+predicate_columns = ["deleted_at"]
+row_rule = { kind = "all_of", rules = [
+  { kind = "inherit", column = "customer_id", parent_table = "customers", parent_column = "id",
+    parent_rule = { kind = "compare", column = "region_id", operator = "=", value_type = "integer", value = 1 } },
+  { kind = "is_null", column = "deleted_at" },
+] }
+
+[[rule_sets.tables]]
+name = "products"
+columns = ["id", "name"]
+row_rule = { kind = "referenced_by", id_column = "id", source_table = "customers", source_id_column = "id",
+  link = { table = "customer_products", source_column = "customer_id", target_column = "product_id" } }
+```
+
+Here `customers` must also declare `region_id`. A reader that knows only the six original kinds refuses a file that uses `is_null`, `is_not_null`, `parent_rule` or an unlisted `referenced_by` link table, so upgrade SQL Lens before deploying such a file.
+
 **Column types.** Each `compare` column, and each `owner_via` `link_user_column` (which is compared with the integer user ID), must have a MySQL type its `value_type` accepts. SQL Lens checks this with the existence check: on any other type the server refuses to start, naming the column, or, when it could not check at startup, refuses requests until the type matches. This stops MySQL from converting one side of a comparison, which could make a hidden row match.
 
 | `value_type` | Accepted MySQL types (`DATA_TYPE`) |
@@ -166,7 +194,7 @@ row_rule = { kind = "all_of", rules = [
 | `string` | `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`, `enum` |
 | `boolean` | `tinyint`, `smallint`, `mediumint`, `int`, `bigint` |
 
-Once the check has passed, it does not run again in that server process, so a column dropped or retyped later is not noticed until the server restarts.
+Once the check has passed, it does not run again in that server process, so a column dropped or retyped later is not noticed until the server restarts. **Restart SQL Lens after renaming or dropping any table or column a rule set names**, unlisted link tables included. Until it restarts, a query that reaches the renamed or dropped name fails with the database's own error, and that error text can name the table and column.
 
 ## Asking a Question Under a Rule Set
 
