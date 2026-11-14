@@ -82,7 +82,7 @@ While a rule-set file is configured, every `query_database` request must carry t
 
 SQL Lens checks these before the assistant does any work. A request that does not pass is refused with one of these messages, and nothing is sent to the model or the database:
 
-- `Request refused: rule-set key missing` — the rule-set field is absent or empty. The same refusal applies when the whole `_meta` is dropped for exceeding its limits (more than 64 keys, or more than 16 KiB as JSON).
+- `Request refused: rule-set key missing` — the rule-set field is absent or empty. The same refusal applies when the whole `_meta` is dropped for exceeding any of SQL Lens's metadata size limits, such as more than 64 keys.
 - `Request refused: no such rule set` — the named set is not in the file.
 - `Request refused: account not bound` — the account field is absent, or the account is not listed in `binding.account_ids`.
 - `Request refused: user ID invalid` — the user field is absent or is not a positive whole number.
