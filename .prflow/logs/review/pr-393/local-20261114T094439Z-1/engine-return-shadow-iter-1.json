@@ -1,0 +1,374 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "severity": "suggestion",
+   "agent": "prflow:type-design-analyzer",
+   "agents": [
+    "prflow:type-design-analyzer"
+   ],
+   "corroboration": 1,
+   "defect_signature": {
+    "file": "src/sqllens/safety/rule_sets.py",
+    "line_range": [
+     92,
+     140
+    ],
+    "kind": "type_design"
+   },
+   "description": "_CatalogView does not enforce that kept is a subset of fields or that fields has no duplicates; a misspelled kept name silently reads as NULL (fails safe, unnoticed)."
+  },
+  {
+   "finding_id": "F-2",
+   "severity": "suggestion",
+   "agent": "prflow:comment-analyzer",
+   "agents": [
+    "prflow:comment-analyzer"
+   ],
+   "corroboration": 1,
+   "defect_signature": {
+    "file": "src/sqllens/agent/core/system_prompt/default.py",
+    "line_range": [
+     62,
+     67
+    ],
+    "kind": "comment_drift"
+   },
+   "description": "rule_sets docstring can be read as making the schema-lookup limit depend on a dialect resolving; line 189 selects it on rule_sets alone."
+  },
+  {
+   "finding_id": "F-3",
+   "severity": "suggestion",
+   "agent": "prflow:pr-test-analyzer",
+   "agents": [
+    "prflow:pr-test-analyzer"
+   ],
+   "corroboration": 1,
+   "defect_signature": {
+    "file": "tests/connectors/test_rule_sets_mysql.py",
+    "line_range": null,
+    "kind": "test_gap"
+   },
+   "description": "test_key_column_usage_lists_only_keys_inside_the_set calls pytest.skip after its main check when SQLLENS_TEST_MYSQL_OTHER_DATABASE is unset, reporting a skip for a passed check locally."
+  },
+  {
+   "finding_id": "F-4",
+   "severity": "suggestion",
+   "agent": "prflow:pr-test-analyzer",
+   "agents": [
+    "prflow:pr-test-analyzer"
+   ],
+   "corroboration": 1,
+   "defect_signature": {
+    "file": "tests/connectors/test_rule_sets_mysql.py",
+    "line_range": null,
+    "kind": "test_gap"
+   },
+   "description": "No connector case covers a listed table's foreign key referencing an unlisted column of another listed table; only a unit test pins that filter text."
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": true,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (four suggestions, two inconclusive checklist items)\nThis PR is ready to merge: no reviewer or checklist item found a defect at or above the important threshold, and every acceptance criterion is itemized.\nRule applied: rule 6 — findings below the threshold and inconclusive items remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (4)\n<details><summary>4 items</summary>\n\n1. `src/sqllens/safety/rule_sets.py` lines 92-140: the `_CatalogView` dataclass does not check that `kept` is a subset of `fields` or that `fields` has no duplicates. A misspelled kept name would silently read as `NULL`. The failure is safe but goes unnoticed. (raised by 1/6 agents)\n2. `src/sqllens/agent/core/system_prompt/default.py` lines 62-67: the `rule_sets` docstring can be read as saying the schema-lookup limit depends on a dialect resolving. The code at line 189 chooses it on `rule_sets` alone. (raised by 1/6 agents)\n3. `tests/connectors/test_rule_sets_mysql.py`: `test_key_column_usage_lists_only_keys_inside_the_set` runs its main check and then calls `pytest.skip` when `SQLLENS_TEST_MYSQL_OTHER_DATABASE` is unset, so a local run reports a skip even though a check passed. CI sets the variable. (raised by 1/6 agents)\n4. `tests/connectors/test_rule_sets_mysql.py`: no connector case has a listed table whose foreign key points at an unlisted column of another listed table. A unit test pins the filter text that excludes such rows. (raised by 1/6 agents)\n\n</details>\n\n### ℹ️ Informational — Deferred\n- VC-4: INCONCLUSIVE (important) — A LIMIT 18446744073709551615 on the derived table stops MySQL from merging it into the outer query or pushing the model's conditions into it, so a model expression never runs on a hidden catalog row [docs/internal/database-connectors/rule-sets.md]\n\n  <details><summary>Evidence</summary>\n\n  The claim depends on MySQL optimizer behavior (derived-table merge and condition pushdown with LIMIT). The repository only emits the SQL: src/sqllens/safety/rule_sets.py:143-146 defines _MATERIALIZE_LIMIT = \"18446744073709551615\" with a comment making the same claim, and tests/unit/test_safety_rule_sets.py:320-325,374,386 assert the LIMIT is appended to the derived tables. No MySQL source was provided (no dependency_sources) and no MySQL server run was possible. The known documented rule (a derived table containing LIMIT is not mergeable and conditions are not pushed into it) supports the claim, and the outer expressions in the select list, JOIN ON or ORDER BY would run over the materialized, already-filtered rows. However, I could not confirm that the optimizer treats the value 18446744073709551615 (equal to HA_POS_ERROR, the 'no limit' sentinel) as a real LIMIT clause on every supported MySQL version. Not verified: running EXPLAIN FORMAT=TREE on SELECT ... FROM (SELECT ... LIMIT 18446744073709551615) AS t JOIN ... ON <error-raising expr> against MySQL 8.0 and 8.4.\n\n  </details>\n\n- VC-9: INCONCLUSIVE (suggestion) — Comparing CAST(TABLE_NAME AS BINARY) against plain string literals matches byte for byte regardless of the connection collation/charset of information_schema columns (utf8mb3) versus literal charset [src/sqllens/safety/rule_sets.py]\n\n  <details><summary>Evidence</summary>\n\n  rule_sets.py:321-337,346-353 wrap only the catalog column side in CAST(... AS BINARY) (_binary); the literals (exp.Literal.string at 334, 351) are plain strings. In MySQL a binary string vs nonbinary string comparison is bytewise, so collation differences (utf8mb3 columns vs connection collation) are irrelevant: this part holds. The existence check in safety/relations.py:173-174 uses the same BINARY x = BINARY y pattern. However the claim says 'regardless of ... charset': the literal's bytes are in the connection charset, and the repo never sets it (grep for charset/character_set in src found nothing; it comes from the driver/URL). For non-ASCII identifiers under a non-utf8 connection charset (e.g. latin1) the literal bytes would differ from the utf8mb3 column bytes, so the charset-independence part cannot be settled by reading; it needs a MySQL run (not performed). Collation independence is established, charset independence is not.\n\n  </details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant, 10 changed files; detect_all_audit set for the catalog re-walk, and the completeness critic ran clean against `tree.find_all(exp.Table)` plus `traverse_scope` sources.\n- Working tree: uncommitted-change check skipped (head-override PR mode); dirty-tree compare reported no change.\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present; requesting-code-review extension: content-present.\n- Vendored helpers missing under `.prflow/vendor/prflow/`; the plugin's own engine and scripts were used.\n- CI evidence: none held for this head; no test suite was run.\n- Normalized (wording-only): 0\n- Verified: 27 passed, 0 failed, 2 inconclusive.\n- Ten verifier dispatches were first refused by the concurrent-agent limit and were relaunched; all 29 returned.\n- Threshold: important (config read printed `important`).\n- Finding rejected lines not counted (no Finding rejected line) — exempt.\n- Checklist: 27 passed, 0 failed, 2 inconclusive\n- <details><summary>✅ Passed items (27 of 29)</summary>\n\n  - VC-1: _CATALOG_VIEWS lists every field of information_schema.TABLES, COLUMNS and KEY_COLUMN_USAGE in MySQL 8.0+ in the view's own order, so SELECT * over the rewritten view returns the same field list as the real view [src/sqllens/safety/rule_sets.py]\n  - VC-2: sqlglot generates exp.CurrentSchema() under the mysql dialect as SCHEMA() (equivalent to DATABASE()), and parses DATABASE() to the same node so the re-walk text comparison matches [src/sqllens/safety/rule_sets.py]\n  - VC-3: exp.Cast to DataType.build('BINARY', dialect='mysql') generates CAST(x AS BINARY) and re-parses to a tree whose generated text is identical, so _is_catalog_derived accepts its own output after reparse [src/sqllens/safety/rule_sets.py]\n  - VC-5: 18446744073709551615 is the largest value MySQL's LIMIT accepts and is accepted as a literal by MySQL and sqlglot [src/sqllens/safety/rule_sets.py]\n  - VC-6: _catalog_view treats a Table as a catalog view only when db is an Identifier equal (case-insensitive) to information_schema, no catalog part, and name upper-cased in _CATALOG_VIEWS; catalog-qualified or other forms fall back to _check_reference and are refused [src/sqllens/safety/rule_sets.py]\n  - VC-7: _is_catalog_derived reads the From node via body.args.get('from_'), matching the arg key sqlglot (>=30.22) uses for Select's FROM [src/sqllens/safety/rule_sets.py]\n  - VC-8: KEY_COLUMN_USAGE filter keeps a row only when its own schema/table/column is listed and the referenced schema, table and column are all NULL or all pass the same listed test, hiding rows referencing another database or unlisted tables/columns [src/sqllens/safety/rule_sets.py]\n  - VC-10: When the rule set lists tables (and thus pairs) the IN lists are non-empty; an empty listing would generate IN () which must be handled or impossible by rule-set loading [src/sqllens/safety/rule_sets.py]\n  - VC-11: The monkeypatched second_fails accepts (tree, tables, expected=None) matching the new _rewalk signature and apply_rule_set's call pattern [tests/unit/test_safety_rule_sets.py]\n  - VC-12: CI step creates database sqllens_other granting ALL to 'sqllens'@'%', and the connector test user name/host matches that account used by SQLLENS_TEST_MYSQL_URL [.github/workflows/ci.yml]\n  - VC-13: The step-level env SQLLENS_TEST_MYSQL_OTHER_DATABASE is added without dropping job-level env (SQLLENS_TEST_MYSQL_URL) needed by the pytest step [.github/workflows/ci.yml]\n  - VC-14: The connector fixture setup creates rs_customers with a FOREIGN KEY to rs_salaries before rs_salaries exists, relying on FOREIGN_KEY_CHECKS=0 set earlier on the same connection in _TEARDOWN [tests/connectors/test_rule_sets_mysql.py]\n  - VC-15: Teardown drops rs_orders (holding FK rs_orders_other_customer to other.rs_customers) before dropping the other database's tables, with FOREIGN_KEY_CHECKS=0 still in effect on that connection [tests/connectors/test_rule_sets_mysql.py]\n  - VC-16: test_key_column_usage_lists_only_keys_inside_the_set asserts the guarded result before skipping when no other database is set, so the skip only drops the other-database checks [tests/connectors/test_rule_sets_mysql.py]\n  - VC-17: pymysql returns information_schema rows as tuples of str/None so tuple membership like (schema,'rs_customers','id',schema,'rs_salaries') in hidden works, and DataFrame columns from the runner keep MySQL's upper-case field names [tests/connectors/test_rule_sets_mysql.py]\n  - VC-18: Other catalog views, the mysql, performance_schema and sys schemas, and SHOW statements are still refused under a rule set [changelog.d/393.added.md]\n  - VC-19: Doc says a KEY_COLUMN_USAGE row must have NULL referenced schema, table and column or ones that pass the same test, matching _catalog_filter [docs/internal/database-connectors/rule-sets.md]\n  - VC-20: The rule-set prompt introspection sentence replaces only the MySQL SHOW sentence; with rule_sets False the line text equals today's, including catalog_example rendering [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-21: Rule-set introspection text is used even when the dialect does not resolve, whereas the qualify rule is dialect-gated; the docstring scopes the schema-lookup change to rule_sets regardless of dialect [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-22: Under the example set, `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()` returns exactly `customers` and `orders`, and the same query written as `select table_name from information_schema.tables where table_schema = database()` returns the same rows. [src/sqllens/safety/rule_sets.py]\n  - VC-23: Under the example set, `INFORMATION_SCHEMA.COLUMNS` returns exactly the five listed columns, with no row for `email`, `discount` or `rep_id`. [src/sqllens/safety/rule_sets.py]\n  - VC-24: Under the example set, `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` returns the primary-key rows for `customers.id` and `orders.id` and the foreign-key row from `orders.customer_id` to `customers.id`, and it returns no row whose table, column, referenced table or referenced column is outside the set, and no row whose schema or referenced schema is another database (a same-named `orders` table in another database the SQL Lens user can read included). [src/sqllens/safety/rule_sets.py]\n  - VC-25: Under the example set, `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE IF(TABLE_NAME = 'salaries', EXP(1000), 0) > 0` returns no row and raises no error. [src/sqllens/safety/rule_sets.py]\n  - VC-26: Under the example set, a catalog read of a field outside the 25 kept fields (for example `TABLE_ROWS`, `COLUMN_DEFAULT` or `CONSTRAINT_NAME`) returns `NULL` for it, and `SELECT *` over a rewritten view returns every field of that view, each field outside the kept fields `NULL`. [src/sqllens/safety/rule_sets.py]\n  - VC-27: A rewritten statement in which a reference to `INFORMATION_SCHEMA.TABLES`, `COLUMNS` or `KEY_COLUMN_USAGE` sits outside the catalog derived table the guard builds for it is refused (a planted defect in a unit test), and a read of `INFORMATION_SCHEMA.STATISTICS` or `SHOW TABLES` is still refused. [src/sqllens/safety/rule_sets.py]\n  - VC-28: While a rule-set file is configured, the system prompt's MySQL schema-lookup guidance names `INFORMATION_SCHEMA.TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE` and permits no `SHOW` statement, and the prompt differs from #374's rule-set prompt for the same configuration by that change only. [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-29: Without a rule-set file configured, catalog reads return what they return today, and the system prompt is byte-identical to today's for the same configuration. [src/sqllens/agent/core/system_prompt/default.py]\n\n  </details>\n- Reviewed against issue #379 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] Under the example set, `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()` returns exactly `customers` and `orders`, and the same query written as `select table_name from information_schema.tables where table_schema = database()` returns the same rows.\n- [ ] Under the example set, `INFORMATION_SCHEMA.COLUMNS` returns exactly the five listed columns, with no row for `email`, `discount` or `rep_id`.\n- [ ] Under the example set, `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` returns the primary-key rows for `customers.id` and `orders.id` and the foreign-key row from `orders.customer_id` to `customers.id`, and it returns no row whose table, column, referenced table or referenced column is outside the set, and no row whose schema or referenced schema is another database (a same-named `orders` table in another database the SQL Lens user can read included).\n- [ ] Under the example set, `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE IF(TABLE_NAME = 'salaries', EXP(1000), 0) > 0` returns no row and raises no error.\n- [ ] Under the example set, a catalog read of a field outside the 25 kept fields (for example `TABLE_ROWS`, `COLUMN_DEFAULT` or `CONSTRAINT_NAME`) returns `NULL` for it, and `SELECT *` over a rewritten view returns every field of that view, each field outside the kept fields `NULL`.\n- [ ] A rewritten statement in which a reference to `INFORMATION_SCHEMA.TABLES`, `COLUMNS` or `KEY_COLUMN_USAGE` sits outside the catalog derived table the guard builds for it is refused (a planted defect in a unit test), and a read of `INFORMATION_SCHEMA.STATISTICS` or `SHOW TABLES` is still refused.\n- [ ] While a rule-set file is configured, the system prompt's MySQL schema-lookup guidance names `INFORMATION_SCHEMA.TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE` and permits no `SHOW` statement, and the prompt differs from #374's rule-set prompt for the same configuration by that change only.\n- [ ] Without a rule-set file configured, catalog reads return what they return today, and the system prompt is byte-identical to today's for the same configuration.",
+ "diff_produced_at_head": "e7d3d0ab871b44f9b29c223e888a41df1d667e88",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:rule_sets.py:catalog-view-field-lists",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:rule_sets.py:currentschema-generates-schema",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:rule_sets.py:binary-cast-roundtrip",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "category": "absolute_claim",
+   "claim": "A LIMIT 18446744073709551615 on the derived table stops MySQL from merging it into the outer query or pushing the model's conditions into it, so a model expression never runs on a hidden catalog row",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "It ends in `LIMIT 18446744073709551615`, which stops MySQL from merging it into the outer query or pushing the model's conditions into it, so a model expression never runs on a hidden row.",
+   "source_file": "docs/internal/database-connectors/rule-sets.md",
+   "verify_against": "MySQL 8.0 derived-table merge and condition-pushdown rules (derived_condition_pushdown is disallowed with LIMIT)",
+   "verify_hint": "Trace an outer WHERE/JOIN ON/SELECT-list expression or ORDER BY on the outer query over the derived table, e.g. an error-raising expression in the select list or in a JOIN ON condition rather than WHERE; check whether MySQL can evaluate it before the derived filter",
+   "claim_signature": "absolute_claim:rule-sets.md:limit-prevents-hidden-row-eval",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim depends on MySQL optimizer behavior (derived-table merge and condition pushdown with LIMIT). The repository only emits the SQL: src/sqllens/safety/rule_sets.py:143-146 defines _MATERIALIZE_LIMIT = \"18446744073709551615\" with a comment making the same claim, and tests/unit/test_safety_rule_sets.py:320-325,374,386 assert the LIMIT is appended to the derived tables. No MySQL source was provided (no dependency_sources) and no MySQL server run was possible. The known documented rule (a derived table containing LIMIT is not mergeable and conditions are not pushed into it) supports the claim, and the outer expressions in the select list, JOIN ON or ORDER BY would run over the materialized, already-filtered rows. However, I could not confirm that the optimizer treats the value 18446744073709551615 (equal to HA_POS_ERROR, the 'no limit' sentinel) as a real LIMIT clause on every supported MySQL version. Not verified: running EXPLAIN FORMAT=TREE on SELECT ... FROM (SELECT ... LIMIT 18446744073709551615) AS t JOIN ... ON <error-raising expr> against MySQL 8.0 and 8.4.",
+   "file_checked": "src/sqllens/safety/rule_sets.py:143-146",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "dependency_interaction:rule_sets.py:max-limit-literal",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "data_format_assumption:rule_sets.py:catalog-view-detection",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "data_format_assumption:rule_sets.py:select-from-arg-key",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:rule_sets.py:kcu-referenced-filter",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "category": "data_format_assumption",
+   "claim": "Comparing CAST(TABLE_NAME AS BINARY) against plain string literals matches byte for byte regardless of the connection collation/charset of information_schema columns (utf8mb3) versus literal charset",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/safety/rule_sets.py",
+   "verify_against": "MySQL comparison rules for BINARY vs string literal; catalog existence check in rule_sets loader",
+   "verify_hint": "Check _binary/_in_pairs in src/sqllens/safety/rule_sets.py and the existence check in src/sqllens/rule_sets.py",
+   "claim_signature": "data_format_assumption:rule_sets.py:binary-comparison-bytewise",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "rule_sets.py:321-337,346-353 wrap only the catalog column side in CAST(... AS BINARY) (_binary); the literals (exp.Literal.string at 334, 351) are plain strings. In MySQL a binary string vs nonbinary string comparison is bytewise, so collation differences (utf8mb3 columns vs connection collation) are irrelevant: this part holds. The existence check in safety/relations.py:173-174 uses the same BINARY x = BINARY y pattern. However the claim says 'regardless of ... charset': the literal's bytes are in the connection charset, and the repo never sets it (grep for charset/character_set in src found nothing; it comes from the driver/URL). For non-ASCII identifiers under a non-utf8 connection charset (e.g. latin1) the literal bytes would differ from the utf8mb3 column bytes, so the charset-independence part cannot be settled by reading; it needs a MySQL run (not performed). Collation independence is established, charset independence is not.",
+   "file_checked": "src/sqllens/safety/rule_sets.py:321-353",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "api_contract:rule_sets.py:empty-in-list",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:rewalk-signature",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "api_contract:ci.yml:other-db-grant-user",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "api_contract:ci.yml:step-env-merge",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:fk-checks-off-setup",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:teardown-order",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:kcu-skip-scope",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "data_format_assumption:test_rule_sets_mysql.py:row-shapes",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "absolute_claim:393.added.md:other-catalog-refused",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "api_contract:rule-sets.md:kcu-doc-matches-filter",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "api_contract:default.py:introspection-line-unchanged-off",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "api_contract:default.py:introspection-dialect-scope",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-22",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-23",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-25",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-26",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-27",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-28",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-29",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
