@@ -133,7 +133,14 @@ jobs:
       - name: Allow the test user to create MySQL stored functions
         run: python -c "import pymysql; c = pymysql.connect(host='127.0.0.1', user='root', password='sqllens'); c.cursor().execute('SET GLOBAL log_bin_trust_function_creators = 1'); c.close()"
 
+      # The rule-set catalog tests need a second database the test user can
+      # write, to check that its same-named tables never show under a rule set.
+      - name: Create a second database for the test user
+        run: python -c "import pymysql; c = pymysql.connect(host='127.0.0.1', user='root', password='sqllens'); cur = c.cursor(); cur.execute('CREATE DATABASE IF NOT EXISTS sqllens_other'); cur.execute(\"GRANT ALL ON sqllens_other.* TO 'sqllens'@'%'\"); c.close()"
+
       - run: pytest -q tests/connectors -v
+        env:
+          SQLLENS_TEST_MYSQL_OTHER_DATABASE: sqllens_other
 
   # Auto-request a PRFlow review once both CI jobs above are green, by posting a
   # standalone `/prflow:review` comment that devflow.yml's `command` job picks

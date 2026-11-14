@@ -15,8 +15,17 @@ selects exactly that table's listed ``columns``::
                            FROM `customers`) AS c
 
 MySQL then resolves every column the model wrote against the derived table,
-so a column the set does not list fails as an unknown column. The guard
-re-walks the rewritten tree, generates sqlglot's MySQL output without
+so a column the set does not list fails as an unknown column.
+
+A reference to ``INFORMATION_SCHEMA.TABLES``, ``COLUMNS`` or
+``KEY_COLUMN_USAGE`` becomes a derived table over that view (see
+:func:`_catalog_body`): it keeps only rows for the connected database and the
+set's tables and listed columns, projects every field of the view under its
+own name with only :data:`_CATALOG_VIEWS`' kept fields carrying values, and
+ends in a ``LIMIT`` so MySQL materializes it before the model's expressions
+read it. Every other catalog relation is refused.
+
+The guard re-walks the rewritten tree, generates sqlglot's MySQL output without
 comments or optimizer hints, parses that output again and re-walks it; the
 inner runners and MySQL receive that output, never the model's text.
 
@@ -33,6 +42,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -75,6 +85,65 @@ KIND_DENIED_FUNCTION = "the query calls a function the guard does not allow"
 KIND_UNCHECKED = "the statement could not be checked"
 
 _CATALOG_SCHEMAS = frozenset({"information_schema", "mysql", "performance_schema", "sys"})
+
+_INFORMATION_SCHEMA = "information_schema"
+
+
+@dataclass(frozen=True)
+class _CatalogView:
+    """A rewritten ``information_schema`` view: every field in view order, and the kept ones."""
+
+    fields: tuple[str, ...]
+    kept: frozenset[str]
+
+
+# Every field of each view in MySQL 8.0+, in the view's own order. A field
+# missing here would disappear from ``SELECT *``; a field added to ``kept``
+# exposes its value under every rule set.
+_CATALOG_VIEWS: dict[str, _CatalogView] = {
+    "TABLES": _CatalogView(
+        fields=(
+            "TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE", "ENGINE", "VERSION",
+            "ROW_FORMAT", "TABLE_ROWS", "AVG_ROW_LENGTH", "DATA_LENGTH", "MAX_DATA_LENGTH",
+            "INDEX_LENGTH", "DATA_FREE", "AUTO_INCREMENT", "CREATE_TIME", "UPDATE_TIME",
+            "CHECK_TIME", "TABLE_COLLATION", "CHECKSUM", "CREATE_OPTIONS", "TABLE_COMMENT",
+        ),
+        kept=frozenset({"TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE"}),
+    ),
+    "COLUMNS": _CatalogView(
+        fields=(
+            "TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "ORDINAL_POSITION",
+            "COLUMN_DEFAULT", "IS_NULLABLE", "DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH",
+            "CHARACTER_OCTET_LENGTH", "NUMERIC_PRECISION", "NUMERIC_SCALE",
+            "DATETIME_PRECISION", "CHARACTER_SET_NAME", "COLLATION_NAME", "COLUMN_TYPE",
+            "COLUMN_KEY", "EXTRA", "PRIVILEGES", "COLUMN_COMMENT", "GENERATION_EXPRESSION",
+            "SRS_ID",
+        ),
+        kept=frozenset({
+            "TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "IS_NULLABLE",
+            "DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "NUMERIC_PRECISION", "NUMERIC_SCALE",
+            "DATETIME_PRECISION", "COLUMN_TYPE", "COLUMN_KEY",
+        }),
+    ),
+    "KEY_COLUMN_USAGE": _CatalogView(
+        fields=(
+            "CONSTRAINT_CATALOG", "CONSTRAINT_SCHEMA", "CONSTRAINT_NAME", "TABLE_CATALOG",
+            "TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "ORDINAL_POSITION",
+            "POSITION_IN_UNIQUE_CONSTRAINT", "REFERENCED_TABLE_SCHEMA", "REFERENCED_TABLE_NAME",
+            "REFERENCED_COLUMN_NAME",
+        ),
+        kept=frozenset({
+            "TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "ORDINAL_POSITION",
+            "POSITION_IN_UNIQUE_CONSTRAINT", "REFERENCED_TABLE_SCHEMA", "REFERENCED_TABLE_NAME",
+            "REFERENCED_COLUMN_NAME",
+        }),
+    ),
+}
+
+# Removing this LIMIT lets MySQL merge the derived table into the outer query
+# or push the model's conditions into it, so a model expression could run on
+# a hidden catalog row. It is the largest value MySQL's LIMIT takes.
+_MATERIALIZE_LIMIT = "18446744073709551615"
 
 # A base-table reference may carry only these arguments; any other one
 # (PARTITION, index hints, TABLESAMPLE, ...) is refused.
@@ -150,6 +219,31 @@ def _check_reference(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) ->
         raise RuleSetRefusal(KIND_UNLISTED_TABLE, f"table {table.name} is not listed")
 
 
+def _catalog_view(table: exp.Table) -> str | None:
+    """The rewritten view ``table`` names (``information_schema.<view>``), else ``None``."""
+    db = table.args.get("db")
+    if (
+        not isinstance(table.this, exp.Identifier)
+        or not isinstance(db, exp.Identifier)
+        or table.args.get("catalog") is not None
+        or db.name.lower() != _INFORMATION_SCHEMA
+    ):
+        return None
+    view = table.name.upper()
+    return view if view in _CATALOG_VIEWS else None
+
+
+def _check_catalog_reference(table: exp.Table) -> None:
+    """Refuse a rewritable catalog-view reference the guard cannot wrap."""
+    extra = _set_args(table) - _TABLE_ARGS - {"db"}
+    if extra:
+        kind = KIND_TABLE_OPTIONS if extra & _TABLE_OPTION_ARGS else KIND_UNSUPPORTED
+        raise RuleSetRefusal(kind, f"catalog view {table.name} carries {sorted(extra)}")
+    alias = table.args.get("alias")
+    if alias is not None and alias.args.get("columns"):
+        raise RuleSetRefusal(KIND_UNSUPPORTED, f"column aliases on catalog view {table.name}")
+
+
 def _is_cte_reference(table: exp.Table, scope: object) -> bool:
     return (
         not table.args.get("db")
@@ -160,9 +254,10 @@ def _is_cte_reference(table: exp.Table, scope: object) -> bool:
 
 def _analyze(
     tree: exp.Expression, tables: Mapping[str, tuple[str, ...]]
-) -> list[exp.Table]:
-    """Return every base-table reference in ``tree``; refuse any table left unaccounted."""
+) -> tuple[list[exp.Table], list[exp.Table]]:
+    """Return ``tree``'s listed-table and catalog-view references; refuse any other table."""
     base: list[exp.Table] = []
+    catalog: list[exp.Table] = []
     accounted: set[int] = set()
     for scope in traverse_scope(tree):
         sources = [s for s in scope.sources.values() if isinstance(s, exp.Table)]
@@ -176,8 +271,12 @@ def _analyze(
                 raise RuleSetRefusal(KIND_TABLE_OPTIONS, f"options on CTE {table.name}")
             accounted.add(id(table))
         for table in sources:
-            _check_reference(table, tables)
-            base.append(table)
+            if _catalog_view(table) is not None:
+                _check_catalog_reference(table)
+                catalog.append(table)
+            else:
+                _check_reference(table, tables)
+                base.append(table)
             accounted.add(id(table))
     for table in tree.find_all(exp.Table):
         if id(table) not in accounted:
@@ -186,7 +285,7 @@ def _analyze(
             # read is reported as one.
             _check_reference(table, tables)
             raise RuleSetRefusal(KIND_UNSUPPORTED, f"unaccounted table {table.name}")
-    return base
+    return base, catalog
 
 
 def _derived(table: exp.Table, columns: tuple[str, ...]) -> exp.Subquery:
@@ -199,6 +298,11 @@ def _derived(table: exp.Table, columns: tuple[str, ...]) -> exp.Subquery:
             for column in columns
         ]
     ).from_(exp.Table(this=exp.to_identifier(table.name, quoted=True)), copy=False)
+    return _wrap(table, body)
+
+
+def _wrap(table: exp.Table, body: exp.Select) -> exp.Subquery:
+    """``body`` as a derived table standing where ``table`` stood, under its alias or name."""
     alias = table.args.get("alias")
     alias_id = (
         alias.this.copy()
@@ -215,11 +319,96 @@ def _derived(table: exp.Table, columns: tuple[str, ...]) -> exp.Subquery:
     return derived
 
 
+def _quoted(name: str) -> exp.Column:
+    return exp.column(exp.to_identifier(name, quoted=True))
+
+
+def _binary(node: exp.Expression) -> exp.Cast:
+    """``BINARY node``, so a comparison matches byte for byte, as the existence check does."""
+    return exp.Cast(this=node, to=exp.DataType.build("BINARY", dialect=_DIALECT))
+
+
+def _in_schema(field: str) -> exp.EQ:
+    return exp.EQ(this=_binary(_quoted(field)), expression=_binary(exp.CurrentSchema()))
+
+
+def _in_pairs(table_field: str, column_field: str, pairs: list[tuple[str, str]]) -> exp.In:
+    return exp.In(
+        this=exp.Tuple(expressions=[_binary(_quoted(table_field)), _binary(_quoted(column_field))]),
+        expressions=[
+            exp.Tuple(expressions=[exp.Literal.string(t), exp.Literal.string(c)])
+            for t, c in pairs
+        ],
+    )
+
+
+def _catalog_filter(view: str, tables: Mapping[str, tuple[str, ...]]) -> exp.Expression:
+    """The row filter for ``view``: the connected database and the set's tables and columns.
+
+    One literal list per comparison keeps the filter compact at the scale of a
+    real rule-set file.
+    """
+    if view == "TABLES":
+        return exp.and_(
+            _in_schema("TABLE_SCHEMA"),
+            exp.In(
+                this=_binary(_quoted("TABLE_NAME")),
+                expressions=[exp.Literal.string(name) for name in tables],
+            ),
+        )
+    pairs = [(name, column) for name, columns in tables.items() for column in columns]
+    own = exp.and_(_in_schema("TABLE_SCHEMA"), _in_pairs("TABLE_NAME", "COLUMN_NAME", pairs))
+    if view == "COLUMNS":
+        return own
+    no_reference = exp.and_(
+        *(
+            exp.Is(this=_quoted(field), expression=exp.Null())
+            for field in (
+                "REFERENCED_TABLE_SCHEMA", "REFERENCED_TABLE_NAME", "REFERENCED_COLUMN_NAME"
+            )
+        )
+    )
+    listed_reference = exp.and_(
+        _in_schema("REFERENCED_TABLE_SCHEMA"),
+        _in_pairs("REFERENCED_TABLE_NAME", "REFERENCED_COLUMN_NAME", pairs),
+    )
+    return exp.and_(own, exp.paren(exp.or_(no_reference, listed_reference)))
+
+
+def _catalog_body(view: str, tables: Mapping[str, tuple[str, ...]]) -> exp.Select:
+    """The body of the derived table that stands in for ``information_schema.<view>``."""
+    spec = _CATALOG_VIEWS[view]
+    projection: list[exp.Expression] = [
+        _quoted(field)
+        if field in spec.kept
+        else exp.alias_(exp.Null(), exp.to_identifier(field, quoted=True))
+        for field in spec.fields
+    ]
+    source = exp.Table(
+        this=exp.to_identifier(view, quoted=True),
+        db=exp.to_identifier(_INFORMATION_SCHEMA, quoted=True),
+    )
+    return (
+        exp.Select(expressions=projection)
+        .from_(source, copy=False)
+        .where(_catalog_filter(view, tables), copy=False)
+        .limit(exp.Literal.number(_MATERIALIZE_LIMIT), copy=False)
+    )
+
+
 def _rewrite(
-    tree: exp.Expression, base: list[exp.Table], tables: Mapping[str, tuple[str, ...]]
+    tree: exp.Expression,
+    base: list[exp.Table],
+    catalog: list[exp.Table],
+    tables: Mapping[str, tuple[str, ...]],
 ) -> exp.Expression:
     for table in base:
         table.replace(_derived(table, tables[table.name]))
+    for table in catalog:
+        view = _catalog_view(table)
+        if view is None:
+            raise RuleSetRefusal(KIND_UNCHECKED, f"table {table.name} is not a catalog view")
+        table.replace(_wrap(table, _catalog_body(view, tables)))
     for hint in list(tree.find_all(exp.Hint)):
         hint.pop()
     return tree
@@ -255,14 +444,39 @@ def _is_guard_derived(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) -
     return alias is None or not alias.args.get("columns")
 
 
+def _is_catalog_derived(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) -> bool:
+    """True if ``table`` is a catalog view inside exactly the derived table the guard builds.
+
+    The body must generate the same MySQL text as :func:`_catalog_body` for
+    that view and ``tables``; text, not sqlglot's node equality, which folds
+    letter case.
+    """
+    view = _catalog_view(table)
+    if view is None or _set_args(table) != {"this", "db"}:
+        return False
+    from_ = table.parent
+    body = from_.parent if isinstance(from_, exp.From) else None
+    if not isinstance(body, exp.Select) or body.args.get("from_") is not from_:
+        return False
+    wrapper = body.parent
+    if not isinstance(wrapper, exp.Subquery) or wrapper.this is not body:
+        return False
+    if _set_args(wrapper) - {"this", "alias", "joins"}:
+        return False
+    alias = wrapper.args.get("alias")
+    if alias is not None and alias.args.get("columns"):
+        return False
+    return _generate(body) == _generate(_catalog_body(view, tables))
+
+
 def _rewalk(tree: exp.Expression, tables: Mapping[str, tuple[str, ...]]) -> None:
-    """Refuse ``tree`` unless every base-table reference is in a guard-shaped derived table."""
+    """Refuse ``tree`` unless every base-table and catalog reference is in a guard-built wrapper."""
     accounted: set[int] = set()
     for scope in traverse_scope(tree):
         sources = [s for s in scope.sources.values() if isinstance(s, exp.Table)]
         source_ids = {id(s) for s in sources}
         for table in sources:
-            if not _is_guard_derived(table, tables):
+            if not (_is_guard_derived(table, tables) or _is_catalog_derived(table, tables)):
                 raise RuleSetRefusal(
                     KIND_UNCHECKED, f"re-walk: table {table.name} is not wrapped"
                 )
@@ -297,13 +511,15 @@ def apply_rule_set(sql: str, tables: Mapping[str, tuple[str, ...]]) -> str:
     """Rewrite ``sql`` so every listed table exposes only its listed columns.
 
     ``tables`` maps each listed table name (compared case-sensitively) to its
-    listed ``columns``. Raises :class:`RuleSetRefusal` for a statement the
-    guard refuses; any other exception from a step is the caller's to turn
-    into a refusal.
+    listed ``columns``. A reference to ``INFORMATION_SCHEMA.TABLES``,
+    ``COLUMNS`` or ``KEY_COLUMN_USAGE`` is rewritten to show only those tables
+    and columns. Raises :class:`RuleSetRefusal` for a statement the guard
+    refuses; any other exception from a step is the caller's to turn into a
+    refusal.
     """
     tree = _parse(sql)
-    base = _analyze(tree, tables)
-    _rewrite(tree, base, tables)
+    base, catalog = _analyze(tree, tables)
+    _rewrite(tree, base, catalog, tables)
     _rewalk(tree, tables)
     output = _generate(tree)
     try:

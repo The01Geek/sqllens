@@ -69,14 +69,25 @@ def _connect(url: str) -> Any:
     )
 
 
-_SETUP = [
+_TEARDOWN = [
+    # The foreign keys below are created and dropped with checks off.
+    "SET FOREIGN_KEY_CHECKS = 0",
     "DROP VIEW IF EXISTS rs_customer_view",
     "DROP FUNCTION IF EXISTS rs_shout",
     "DROP TABLE IF EXISTS rs_customers, rs_orders, rs_salaries, rs_outer, rs_inner",
+]
+
+_SETUP = [
+    *_TEARDOWN,
+    # rs_customers.id references the unlisted rs_salaries, and the unlisted
+    # rs_orders.discount references rs_customers: KEY_COLUMN_USAGE must hide both.
     "CREATE TABLE rs_customers (id INT PRIMARY KEY, name VARCHAR(50) NULL,"
-    " email VARCHAR(80), rep_id INT, account_id INT)",
+    " email VARCHAR(80), rep_id INT, account_id INT,"
+    " CONSTRAINT rs_customers_salary FOREIGN KEY (id) REFERENCES rs_salaries (id))",
     "CREATE TABLE rs_orders (id INT PRIMARY KEY, customer_id INT, total INT,"
-    " discount INT, account_id INT)",
+    " discount INT, account_id INT,"
+    " CONSTRAINT rs_orders_customer FOREIGN KEY (customer_id) REFERENCES rs_customers (id),"
+    " CONSTRAINT rs_orders_discount FOREIGN KEY (discount) REFERENCES rs_customers (id))",
     "CREATE TABLE rs_salaries (id INT PRIMARY KEY, amount INT)",
     "CREATE TABLE rs_outer (id INT PRIMARY KEY, name VARCHAR(20))",
     "CREATE TABLE rs_inner (id INT PRIMARY KEY, name VARCHAR(20))",
@@ -120,19 +131,40 @@ def _rule_set_toml(database: str, tables: dict[str, tuple[str, ...]],
     return "\n".join(lines) + "\n"
 
 
+def _other_database() -> str | None:
+    """A second database the test user can write, named by ``SQLLENS_TEST_MYSQL_OTHER_DATABASE``."""
+    return os.environ.get("SQLLENS_TEST_MYSQL_OTHER_DATABASE") or None
+
+
+def _other_setup(other: str) -> list[str]:
+    """Same-named tables in ``other``, and a key in this database that references one."""
+    return [
+        f"DROP TABLE IF EXISTS `{other}`.rs_orders, `{other}`.rs_customers",
+        f"CREATE TABLE `{other}`.rs_customers (id INT PRIMARY KEY, name VARCHAR(50))",
+        f"CREATE TABLE `{other}`.rs_orders (id INT PRIMARY KEY, customer_id INT,"
+        f" CONSTRAINT rs_other_orders_customer FOREIGN KEY (customer_id)"
+        f" REFERENCES `{other}`.rs_customers (id))",
+        "ALTER TABLE rs_orders ADD CONSTRAINT rs_orders_other_customer"
+        f" FOREIGN KEY (customer_id) REFERENCES `{other}`.rs_customers (id)",
+    ]
+
+
 @pytest.fixture(scope="module")
 def database() -> Iterator[str]:
     url = _url()
+    other = _other_database()
     conn = _connect(url)
     cursor = conn.cursor()
-    for statement in _SETUP:
+    for statement in [*_SETUP, *(_other_setup(other) if other else [])]:
         cursor.execute(statement)
     conn.close()
     yield url
     conn = _connect(url)
     cursor = conn.cursor()
-    for statement in _SETUP[:3]:
+    for statement in _TEARDOWN:
         cursor.execute(statement)
+    if other:
+        cursor.execute(f"DROP TABLE IF EXISTS `{other}`.rs_orders, `{other}`.rs_customers")
     conn.close()
 
 
@@ -419,9 +451,8 @@ async def test_no_backslash_escapes_is_removed(database, tmp_path, selected) -> 
         "DESCRIBE rs_customers",
         "SELECT 1 FROM rs_customers; SELECT 2 FROM rs_customers",
         "SELECT * FROM INFORMATION_SCHEMA.STATISTICS",
-        "SELECT * FROM INFORMATION_SCHEMA.TABLES",
-        "SELECT * FROM INFORMATION_SCHEMA.COLUMNS",
-        "SELECT * FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE",
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS",
+        "SHOW COLUMNS FROM rs_customers",
         "SELECT user FROM mysql.user",
         "SELECT id FROM rs_customer_view",
         "SELECT * FROM JSON_TABLE('[1]', '$[*]' COLUMNS (a INT PATH '$')) j",
@@ -489,3 +520,135 @@ async def test_refusal_text_names_nothing(database, tmp_path, selected) -> None:
                 await _run(runner, sql)
             for name in ("email", "rs_customers", "rs_salaries", "amount"):
                 assert name not in str(info.value)
+
+
+# --- catalog reads under a rule set (#379) ---------------------------------------------
+
+
+def _unguarded(url: str, sql: str) -> list[tuple[Any, ...]]:
+    conn = _connect(url)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        return list(cursor.fetchall())
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()",
+        "select table_name from information_schema.tables where table_schema = database()",
+    ],
+)
+async def test_tables_view_lists_only_the_set_s_tables(database, tmp_path, selected, sql) -> None:
+    frame = await _run(_chain(database, _loaded(tmp_path, database)), sql)
+    assert sorted(frame.iloc[:, 0].tolist()) == ["rs_customers", "rs_orders"]
+
+
+async def test_columns_view_lists_only_the_listed_columns(database, tmp_path, selected) -> None:
+    loaded = _loaded(tmp_path, database, predicate={"rs_customers": ["rep_id"]})
+    frame = await _run(
+        _chain(database, loaded),
+        "SELECT c.TABLE_NAME, c.COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS c",
+    )
+    assert sorted(map(tuple, frame.values.tolist())) == [
+        ("rs_customers", "id"), ("rs_customers", "name"),
+        ("rs_orders", "customer_id"), ("rs_orders", "id"), ("rs_orders", "total"),
+    ]
+
+
+async def test_key_column_usage_lists_only_keys_inside_the_set(
+    database, tmp_path, selected
+) -> None:
+    sql = (
+        "SELECT k.TABLE_SCHEMA, k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_SCHEMA,"
+        " k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME"
+        " FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE k"
+    )
+    frame = await _run(_chain(database, _loaded(tmp_path, database)), sql)
+    schema = urlparse(database).path.lstrip("/")
+    rows = sorted(
+        tuple(None if pd.isna(v) else v for v in row) for row in frame.values.tolist()
+    )
+    assert rows == sorted([
+        (schema, "rs_customers", "id", None, None, None),
+        (schema, "rs_orders", "id", None, None, None),
+        (schema, "rs_orders", "customer_id", schema, "rs_customers", "id"),
+    ])
+    # The unguarded view holds the rows the rewrite hides, so the check above
+    # would catch a filter that let them through.
+    hidden = _unguarded(
+        database,
+        "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_SCHEMA,"
+        " REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE"
+        " WHERE TABLE_NAME LIKE 'rs\\_%'",
+    )
+    assert (schema, "rs_customers", "id", schema, "rs_salaries") in hidden
+    assert (schema, "rs_orders", "discount", schema, "rs_customers") in hidden
+    other = _other_database()
+    if other is None:
+        pytest.skip("SQLLENS_TEST_MYSQL_OTHER_DATABASE not set; other-database rows not checked")
+    assert (other, "rs_orders", "id", None, None) in hidden
+    assert (schema, "rs_orders", "customer_id", other, "rs_customers") in hidden
+
+
+async def test_error_raising_condition_never_sees_a_hidden_row(
+    database, tmp_path, selected
+) -> None:
+    sql = (
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES"
+        " WHERE IF(TABLE_NAME = 'rs_salaries', EXP(1000), 0) > 0"
+    )
+    # Unguarded, the condition reaches rs_salaries and raises "out of range".
+    with pytest.raises(pymysql.err.OperationalError):
+        _unguarded(database, sql)
+    frame = await _run(_chain(database, _loaded(tmp_path, database)), sql)
+    assert len(frame) == 0
+
+
+async def test_fields_outside_the_kept_list_are_null(database, tmp_path, selected) -> None:
+    runner = _chain(database, _loaded(tmp_path, database))
+    for sql in (
+        "SELECT t.TABLE_ROWS, t.TABLE_COMMENT FROM INFORMATION_SCHEMA.TABLES t",
+        "SELECT c.COLUMN_DEFAULT, c.EXTRA FROM INFORMATION_SCHEMA.COLUMNS c",
+        "SELECT k.CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE k",
+    ):
+        frame = await _run(runner, sql)
+        assert len(frame) > 0
+        assert frame.isna().all().all(), sql
+
+
+@pytest.mark.parametrize("view", ["TABLES", "COLUMNS", "KEY_COLUMN_USAGE"])
+async def test_star_returns_every_field_of_the_view(database, tmp_path, selected, view) -> None:
+    from sqllens.safety.rule_sets import _CATALOG_VIEWS
+
+    conn = _connect(database)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT * FROM information_schema.{view} LIMIT 0")
+        fields = [d[0] for d in cursor.description]
+    finally:
+        conn.close()
+    frame = await _run(
+        _chain(database, _loaded(tmp_path, database)), f"SELECT * FROM INFORMATION_SCHEMA.{view}"
+    )
+    assert list(frame.columns) == fields
+    assert len(frame) > 0
+    kept = _CATALOG_VIEWS[view].kept
+    for field in fields:
+        if field not in kept:
+            assert frame[field].isna().all(), field
+
+
+async def test_without_a_rule_set_catalog_reads_are_unchanged(database) -> None:
+    runner = ReadOnlyGuardRunner(RowCapRunner(_engine(database), max_rows=1000), dialect="mysql")
+    frame = await _run(
+        runner,
+        "SELECT TABLE_NAME, TABLE_ROWS FROM INFORMATION_SCHEMA.TABLES"
+        " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'rs\\_%'"
+        " AND TABLE_TYPE = 'BASE TABLE'",
+    )
+    assert {"rs_customers", "rs_orders", "rs_salaries"} <= set(frame["TABLE_NAME"])
+    assert frame["TABLE_ROWS"].notna().all()
