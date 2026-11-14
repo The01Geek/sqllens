@@ -778,7 +778,18 @@ class RuleSetsConfig(BaseModel):
 
     @property
     def loaded(self) -> LoadedRuleSets | None:
-        """The validated file, or ``None`` when no rule-set file is configured."""
+        """The validated file, or ``None`` when no rule-set file is configured.
+
+        Raises ``RuntimeError`` when ``file`` is set but was never loaded (a
+        ``RuleSetsConfig`` built outside ``Config``): every consumer reads
+        ``None`` as "no rule sets", so returning it would serve requests with
+        no rule-set guard.
+        """
+        if self._loaded is None and self.file is not None:
+            raise RuntimeError(
+                "rule_sets.file is set but the rule-set file was never loaded; "
+                "build the configuration through Config so the file is validated"
+            )
         return self._loaded
 
 

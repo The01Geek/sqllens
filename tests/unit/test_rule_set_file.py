@@ -450,3 +450,15 @@ def test_preflight_runs_the_catalog_check_and_confirms(tmp_path: Path, monkeypat
     with pytest.raises(PreflightError, match="table 'orders' does not exist"):
         probe_database(fresh)
     assert fresh.rule_sets.loaded is not None and not fresh.rule_sets.loaded.catalog.confirmed
+
+
+def test_unloaded_rule_set_file_fails_closed(tmp_path: Path) -> None:
+    # Built outside Config, the file is never validated or loaded; reading
+    # ``loaded`` must not answer "no rule sets" and switch the guard off.
+    from sqllens.config import RuleSetsConfig
+
+    unloaded = RuleSetsConfig(file=write_rule_set_file(tmp_path, example_document()))
+    with pytest.raises(RuntimeError, match="never loaded"):
+        _ = unloaded.loaded
+    assert RuleSetsConfig().loaded is None
+    assert rule_set_config(tmp_path).rule_sets.loaded is not None
