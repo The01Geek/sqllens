@@ -149,6 +149,66 @@ def row_rule_document(database: str = "shop", prefix: str = "") -> dict[str, Any
     return document
 
 
+SCALE_COLUMNS = ["id", "parent_id", "owner_id", "kind_s"]
+
+
+def _scale_compare(column: str, value: Any, value_type: str) -> dict[str, Any]:
+    return {"kind": "compare", "column": column, "operator": "=", "value_type": value_type,
+            "value": value}
+
+
+def scale_document(database: str = "shop", prefix: str = "") -> dict[str, Any]:
+    """A synthetic file with the real-scale file's shape, never its names.
+
+    10 sets of 130 tables (1,300 entries), 27 row rules per set (270) using
+    all six kinds; ``t004`` ends a chain 4 deep (``t004`` -> ``t003`` ->
+    ``t002`` -> ``t001`` -> ``t000``), and ``t007``'s rule has 21 nodes.
+    Every table has :data:`SCALE_COLUMNS`; ``t005`` and ``t006`` use the
+    unlisted link table ``<prefix>link``.
+    """
+    def t(n: int) -> str:
+        return f"{prefix}t{n:03d}"
+
+    owner = {"kind": "owner_via", "id_column": "id", "link_table": f"{prefix}link",
+             "link_row_column": "row_id", "link_user_column": "user_id"}
+    rules: dict[int, dict[str, Any]] = {
+        0: user_id_compare("owner_id"),
+        **{n: {"kind": "inherit", "column": "parent_id", "parent_table": t(n - 1),
+               "parent_column": "id"} for n in range(1, 5)},
+        5: owner,
+        6: {"kind": "any_of", "rules": [_scale_compare("kind_s", "a", "string"), owner]},
+        7: {"kind": "all_of", "rules": [
+            {"kind": "any_of", "rules": [_scale_compare("owner_id", v, "integer")
+                                         for v in range(9)]},
+            {"kind": "any_of", "rules": [_scale_compare("kind_s", f"k{v}", "string")
+                                         for v in range(9)]},
+        ]},
+        8: {"kind": "referenced_by", "id_column": "id", "source_table": t(0),
+            "source_column": "parent_id"},
+        9: {"kind": "referenced_by", "id_column": "id", "source_table": t(1),
+            "source_id_column": "id",
+            "link": {"table": t(10), "source_column": "parent_id", "target_column": "owner_id"}},
+        **{n: _scale_compare("kind_s", f"s{n}", "string") for n in range(10, 27)},
+    }
+    document = example_document()
+    document["binding"]["database"] = database
+    document["rule_sets"] = []
+    for set_index in range(1, 11):
+        tables = []
+        for n in range(130):
+            table: dict[str, Any] = {"name": t(n), "columns": list(SCALE_COLUMNS)}
+            if n in rules:
+                table["row_rule"] = copy.deepcopy(rules[n])
+            tables.append(table)
+        document["rule_sets"].append({
+            "name": str(set_index),
+            "scope": f"Synthetic scale set {set_index}.",
+            "source": {"confirmed_against_production": True},
+            "tables": tables,
+        })
+    return document
+
+
 def _toml_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
