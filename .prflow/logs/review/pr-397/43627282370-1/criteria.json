@@ -1,0 +1,66 @@
+[
+  {
+    "criterion": 1,
+    "text": "A version-1 rule-set file loads when a table's `row_rule` uses `{ kind = \"is_null\", column = \"<c>\" }` or `{ kind = \"is_not_null\", column = \"<c>\" }`, alone or inside `any_of` or `all_of`, where `<c>` is in that table's `columns` or `predicate_columns`."
+  },
+  {
+    "criterion": 2,
+    "text": "Loading refuses a null-test node, naming its record path, when at minimum: its column is not declared on its table; it has no `column`; it has any field besides `kind` and `column`."
+  },
+  {
+    "criterion": 3,
+    "text": "On MySQL, with no flat `[[rls]]` rules configured, a `query_database` request under a set whose `orders` rule is `is_null` on `deleted_at` returns every orders row whose `deleted_at` is NULL and no row whose `deleted_at` is not NULL; with `is_not_null` it returns the reverse. Both hold when the connection starts with `HIGH_NOT_PRECEDENCE` in its session `sql_mode`."
+  },
+  {
+    "criterion": 4,
+    "text": "On MySQL, under a set whose `orders` rule is `is_null` on `deleted_at`, where order 42 has a non-NULL `deleted_at`, `SELECT id FROM orders WHERE IF(id = 42, EXP(1000), 0) > 0` returns no row and raises no error. The same holds when row 42 is hidden instead by a `referenced_by` rule through an unlisted link table, and when it is hidden by an `inherit` rule's `parent_rule`."
+  },
+  {
+    "criterion": 5,
+    "text": "A version-1 file loads when a `referenced_by` link variant names a `link.table` the set does not list. Under that set, with no flat `[[rls]]` rules configured, a row is visible exactly when a visible source row references it through a link row, and link rows are read with no row rule of their own."
+  },
+  {
+    "criterion": 6,
+    "text": "Under such a set, model-written SQL that reads the unlisted link table as a base table is refused as an unlisted table, and the table appears in no catalog read the model receives."
+  },
+  {
+    "criterion": 7,
+    "text": "Under a set with an unlisted link table or an `inherit` rule with `parent_rule`, a statement whose model-written SQL defines a CTE named like that link table or that `parent_table`, with the same letters or differing only in letter case, returns no row that the rule hides."
+  },
+  {
+    "criterion": 8,
+    "text": "A `referenced_by` link variant whose `link.table` is listed still requires each link row it uses to pass the link table's own row rule."
+  },
+  {
+    "criterion": 9,
+    "text": "The catalog existence check treats an unlisted link table and its `source_column` and `target_column` as it treats a listed table and its columns: a missing table, a table that is not a base table, or a missing column fails the check."
+  },
+  {
+    "criterion": 10,
+    "text": "A version-1 file loads when an `inherit` node has a `parent_rule` that is a column-local node whose columns are declared on `parent_table`. Under that set, with no flat `[[rls]]` rules configured, a row is visible only when at least one parent row matching it on `column` = `parent_column` passes both the parent table's own row rule (when it has one) and `parent_rule`, on that same parent row."
+  },
+  {
+    "criterion": 11,
+    "text": "Loading refuses, naming the record path, a `parent_rule` that holds an `owner_via`, `inherit` or `referenced_by` node at any depth, or that names a column not declared on `parent_table`."
+  },
+  {
+    "criterion": 12,
+    "text": "A file that uses only the six existing shapes loads and scopes rows exactly as before this change."
+  },
+  {
+    "criterion": 13,
+    "text": "The SQL for the new conditions is built as sqlglot expression nodes, never as SQL text, and a statement that fails the guard's re-walk or re-parse after the conditions are added is refused, never run."
+  },
+  {
+    "criterion": 14,
+    "text": "`docs/external/rule-sets.md` documents `is_null` and `is_not_null`, the unlisted link table of `referenced_by` (its two internal-only columns, no row rule of its own, no graph edge), and `parent_rule` with its column-local limit. It states that the format's unlisted-table exceptions are exactly the `owner_via` link table and the `referenced_by` link table."
+  },
+  {
+    "criterion": 15,
+    "text": "`docs/external/rule-sets.md` tells operators to restart SQL Lens after renaming or dropping a table or column a rule set names."
+  },
+  {
+    "criterion": 16,
+    "text": "The change leaves the database-error pass-through of the rule-set guard unchanged, so a MySQL error raised by a row-rule read of an unlisted link table reaches the model with its text, which can name that table and column. For example, this happens when one of its columns is renamed or dropped after the catalog check has passed, or when the database user may not read one of its columns."
+  }
+]
