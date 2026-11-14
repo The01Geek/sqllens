@@ -1,6 +1,6 @@
 # Per-role rule sets
 
-<!-- verified-against: 97783a1 2026-11-14 -->
+<!-- verified-against: 631e028 2026-11-14 -->
 
 How a rule-set file limits each `query_database` request to one application role's tables, columns and rows: loading and validating the file and its row rules, selecting a set per request, the catalog existence and type check, and the SQL guard that enforces the selected set. Read it before changing `src/sqllens/rule_sets.py`, `src/sqllens/safety/rule_sets.py`, or anything they wire into. For row predicates from `[[rls]]`, read [row-level-security.md](row-level-security.md) instead. MySQL only.
 
@@ -96,7 +96,7 @@ A reference to `information_schema.TABLES`, `COLUMNS` or `KEY_COLUMN_USAGE`, in 
 
 ### Tables with a row rule
 
-`RuleSetGuardRunner` gets the selected set's `GuardSpec` (`LoadedRuleSets.guard_spec`: listed tables and compiled rules) and the selection's normalized `user_id`. A reference to a table with a row rule becomes `_scoped_body`'s derived table: `SELECT <listed columns> FROM <table> AS <guard alias> WHERE <rule> LIMIT 18446744073709551615`. A table without a row rule keeps the plain derived table above, which MySQL may merge into the model's query.
+`RuleSetGuardRunner` gets the selected set's `GuardSpec` (`LoadedRuleSets.guard_spec`: listed tables and compiled rules) and the selection's normalized `user_id`. `guard_spec` raises `RuntimeError` when a table of the set has a `row_rule` but no compiled rule; `_rewrite` does not catch it, so the statement never runs unfiltered. A reference to a table with a row rule becomes `_scoped_body`'s derived table: `SELECT <listed columns> FROM <table> AS <guard alias> WHERE <rule> LIMIT 18446744073709551615`. A table without a row rule keeps the plain derived table above, which MySQL may merge into the model's query.
 
 - **Why the `LIMIT`.** A filtered derived table alone is not enough: MySQL can merge it into the outer query or push the model's conditions into it, and then an expression the model wrote (for example one that overflows) could run on a hidden row and reveal it through its error. The `LIMIT` blocks both merging and derived-condition pushdown, so MySQL builds the visible rows first. The cost is that each scoped reference is built in full before the model's own filters apply, and that work counts against the statement timeout. The guard cannot use `NO_MERGE` hints instead, because it removes every optimizer hint.
 - **Guard aliases.** Every table reference the guard writes inside a filtered derived table carries the alias `<prefix><k>_<slot>`, where `k` counts scoped references in the statement and `_choose_prefix` picks `sl<n>_` so that no identifier in the model's statement and no table the set or its rules name starts with it, ignoring letter case. Every column in the derived table's select list and filter is qualified with these aliases. MySQL resolves a qualified column in outer query blocks when the inner block lacks it, so a bare table-name qualifier could bind a column dropped after the existence check to a model alias of the same name; with guard aliases it fails as an unknown column (1054). The guard does not redact that database error.
