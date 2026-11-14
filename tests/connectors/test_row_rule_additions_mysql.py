@@ -21,6 +21,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import pandas as pd
+import pymysql
 import pytest
 
 from sqllens.rule_sets import RuleSetCatalogError, check_catalog, load_rule_sets
@@ -29,8 +30,6 @@ from tests.connectors.test_rule_sets_mysql import _chain, _connect, _run, _url
 from tests.unit._rule_set_fixtures import example_document, to_toml, user_id_compare
 
 pytestmark = pytest.mark.asyncio
-
-pymysql = pytest.importorskip("pymysql")
 
 _TEARDOWN = [
     "DROP TABLE IF EXISTS ra_customers, ra_orders, ra_products, ra_customer_products",
