@@ -1,0 +1,26 @@
+{
+  "root_completeness": "established",
+  "phase3_findings": [
+    {"finding_id": "F-1", "agent": "prflow:comment-analyzer", "severity": "important", "file": "docs/external/rule-sets.md", "line_range": [66, 66], "kind": "documented_falsehood", "description": "docs/external/rule-sets.md line 66 says confirmed_against_production = true is required, but Source.confirmed_against_production (src/sqllens/rule_sets.py:123) is a required StrictBool: a file with false loads, warns at startup, and its requests are refused. The same page (lines 89, 99, 129) and the internal doc contradict line 66."},
+    {"finding_id": "F-2", "agent": "prflow:comment-analyzer", "severity": "suggestion", "file": "docs/external/rule-sets.md", "line_range": [86, 86], "kind": "comment_drift", "description": "The 'no such rule set' line covers only a name missing from the file; select_rule_set also gives it for a name that is not a string or non-Boolean integer (2.0, true, [2])."},
+    {"finding_id": "F-3", "agent": "prflow:requesting-code-review", "severity": "suggestion", "file": "docs/external/rule-sets.md", "line_range": [85, 85], "kind": "other", "description": "The 'rule-set key missing' line omits that a _meta with more than 64 keys also gets this refusal."},
+    {"finding_id": "F-4", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "file": "src/sqllens/config.py", "line_range": [760, 828], "kind": "type_design", "description": "RuleSetsConfig can hold a file path with _loaded None; every consumer checks loaded, so such a config would skip the guard silently. No current path builds it."},
+    {"finding_id": "F-5", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "file": "src/sqllens/rule_sets.py", "line_range": [234, 265], "kind": "type_design", "description": "CatalogConfirmation.confirmed is writable, LoadedRuleSets is not frozen, and list fields of frozen _Record models are mutable in place."},
+    {"finding_id": "F-6", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "file": "src/sqllens/rule_sets.py", "line_range": [348, 370], "kind": "type_design", "description": "RuleSetSelection has no construction-time validation; only select_rule_set enforces validity and set_rule_set_selection accepts any instance."},
+    {"finding_id": "F-7", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "file": "src/sqllens/rule_sets.py", "line_range": [174, 179], "kind": "type_design", "description": "TableRule.row_rule: Any = None is a field that exists only to be rejected via model_fields_set."},
+    {"finding_id": "F-8", "agent": "prflow:pr-test-analyzer", "severity": "suggestion", "file": "tests/unit/test_query_database_rule_sets.py", "line_range": [268, 271], "kind": "test_gap", "description": "Criterion 34 (show_details profile still served under the guard) is checked only for the selection through a fake agent; no test sends SQL through the guarded chain under that profile."},
+    {"finding_id": "F-9", "agent": "prflow:pr-test-analyzer", "severity": "suggestion", "file": "src/sqllens/tools/query_database.py", "line_range": [229, 252], "kind": "test_gap", "description": "The fail-closed branches of _check_conversation_owner (no owner_id lookup; resolver or store raises) are untested."},
+    {"finding_id": "F-10", "agent": "prflow:pr-test-analyzer", "severity": "suggestion", "file": "tests/connectors/test_rule_sets_mysql.py", "line_range": null, "kind": "test_gap", "description": "test_refused_before_execution uses SELECT * with refuse_whole_row_selects on, so the whole-row guard may refuse first; the live test cannot attribute those refusals to the rule-set guard."}
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": true, "test_relevant": true, "detect_all_audit": false, "checklist_skipped": null, "file_count": 39, "changed_lines": 4382},
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase4_demoted": [],
+  "reject_drivers": ["F-1"],
+  "criterion_exempt": [],
+  "verdict": "REJECT"
+}

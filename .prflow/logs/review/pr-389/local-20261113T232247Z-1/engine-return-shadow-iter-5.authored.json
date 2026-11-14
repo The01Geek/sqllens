@@ -1,0 +1,23 @@
+{
+  "root_completeness": "established",
+  "phase3_findings": [
+    {"finding_id": "F-1", "agent": "prflow:silent-failure-hunter", "severity": "important", "description": "Request-time catalog check (_check_catalog_blocking / ensure_catalog_confirmed) has no read/write or statement timeout and runs under the process-wide state.lock, so a stalled information_schema read hangs every later rule-set request instead of refusing it with REFUSED_CATALOG_UNCONFIRMED; preflight catalog read has the same gap (startup only).", "defect_signature": {"file": "src/sqllens/rule_sets.py", "line_range": [531, 568], "kind": "other"}},
+    {"finding_id": "F-2", "agent": "prflow:silent-failure-hunter", "severity": "suggestion", "description": "_rule_set_file_configured returns False silently on unreadable or malformed TOML, so verify-memory skips its rule-sets-unsupported message (still exits 2 with the config error).", "defect_signature": {"file": "src/sqllens/cli.py", "line_range": [98, 116], "kind": "other"}},
+    {"finding_id": "F-3", "agent": "prflow:pr-test-analyzer", "severity": "suggestion", "description": "Live MySQL refusal cases for INFORMATION_SCHEMA tables and JSON_TABLE use SELECT *, so the whole-row guard refuses them first and the rule-set guard's own refusal is never exercised end to end.", "defect_signature": {"file": "tests/connectors/test_rule_sets_mysql.py", "line_range": [421, 427], "kind": "test_gap"}},
+    {"finding_id": "F-4", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "description": "Frozen rule-set records hold mutable lists and LoadedRuleSets is a mutable dataclass; invariants are enforced only by convention after validation.", "defect_signature": {"file": "src/sqllens/rule_sets.py", "line_range": [77, 265], "kind": "type_design"}},
+    {"finding_id": "F-5", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "description": "CatalogConfirmation.confirmed is a public mutable flag set directly by outside code (preflight.py:175).", "defect_signature": {"file": "src/sqllens/rule_sets.py", "line_range": [234, 239], "kind": "type_design"}},
+    {"finding_id": "F-6", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "description": "RuleSetsConfig can hold a file path with _loaded None; consumers check loaded, so a non-validated construction fails open.", "defect_signature": {"file": "src/sqllens/config.py", "line_range": [760, 828], "kind": "type_design"}},
+    {"finding_id": "F-7", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "description": "RuleSetSelection does not enforce its invariants (positive user_id, known set, bound account); only select_rule_set does.", "defect_signature": {"file": "src/sqllens/rule_sets.py", "line_range": [348, 358], "kind": "type_design"}}
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": true, "test_relevant": true, "detect_all_audit": false, "file_count": 39, "changed_lines": 4382},
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase4_demoted": [],
+  "reject_drivers": ["F-1"],
+  "criterion_exempt": [],
+  "verdict": "REJECT"
+}

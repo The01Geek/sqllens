@@ -1,0 +1,1412 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "description": "Internal docs row-level-security.md:190 and authentication/overview.md:113 still say caller metadata can only supply RLS predicate values; rule-set _meta keys now also select the guarding set.",
+   "defect_signature": {
+    "file": "docs/internal/database-connectors/row-level-security.md",
+    "line_range": [
+     190,
+     190
+    ],
+    "kind": "comment_drift"
+   }
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "description": "docs/external/rule-sets.md refusal list is incomplete: no-such-rule-set also covers non-string/non-integer names, >64 _meta keys refusal unstated, owner and catalog refusals omitted.",
+   "defect_signature": {
+    "file": "docs/external/rule-sets.md",
+    "line_range": null,
+    "kind": "comment_drift"
+   }
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "Frozen rule-set record models hold mutable lists, so validated invariants can be broken after construction.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": [
+     77,
+     214
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-4",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "LoadedRuleSets is a mutable dataclass and CatalogConfirmation.confirmed is a public bool that could skip the catalog check.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": [
+     234,
+     265
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-5",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "RuleSetSelection validates nothing at construction; the guard trusts any published selection.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": [
+     348,
+     358
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-6",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "RuleSetsConfig._loaded is set from outside the class and can drift from file.",
+   "defect_signature": {
+    "file": "src/sqllens/config.py",
+    "line_range": [
+     770,
+     782
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-7",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "description": "No test that list_data_sources answers a call with no _meta while a rule-set file is configured (criterion 32).",
+   "defect_signature": {
+    "file": "tests/unit/test_query_database_rule_sets.py",
+    "line_range": null,
+    "kind": "test_gap"
+   }
+  },
+  {
+   "finding_id": "F-8",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "description": "show_details profile under a rule set is only checked for selection, not end to end through the guard (criterion 34).",
+   "defect_signature": {
+    "file": "tests/unit/test_query_database_rule_sets.py",
+    "line_range": null,
+    "kind": "test_gap"
+   }
+  },
+  {
+   "finding_id": "F-9",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "description": "RefusalRedactingRunner's _logged_by_guard assumption (non-guard __cause__ means already logged) is unpinned by any test; raw readonly/rls raises from sqlglot errors do not log.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/rule_sets.py",
+    "line_range": null,
+    "kind": "test_gap"
+   }
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "file_count": 39,
+  "changed_lines": 4382
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (no finding or checklist FAIL at or above the important threshold; notes remain)\n\nThis PR is ready to merge. No reviewer and no checklist item found a defect at or above the important threshold, all 37 acceptance criteria were itemized, and what remains is suggestions plus ten checklist items that could not be settled by reading alone.\nRule applied: rule 6, below-threshold findings, checklist FAILs or INCONCLUSIVE items remain, so the verdict is APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (10)\n\n<details><summary>10 items</summary>\n\n1. Two internal docs still say that caller metadata can supply only RLS predicate values: `docs/internal/database-connectors/row-level-security.md` line 190 and `docs/internal/authentication/overview.md` line 113. With a rule-set file configured, caller `_meta` also carries the rule-set, account and user keys that choose the guarding set. The diff does not touch either line. (raised by 1/6 agents)\n2. In `docs/external/rule-sets.md`, the \"Asking a Question Under a Rule Set\" list is incomplete. It describes `Request refused: no such rule set` only as \"the named set is not in the file\", but the code also returns it for a name that is not a string or whole number. The list does not say that a `_meta` with more than 64 keys is refused as rule-set key missing. It also omits the conversation-owner and catalog-unconfirmed refusals. (raised by 1/6 agents)\n3. In `src/sqllens/rule_sets.py`, the `frozen=True` record models (lines 77 to 214) still hold mutable `list` fields: `Binding.account_ids`, `TableRule.columns` and `predicate_columns`, `RuleSet.tables`, `RuleSetFile.rule_sets` and `Source.global_switches`. A caller could append to them after validation and bypass the load-time checks. No current caller does. (raised by 1/6 agents)\n4. In `src/sqllens/rule_sets.py`, `LoadedRuleSets` (lines 242 to 265) is a mutable dataclass with public fields, and `CatalogConfirmation.confirmed` is a public `bool`. Setting it from outside would skip the catalog check, so the rule that only a passing check sets it is kept by convention only. (raised by 1/6 agents)\n5. In `src/sqllens/rule_sets.py`, `RuleSetSelection` (lines 348 to 358) checks nothing when it is built, so it can hold states that `select_rule_set` would refuse. `RuleSetGuardRunner._rewrite` trusts any published selection and does not check confirmation. The only producer today is `select_rule_set`. (raised by 1/6 agents)\n6. In `src/sqllens/config.py`, `RuleSetsConfig._loaded` (lines 770 to 782) is set from outside the class by `Config._load_rule_sets`, so `file` and `loaded` can drift apart if `file` is changed after load. (raised by 1/6 agents)\n7. In `tests/unit/test_query_database_rule_sets.py`, no test checks that `list_data_sources` answers a call with no `_meta` while a rule-set file is configured (criterion 32). (raised by 1/6 agents)\n8. In `tests/unit/test_query_database_rule_sets.py`, the `show_details` profile case (criterion 34) is only checked for the selection, not end to end through the guard chain. (raised by 1/6 agents)\n9. In `src/sqllens/safety/rule_sets.py`, `RefusalRedactingRunner` skips its WARNING log whenever a refusal's `__cause__` is not a guard error, assuming the guard already logged it. Raw guard functions in `safety/readonly.py` and `safety/rls.py` raise from sqlglot errors without logging, and only the runner wrappers make those refusals log today. No test pins this. (raised by 1/6 agents)\n- VC-3: FAIL (suggestion) — The configuration.md note says [result_masking] and [rule_sets] reject unknown keys, like [[rls]]. [docs/external/configuration.md]\n\n  <details><summary>Evidence</summary>\n\n  Code: config.py:311 ResultMaskingConfig model_config=ConfigDict(extra=\"forbid\"); config.py:768 RuleSetsConfig extra=\"forbid\"; config.py:688 RlsRule extra=\"forbid\". So all three reject unknown keys. But the note at docs/external/configuration.md:234 reads \"rejected at config load rather than silently ignored, as it is in `[result_masking]` and `[rule_sets]`\". The natural parse of \"silently ignored, as it is in X\" says unknown keys ARE silently ignored in [result_masking] and [rule_sets], which contradicts the code. The note does not clearly say they reject like [[rls]]; it is misleading/wrong under its natural reading and should be reworded (e.g. 'as it is in ...' -> 'as in ... where unknown keys are also rejected').\n\n  </details>\n\n</details>\n\n### ℹ️ Informational — Deferred (10)\n\n<details><summary>10 items</summary>\n\n- VC-23: INCONCLUSIVE (important) — RefusalRedactingRunner replaces other guards' UnsafeSqlError/RlsError text with its kind keeping type; a refusal whose __cause__ is neither is redacted to REDACTED_GUARD_ERROR (KIND_UNCHECKED) via _logged_by_guard and not logged twice; database errors pass unchanged. [docs/internal/database-connectors/rule-sets.md]\n\n  <details><summary>Evidence</summary>\n\n  FAIL stored INCONCLUSIVE (requirement quote is missing): Most of the claim holds. RefusalRedactingRunner.run_sql (rule_sets.py:457-471) catches UnsafeSqlError/RlsError, rebuilds the exception with type(exc).__new__ so the type is kept, and sets the text to redacted_refusal_text. It calls logger.warning only when not _logged_by_guard(exc). _logged_by_guard (432-441) is true when __cause__ is non-None and is not an UnsafeSqlError or RlsError. Non-guard exceptions pass through unchanged. The claim breaks as written ('a refusal whose __cause__ is neither is redacted to REDACTED_GUARD_ERROR'): redacted_refusal_text (406-429) returns REDACTED_GUARD_ERROR only after earlier branches. (1) An RlsError never reaches it: it returns REDACTED_VIEW, REDACTED_ROUTINE, REDACTED_RELATION or REDACTED_RLS at 411-418. rls.py:244-246 raises RlsError from a generic Exception (cause is neither), and the result is REDACTED_RLS. (2) A message containing a parse marker returns REDACTED_PARSE at 419-420, before the _logged_by_guard check at 421. readonly.py:551-552 raises UnsafeSqlError('could not parse SQL') from a sqlglot ParseError, so the cause is neither, yet the result is REDACTED_PARSE. Side effect: _logged_by_guard is true for that case, so the redactor skips its own warning, although that path shows no guard logging. The doc (rule-sets.md:64) describes the rule as covering a refusal from an unexpected internal exception, but the claim states it unconditionally.\n\n  </details>\n\n- VC-29: INCONCLUSIVE (important) — In the locked sqlglot version, a MySQL Select stores its FROM clause under the arg key `from_`, table options under `partition`/`hints`/`indexed`, SELECT INTO under `into`, and JSON_TABLE parses to exp.JSONTable [src/sqllens/safety/rule_sets.py]\n\n  <details><summary>Evidence</summary>\n\n  requirements.txt:103 locks sqlglot==30.31.0. The item has no dependency_sources, and a Glob for **/sqlglot/expressions* under the review directory (which includes both views) found nothing. So sqlglot's expressions.py (Select.arg_types, Table.arg_types, JSONTable) was not available to read, and the claim about arg keys (from_, partition/hints/indexed, into, JSONTable) is unverified. Missing evidence: sqlglot 30.31.0 source.\n\n  </details>\n\n- VC-30: INCONCLUSIVE (suggestion) — sqlglot traverse_scope's Scope exposes `sources`, `tables` and `cte_sources`, with CTE references appearing in `tables` but not as exp.Table in `sources` [src/sqllens/safety/rule_sets.py]\n\n  <details><summary>Evidence</summary>\n\n  Library claim about sqlglot Scope. The item has no dependency_sources and view-head holds no sqlglot/optimizer/scope.py (Glob found none), so the authorized evidence does not include the library source. rule_sets.py:157,167-170,261-270 uses scope.cte_sources, scope.sources and scope.tables, but that only shows usage, not library behavior. Searched: view-head glob for sqlglot/optimizer/scope.py. Missing: an installed sqlglot source directory supplied via dependency_sources. A grep outside the supplied directories turned up unrelated sqlglot copies; I did not rely on them.\n\n  </details>\n\n- VC-31: INCONCLUSIVE (suggestion) — Expression.sql accepts comments=False, unsupported_level and normalize_functions=False, and removing exp.Hint nodes drops optimizer hints from generated MySQL output [src/sqllens/safety/rule_sets.py]\n\n  <details><summary>Evidence</summary>\n\n  The code at src/sqllens/safety/rule_sets.py:223-224 pops exp.Hint nodes, and :280-286 calls tree.sql(dialect=_DIALECT, comments=False, unsupported_level=ErrorLevel.RAISE, normalize_functions=False). Re-walk at :276 refuses if any Hint remains. The claim depends on installed sqlglot behaviour (Generator options and MySQL hint generation). The item has no dependency_sources, and the head view contains no sqlglot source (Glob **/sqlglot/** found nothing). Per the rules, a library claim without dependency_sources is verified from the views alone, so the library's source is unread. I did not read generator.py, and I did not run any command to check the behaviour.\n\n  </details>\n\n- VC-41: INCONCLUSIVE (important) — Removing only HIGH_NOT_PRECEDENCE and NO_BACKSLASH_ESCAPES makes MySQL read sqlglot's regenerated SQL as sqlglot wrote it, including under ANSI/ANSI_QUOTES/PIPES_AS_CONCAT (criterion 14) [src/sqllens/agent/factory.py]\n\n  <details><summary>Evidence</summary>\n\n  factory.py:67 defines RULE_SET_REMOVED_SQL_MODES = {HIGH_NOT_PRECEDENCE, NO_BACKSLASH_ESCAPES}. factory.py:116 passes it to the MySQL runner only when rule sets are loaded. mysql/sql_runner.py:126-139 reads @@SESSION.sql_mode, drops those flags and sets the rest, so ANSI, ANSI_QUOTES and PIPES_AS_CONCAT stay on. Whether MySQL reads sqlglot's output the way sqlglot wrote it under those modes depends on what sqlglot's MySQL generator emits: backtick identifiers, single-quoted strings, and what it does with `||`. The item gave no dependency_sources, and the views hold no sqlglot source. I did not run a live MySQL integration test (tests/connectors/test_rule_sets_mysql.py:383 test_ansi_mode_reads_double_quotes_as_strings) or the unit test tests/unit/test_safety_rule_sets.py:167 that pins the sqlglot output. The claim therefore cannot be settled from the views alone. Missing evidence: sqlglot's MySQL generator source, or a run of those tests.\n\n  </details>\n\n- VC-93: INCONCLUSIVE (suggestion) — _FakeConn/_FakeCursor (ping(reconnect), cursor(*args), execute(sql, params), fetchone, fetchmany, close) and the pymysql namespace with cursors.SSDictCursor/DictCursor cover every call MySQLRunner._run_sql_blocking makes, including reading the current sql_mode with fetchone before SET SESSION sql_mode = %s. [tests/unit/test_safety_rule_sets.py:629]\n\n  <details><summary>Evidence</summary>\n\n  Read-path alignment holds. sql_runner.py:113-172 calls pymysql.connect(**kw), conn.ping(reconnect=True), conn.cursor() with no args for setup, setup.execute('SELECT @@SESSION.sql_mode'), setup.fetchone() (row[0]), setup.execute('SET SESSION sql_mode = %s', (..,)), setup.close(), conn.cursor(pymysql.cursors.SSDictCursor), cursor.execute(sql), cursor.fetchmany(cap+1), conn.close(). Test fakes (test_safety_rule_sets.py:629-673) provide all of these, and the namespace has cursors.SSDictCursor and DictCursor, so the sql_mode read via fetchone before the SET is covered. The remove_sql_modes kwarg exists (sql_runner.py:34) and self.pymysql is overridden after __init__ (line 58). However the claim says the fakes cover 'every call' _run_sql_blocking makes. They do not cover conn.commit() or cursor.rowcount on the write path (sql_runner.py:172-186), or verify_base_tables(conn, ...) when require_base_tables=True (line 157). _FakeConn has no commit and _FakeCursor has no rowcount. The tests only run SELECT 1 with require_base_tables=False (lines 690, 704, 711), so those gaps are unexercised. As written the claim overstates coverage. I found no repository requirement in the views that the fakes must cover the write path, so I cannot show a broken requirement or confirm INVALID.\n\n  </details>\n\n- VC-96: INCONCLUSIVE (suggestion) — The docstring asserts sqlglot unescapes \\/ inside an optimizer hint, so a kept hint would end early and run the rest. [tests/unit/test_safety_rule_sets.py:144]\n\n  <details><summary>Evidence</summary>\n\n  The docstring is at tests/unit/test_safety_rule_sets.py:143 and the test input is at line 145. requirements.txt:103 pins sqlglot==30.31.0. The item has no dependency_sources, and the head and base views do not contain sqlglot source, so I could not read the MySQL tokenizer or generator hint handling at that version. The claim depends on how sqlglot parses and re-emits a hint containing an escaped slash. That needs either the library source or a run of SELECT /*+ BKA('*\\/ x') */ 1 through sqlglot's MySQL parse and generate. I did not run that command. I did not use installed copies found elsewhere on the filesystem, because they are outside the views and dependency_sources and their versions are unverified.\n\n  </details>\n\n- VC-111: INCONCLUSIVE (critical) — Under the example set, each of these runs and returns rows: `SELECT c.name, o.total FROM customers c JOIN orders o ON o.customer_id = c.id`; `SELECT COUNT(*) AS n FROM orders ORDER BY n`; `SELECT c.name AS nm FROM customers c JOIN orders o ON o.customer_id = c.id ORDER BY nm`; `SELECT name FROM customers UNION SELECT name FROM customers ORDER BY name`; `WITH t AS (SELECT c.name AS nm FROM customers c) SELECT t.nm FROM t`; `SELECT d.n FROM (SELECT COUNT(*) AS n FROM orders o) d`; `SELECT name, total FROM customers c JOIN orders o ON o.customer_id = c.id`; `SELECT name FROM customers WHERE id IN (SELECT customer_id FROM orders)`; `SELECT name FROM customers c WHERE NOT EXISTS (SELECT 1 FROM orders WHERE customer_id = c.id)`; `SELECT o.customer_id AS cust, SUM(o.total) AS revenue FROM orders o GROUP BY cust HAVING revenue > 100`; and `SELECT NAME FROM customers`. `SELECT name FROM CUSTOMERS` is refused. [src/sqllens/safety/rule_sets.py:296-316]\n\n  <details><summary>Evidence</summary>\n\n  criteria.json read: valid {criterion,text} list, criterion 11 matches, so graded with the full list. Read src/sqllens/safety/rule_sets.py (head view). Static trace: the guard parses with the MySQL dialect and requires one Query (rule_sets.py:108-128). It accepts only base tables whose case-sensitive name is in `tables` (:131-150), so `FROM CUSTOMERS` is refused with KIND_UNLISTED_TABLE (:149-150) and `SELECT NAME FROM customers` is not refused, because column case is not checked. CTE references (:153-158, 173-177), derived tables and subqueries are walked by traverse_scope, and each base table is replaced by a derived table of its listed columns (:192-225). The rewritten tree is re-walked, generated and re-parsed (:296-316), with unsupported_level=RAISE at :284. Nothing in the code obviously refuses the eleven listed statements. tests/connectors/test_rule_sets_mysql.py:266-279 lists these statements, using rs_ table names, as expected-to-run cases. tests/unit/test_safety_rule_sets.py:193,237 pin the CUSTOMERS refusal. Not settled: whether sqlglot's MySQL generation, with unsupported_level=RAISE, round-trips each statement (for example GROUP BY alias with HAVING, UNION with ORDER BY, correlated NOT EXISTS) and whether MySQL then returns rows. That needs the MySQL integration tests (tests/connectors/test_rule_sets_mysql.py) or a live run. I did not run them and could not confirm they pass. The fail-closed branch for an unexpected guard exception (:365-371) is not shown to be unreachable for these inputs without running sqlglot.\n\n  </details>\n\n- VC-118: INCONCLUSIVE (critical) — Under the example set, `SELECT c.name, d.total FROM customers c JOIN LATERAL (SELECT o.total FROM orders o WHERE o.customer_id = c.id ORDER BY o.total DESC LIMIT 1) d ON TRUE` runs and returns rows, while the same statement whose lateral body reads `o.discount` fails with MySQL's unknown-column error (1054) and returns no value of `orders.discount`. [src/sqllens/safety/rule_sets.py:192-316]\n\n  <details><summary>Evidence</summary>\n\n  criteria.json is a list of {criterion, text} objects and carries criterion 18, so it counts. The diff covers the criterion in three places. src/sqllens/safety/rule_sets.py apply_rule_set (296-316) and _derived (192-215) wrap every base table in a derived table that selects only the listed columns, and _analyze/_rewalk use sqlglot traverse_scope. For a lateral body over orders, that wrapper would expose only id, customer_id and total, so a read of o.discount would hit MySQL's 1054. tests/unit/test_safety_rule_sets.py:119-123 pins the rewritten shape for the lateral statement. tests/connectors/test_rule_sets_mysql.py:278 (runs and returns rows) and :318 (o.discount in the lateral body, expecting an unknown column) are the live-MySQL tests for both halves of the claim. What I could not settle: the claim is about runtime behaviour on a MySQL server. I did not run those integration tests or the unit tests. I also did not trace sqlglot's scope handling of exp.Lateral to confirm _analyze and _rewalk accept the lateral statement without refusing it, nor MySQL's execution of the rewritten JOIN LATERAL. Static reading of the guard supports the claim, but no run output backs it. Missing evidence: the pass/fail result of `pytest tests/connectors/test_rule_sets_mysql.py -k lateral` against a live MySQL, and of tests/unit/test_safety_rule_sets.py::test_lateral_derived_table_body_is_wrapped.\n\n  </details>\n\n- VC-124: INCONCLUSIVE (critical) — With a listed column dropped from the database after the existence check passed, a query that reads it fails with MySQL's unknown-column error, even inside a correlated subquery whose outer table has a column of the same name. A statement that reaches the rule-set guard for a request with no selected rule set is refused. [src/sqllens/safety/rule_sets.py:192-222,342-374]\n\n  <details><summary>Evidence</summary>\n\n  Graded with criteria.json (criterion 24 present, valid list). Second sentence verified: src/sqllens/safety/rule_sets.py:343-345 RuleSetGuardRunner._rewrite raises RuleSetRefusal(KIND_NO_SELECTION) when current_rule_set_selection() is None; run_sql (357-364) re-raises it before the inner runner is called, so no SQL runs. First sentence is not settled by reading: the guard (rule_sets.py:192-222) rewrites each listed table to a derived table `(SELECT `t`.`col`... FROM `t`) AS alias`, so a dropped listed column is read by the derived body and MySQL should raise 1054. But whether MySQL resolves the qualified `rs_inner.name` inside that body to an outer column of the same name, as it can for outer references in derived tables (MySQL 8.0.14+), depends on MySQL name resolution at runtime. For example, an outer table aliased with the inner table's name could capture it. The only evidence is the live-MySQL test tests/connectors/test_rule_sets_mysql.py:364-377 (test_dropped_listed_column_fails_in_a_correlated_subquery), which I did not run. Missing evidence: a run of that test against MySQL, and a variant where the outer alias equals the inner table name. Trigger-condition split not completed because the first sentence is unsettled.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types and test_relevant (not small_diff, not config_only), 39 changed files, 4382 changed lines.\n- Working tree: skipped in PR mode (head override).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass reviewer extension (requesting-code-review): PROMPT-EXTENSION-STATUS: content-present.\n- CI evidence: no CI results were supplied for head d843f09 and no in-environment suite result is held; test evidence is missing.\n- Verdict severity threshold: important.\n- Normalized (wording-only): 2\n- Re-verification: none.\n- prior-report: none\n- Finding rejected lines not counted (no Finding rejected line) does not apply; no Finding rejected line was present.\n- Phase 2 ran in rounds of up to 20 verifiers because of the session's concurrent subagent limit; every one of the 137 items received a verdict.\n- Dirty-tree check: ran clean.\n\n- Checklist: 126 passed, 1 failed, 10 inconclusive\n- <details><summary>✅ Passed items (126 of 137)</summary>\n\n  - VC-1: The changelog says the catalog check runs at startup or else on the first request, a request lacking rule set/account/user _meta is refused before the assistant runs, the assistant saves nothing to memory while memory import and admin tools are unaffected, conversations continue only under the starting identity, verify-memory is unsupported, row rules unsupported, unconfirmed sets refused, and nothing changes without [rule_sets] file. [changelog.d/389.added.md]\n  - VC-2: configuration.md says RuleSetsConfig has one field `file` (path, default unset), env var SQLLENS_RULE_SETS__FILE, an unknown key in [rule_sets] fails the load, and the file is validated on every config load. [docs/external/configuration.md]\n  - VC-4: The rule-sets.md example file (format_version 1, binding, metadata, rule_sets with source, tables, predicate_columns) loads under the version-1 RuleSetFile model, including generated_on given as a string. [docs/external/rule-sets.md]\n  - VC-5: rule-sets.md lists the optional source fields role_id, role_name, role_copy, permission_list_version, global_switches, permission_fingerprint, application_commit and generated_on, with confirmed_against_production required and role_id required to equal the set name. [docs/external/rule-sets.md]\n  - VC-6: Source provenance is never sent to the model. [docs/external/rule-sets.md]\n  - VC-7: The five refusal texts are exactly 'Request refused: rule-set key missing', 'no such rule set', 'account not bound', 'user ID invalid', 'rule set not confirmed', with the described conditions. [docs/external/rule-sets.md]\n  - VC-8: The request refusal messages never name a table, a column or another rule set. [docs/external/rule-sets.md]\n  - VC-9: verify-memory prints exactly 'sqllens verify-memory does not support rule sets yet; run it against a config without [rule_sets] file' and stops. [docs/external/rule-sets.md]\n  - VC-10: validate prints a Warning: line and serve logs a warning for each set whose confirmed_against_production is not true. [docs/external/rule-sets.md]\n  - VC-11: The rule-set refusal message never names a table, a column or a function name. [docs/external/rule-sets.md]\n  - VC-12: In a request, account given as number 5 or string \"5\" matches \"5\" in the file; in the file a bare 5 fails and \"05\" is rejected. [docs/external/rule-sets.md]\n  - VC-13: After a catalog failure SQL Lens retries the check on the next request, so no restart is needed. [docs/external/rule-sets.md]\n  - VC-14: The listed refusal reasons (unlisted table, non-single SELECT, qualified schema/catalog, table function/JSON_TABLE/DUAL, partition list, index hint, denied function) correspond to guard refusals, and unlisted columns surface as MySQL unknown-column errors. [docs/external/rule-sets.md]\n  - VC-15: _request_metadata takes count_declared_keys and, when true, returns {} if _meta holds more than 64 keys in all, progress token and io.modelcontextprotocol/ keys included; server.py passes count_declared_keys=cfg.rule_sets.loaded is not None. [docs/internal/authentication/overview.md]\n  - VC-16: With a rule-set file, call order is ResultMaskingRunner -> RefusalRedactingRunner -> WholeRowSelectGuardRunner -> RuleSetGuardRunner -> RlsGuardRunner -> ReadOnlyGuardRunner -> RowCapRunner -> engine runner. [docs/internal/database-connectors/rule-sets.md]\n  - VC-17: build_agent with a rule-set file forces allow_memory_writes off (no save tools, ChromaAgentMemory(track_usage=False)), uses _RuleSetUserResolver, removes HIGH_NOT_PRECEDENCE and NO_BACKSLASH_ESCAPES via remove_sql_modes failing the query on error, and passes rule_sets=True to DefaultSystemPromptBuilder. [docs/internal/database-connectors/rule-sets.md]\n  - VC-18: A caller-supplied base_prompt is returned as given, so neither rule-set prompt rule reaches it; the qualify-columns rule is added only when a dialect resolves. [docs/internal/database-connectors/rule-sets.md]\n  - VC-19: select_rule_set runs on reserved-stripped _meta before the named-profile lookup; the selection is published via set_rule_set_selection/reset_rule_set_selection; owner and catalog checks run inside the conversation turn lock, failing closed on missing owner_id or raising resolver/store. [docs/internal/database-connectors/rule-sets.md]\n  - VC-20: verify-memory checks cfg.rule_sets.loaded before --format and API-key checks and exits 1; on config load failure prints the error, exits 2, and adds the message when _is_rule_set_file_error or _rule_set_file_configured (which returns False on unreadable/unparseable TOML); run_verification raises ValueError with the message. [docs/internal/database-connectors/rule-sets.md]\n  - VC-21: check_catalog reads information_schema TABLES and COLUMNS for DATABASE(), requires BASE TABLE and exact-case names for tables, columns and predicate columns, raising RuleSetCatalogError naming each problem. [docs/internal/database-connectors/rule-sets.md]\n  - VC-22: load_rule_sets refuses a non-mysql/mysql+driver URL scheme and a binding.database differing byte for byte from the URL path's database. [docs/internal/database-connectors/rule-sets.md]\n  - VC-24: RuleSetGuardRunner regenerates MySQL SQL without comments or hints, re-parses and re-checks it, and passes it inward with require_base_tables=True; function denylist and relation check apply regardless of [[rls]] and read_only. [docs/internal/database-connectors/rule-sets.md]\n  - VC-25: probe_database uses mysql_connect_kwargs from rule_sets.py, raising PreflightError with the fixed text for missing user/host or non-numeric port, and _check_rule_set_catalog raises on mismatch or read failure and marks the catalog confirmed on pass. [docs/internal/setup/preflight.md]\n  - VC-26: Upstream brand name appears nowhere in the changed files outside LICENSES/THIRD-PARTY.txt. [docs/external/rule-sets.md]\n  - VC-27: NORMALIZED (wording-only) — _parse_statements(sql, dialect) in readonly.py returns a list of statements (possibly containing None) and raises UnsafeSqlError on parse/tokenize failure, including empty and comment-only input [src/sqllens/safety/rule_sets.py]\n  - VC-28: uses_table_shorthand(sql, dialect) and assert_no_denied_functions(sql, dialect=...) exist in readonly.py with these signatures, the latter raising UnsafeSqlError [src/sqllens/safety/rule_sets.py]\n  - VC-32: RefusalRedactingRunner replaces the text of every other guard's refusal so no table, column or function name reaches the model or client [src/sqllens/safety/rule_sets.py]\n  - VC-33: RlsError messages from rls.py/relations.py contain the substrings 'database views are not supported', 'functions defined in the database', 'could not verify'/'cannot verify' for the view, routine and relation cases redacted_refusal_text maps [src/sqllens/safety/rule_sets.py]\n  - VC-34: _PARSE_REFUSAL_MARKERS cover the text of every parse refusal from readonly._parse_statements and _mysql_parse_sql, and the denylist refusal contains 'side-effecting / DoS / RCE' [src/sqllens/safety/rule_sets.py]\n  - VC-35: WHOLE_ROW_REFUSAL and WholeRowSelectError are exported from safety/whole_row.py and WholeRowSelectError is an UnsafeSqlError subclass so RefusalRedactingRunner catches it [src/sqllens/safety/rule_sets.py]\n  - VC-36: Recreating a refusal via type(exc).__new__ plus Exception.__init__ yields a usable exception for every UnsafeSqlError/RlsError subclass, including those whose __init__ sets extra attributes (e.g. RuleSetRefusal.kind/detail) that later code reads [src/sqllens/safety/rule_sets.py]\n  - VC-37: _relation_check_executor and _declares_relation_check in safety/__init__.py unwrap RefusalRedactingRunner and RuleSetGuardRunner via an `_inner` attribute and find the executor declaring require_base_tables [src/sqllens/safety/__init__.py]\n  - VC-38: The safety package lists seven orthogonal protections composed at the factory [src/sqllens/safety/__init__.py]\n  - VC-39: RuleSetGuardRunner applies the function denylist and the relation check whatever [[rls]] and database.read_only are [src/sqllens/safety/__init__.py]\n  - VC-40: MySQLRunner reads SELECT @@SESSION.sql_mode, removes the configured flags and sets the session sql_mode before the query; a failure of either step fails the query without running it [src/sqllens/agent/integrations/mysql/sql_runner.py]\n  - VC-42: Runner order in build_agent: RowCap, ReadOnly, Rls, RuleSetGuard, WholeRow, RefusalRedacting, ResultMasking; RuleSetGuard sits outside flat RLS so RLS predicates land inside the guard's derived tables [src/sqllens/agent/factory.py]\n  - VC-43: Agent tools are registered under the 'default' group, so a rule-set User with group_memberships=['default'] keeps access to them, and user id differs per rule set/account/user for conversation ownership [src/sqllens/agent/factory.py]\n  - VC-44: A caller-supplied base_prompt is returned as given, so neither rule-set rule is added to it [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-45: pydantic ValidationError.errors() entries carry the original RuleSetFileError under ctx['error'] when raised from Config's model_validator, so _is_rule_set_file_error detects it [src/sqllens/cli.py]\n  - VC-46: config._resolved_toml_path() exists, takes no arguments and returns the TOML Path or None as Config.load would resolve it [src/sqllens/cli.py]\n  - VC-47: _format_config_error renders a RuleSetFileError (or ValidationError wrapping it) with the record and problem text rather than a generic message (criterion 2) [src/sqllens/cli.py]\n  - VC-48: The Config model_validator loading rule sets runs for env and TOML sources and RuleSetsConfig._loaded PrivateAttr survives Config construction (not reset by model copy in profiles/runtime effective settings) [src/sqllens/config.py]\n  - VC-49: RuleSetsConfig.file is read once when config loads; a change takes effect after a restart [src/sqllens/config.py]\n  - VC-50: RESERVED_METADATA_KEYS in config.py contains starter_ui_request and ui_features_available [src/sqllens/rule_sets.py]\n  - VC-51: With strict=True, a TOML date for generated_on and a Boolean for a StrictInt are rejected, and a row_rule key is detected via model_fields_set even when its value is falsy [src/sqllens/rule_sets.py]\n  - VC-52: _url_database returns the database from the URL path, byte for byte, and binding.database is compared against it; a URL path with query string or percent-encoding yields the expected name [src/sqllens/rule_sets.py]\n  - VC-53: run_blocking_sql in agent/integrations/sql_threads.py accepts (fn, *args) and runs fn off the event loop [src/sqllens/rule_sets.py]\n  - VC-54: CatalogConfirmation's asyncio.Lock, created at config load, is usable from the server's event loop (Python 3.11+ binds the loop lazily) [src/sqllens/rule_sets.py]\n  - VC-55: information_schema TABLE_TYPE is 'BASE TABLE' for base tables and TABLE_NAME/COLUMN_NAME are returned with their stored case, so case-sensitive comparison detects letter-case mismatch (criterion 6), including under lower_case_table_names [src/sqllens/rule_sets.py]\n  - VC-56: mysql_connect_kwargs raises ValueError on an invalid port (parsed.port raises ValueError) and on missing user/host, matching preflight's except ValueError [src/sqllens/preflight.py]\n  - VC-57: A catalog-check failure in probe_database raises PreflightError so serve refuses to start and validate --check-db exits 2 naming the mismatch [src/sqllens/preflight.py]\n  - VC-58: run_verification raising ValueError for rule-set configs is handled by its callers (CLI) as a structured error [src/sqllens/eval/runner.py]\n  - VC-59: BoundedConversationStore stores Conversation objects with a `user.id` attribute, and owner_id is used by the tool layer for the conversation-owner check [src/sqllens/conversation_store.py]\n  - VC-60: _check_conversation_owner calls agent.conversation_store.owner_id(conversation_id) and compares its result to user.id from agent.user_resolver.resolve_user; owner_id returns None for an unknown conversation and the stored owner id otherwise, in the same id format the rule-set user resolver produces [src/sqllens/tools/query_database.py]\n  - VC-61: A RuleSetRequestError raised by select_rule_set, _check_conversation_owner or ensure_catalog_confirmed reaches the MCP client as isError with its class text, not as the sanitized internal error or a success [src/sqllens/tools/query_database.py]\n  - VC-62: select_rule_set is passed strip_reserved_metadata(metadata); stripping reserved keys does not remove the configured rule-set, account or user metadata keys, which the config refuses to be reserved names [src/sqllens/tools/query_database.py]\n  - VC-63: In _request_metadata the variable `meta` is a dict-like (supports len) whenever execution reaches the key-limit check, including a non-dict or None _meta [src/sqllens/server.py]\n  - VC-64: The docstring asserts that without count_declared_keys the key count is unchanged, so a request with no rule-set file configured behaves as before [src/sqllens/server.py]\n  - VC-65: The WholeRowSelectGuardRunner docstring states it is composed beneath ResultMaskingRunner and, with a rule-set file, RefusalRedactingRunner, and outside RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner and the engine runner [src/sqllens/safety/whole_row.py]\n  - VC-66: The connector test's _chain mirrors the chain build_agent composes with a rule-set file (RefusalRedacting > WholeRow > RuleSetGuard > [RlsGuard] > ReadOnly > RowCap > MySQLRunner), minus ResultMaskingRunner [tests/connectors/test_rule_sets_mysql.py]\n  - VC-67: MySQLRunner accepts host, port, database, user, password, read_only, remove_sql_modes and init_command keyword arguments [tests/connectors/test_rule_sets_mysql.py]\n  - VC-68: An unknown-column failure from MySQLRunner propagates as pymysql.err.OperationalError with args[0] == 1054 through every runner in the chain, unwrapped [tests/connectors/test_rule_sets_mysql.py]\n  - VC-69: probe_database(cfg) runs the rule-set catalog check and raises PreflightError whose text contains the mismatch phrases ('column rs_customers.nosuch does not exist', \"table 'rs_absent' does not exist\", 'differs in letter case', 'is a view, not a base table') and sets loaded.catalog.confirmed on success [tests/connectors/test_rule_sets_mysql.py]\n  - VC-70: Every SQL in test_refused_before_execution is refused with an UnsafeSqlError (or subclass, including RuleSetRefusal); RuleSetRefusal and RlsError relate to UnsafeSqlError as the tests assume [tests/connectors/test_rule_sets_mysql.py]\n  - VC-71: NORMALIZED (wording-only) — test_stored_function_on_a_listed_column_is_refused expects RlsError from the function denylist with no [[rls]] rules configured, i.e. the function check runs in a runner present in _chain without rls [tests/connectors/test_rule_sets_mysql.py]\n  - VC-72: _rule_set_toml produces a version-1 file accepted by load_rule_sets: root keys format_version, binding, metadata before [[rule_sets]] tables, source inline table, predicate_columns list [tests/connectors/test_rule_sets_mysql.py]\n  - VC-73: to_toml/example_document produce a valid version-1 file; FULL_SOURCE lists every provenance field the version-1 format defines with the right types (generated_on as string, permission_list_version int, global_switches list of tables) [tests/unit/_rule_set_fixtures.py]\n  - VC-74: _toml_value serializes a datetime.date as a bare TOML date and every other value as valid TOML; a datetime.datetime (subclass of date) is also emitted via isoformat [tests/unit/_rule_set_fixtures.py]\n  - VC-75: cli validate/serve print rule-set errors to stderr with the texts 'rule_sets[0].tables[0]: duplicate column 'id'', 'remove the whole rule set', 'is not the database named in database.url', 'reserved', 'need a MySQL database', and exit 2; validate prints one 'Warning:' stderr line per unconfirmed set naming it quoted [tests/unit/test_cli_rule_sets.py]\n  - VC-76: Patching sqllens.server.run prevents serve from starting a server, and patching sqllens.preflight.probe_database and sqllens.preflight._PROBES intercepts the preflight cli serve calls [tests/unit/test_cli_rule_sets.py]\n  - VC-77: Patching sqllens.eval.run_verification intercepts the call verify-memory makes, and run_verification itself raises ValueError 'does not support rule sets yet' for a rule-set config [tests/unit/test_cli_rule_sets.py]\n  - VC-78: The serve warning test expects exactly one log record from logger 'sqllens.rule_sets' at WARNING or above, naming '3' [tests/unit/test_cli_rule_sets.py]\n  - VC-79: Factory tests read private attributes: tool_registry._tools, agent_memory._track_usage, runner _inner chain, MySQLRunner._remove_sql_modes; these names exist on the real classes [tests/unit/test_factory_wiring.py]\n  - VC-80: Replacing engine.run_sql on the MySQLRunner instance intercepts the call the chain makes (inner runners call self._inner.run_sql at call time) [tests/unit/test_factory_wiring.py]\n  - VC-81: The rule-set user resolver yields user id 'rule-set:2/account:5/user:7' and group_memberships ['default'] for selection RuleSetSelection('2','5',7) [tests/unit/test_factory_wiring.py]\n  - VC-82: With refuse_whole_row_selects on, a statementless argument is refused by the whole-row guard with text equal to REDACTED_PARSE after RefusalRedactingRunner, not starting with 'Refused by the rule set:' [tests/unit/test_factory_wiring.py]\n  - VC-83: The spy in test_http_transport forwards keyword arguments so the server's new count_declared_keys call works through it [tests/integration/test_http_transport.py]\n  - VC-84: test_metadata_bounds expects progressToken not to be forwarded (so 64 extras plus progressToken returns extras without the flag) and 65 extras to be discarded [tests/unit/test_metadata_bounds.py]\n  - VC-85: The _Agent stub's send_message(request_context, message, *, conversation_id=None) returning an async iterator matches how query_database_impl_with_widgets calls the real agent's send_message, and the stub's use of user_resolver.resolve_user and conversation_store.get_conversation/create_conversation mirrors what the real Agent does for ownership. [tests/unit/test_query_database_rule_sets.py:59]\n  - VC-86: Monkeypatching rule_sets._check_catalog_blocking(url, loaded) replaces the function the request-time catalog check actually calls, with the same positional signature. [tests/unit/test_query_database_rule_sets.py:94]\n  - VC-87: server._request_metadata accepts (ctx, *, count_declared_keys=False), reads ctx.request_context.meta, counts progressToken toward the 64-key limit only when count_declared_keys is true, and drops progressToken from the forwarded dict. [tests/unit/test_query_database_rule_sets.py:146]\n  - VC-88: build_server(cfg)._tool_manager.get_tool('query_database').fn is the undecorated tool coroutine accepting question and ctx keywords, and an exception raised inside it surfaces with its message in the raised exception. [tests/unit/test_query_database_rule_sets.py:309]\n  - VC-89: The comment asserts the tool wrapper re-raises the error as the SDK's ToolError. [tests/unit/test_query_database_rule_sets.py:310]\n  - VC-90: The _Cursor fake routes on the substring 'information_schema.TABLES' in the executed SQL, matching the literal casing check_catalog uses for its tables query, and returns (name, type) and (table, column) tuples in the shape check_catalog reads. [tests/unit/test_rule_set_file.py:327]\n  - VC-91: probe_database calls pymysql.connect (module attribute looked up at call time) for the rule-set catalog check, and the _Connection fake (cursor(), close()) covers every method the preflight probe calls on the connection. [tests/unit/test_rule_set_file.py:429]\n  - VC-92: The docstring asserts that each set's columns are checked, not only those of the first set listing a table. [tests/unit/test_rule_set_file.py:417]\n  - VC-94: The _Recorder executor's run_sql(args, context, *, require_base_tables=False) matches the real relation-checking executor signature that RuleSetGuardRunner requires and _relation_check_executor detects. [tests/unit/test_safety_rule_sets.py:310]\n  - VC-95: Monkeypatching guard._parse, _analyze, _rewrite, _generate and _reparse replaces module-level functions that RuleSetGuardRunner/apply_rule_set call by module-global lookup. [tests/unit/test_safety_rule_sets.py:376]\n  - VC-97: The redaction tests' error messages (whole-row, could not parse SQL, function denylist, non-SELECT, views with RLS, database function, could not prove RLS scoping, could not verify relation types) match the texts the real guards raise, so redacted_refusal_text classifies real errors the same way. [tests/unit/test_safety_rule_sets.py:487]\n  - VC-98: whole_row.assert_no_whole_row_select(sql, dialect=None) is looked up at call time by WholeRowSelectGuardRunner, and its unexpected-error path logs one WARNING with exc_info and raises WholeRowSelectError. [tests/unit/test_safety_rule_sets.py:575]\n  - VC-99: The docstring asserts the relation check logs its own ParseError fail-closed path. [tests/unit/test_safety_rule_sets.py:596]\n  - VC-100: DefaultSystemPromptBuilder accepts a rule_sets keyword and the prompt's Tool Errors section has _TOOL_ERRORS_BULLETS ordering into which the rule-set bullet is inserted third. [tests/unit/test_system_prompt.py:713]\n  - VC-101: With the new config key naming a valid version-1 rule-set file and a MySQL `database.url`, `sqllens validate` exits 0 and `sqllens serve` starts. [src/sqllens/rule_sets.py:290-326]\n  - VC-102: A rule-set file with an unknown field in any record, a missing required field, a wrong-typed value (a Boolean where a number is expected, a TOML date for `generated_on` and a `role_id` other than its set's `name` included), an ID with a leading zero or a non-digit, an identifier outside `[A-Za-z_][A-Za-z0-9_]*`, a duplicate set or table name, a duplicate entry in any list (`columns = [\"id\", \"name\", \"id\"]` included), a predicate column also listed in `columns`, `metadata` key names that are not three distinct identifiers, or a `metadata` key name that SQL Lens reserves (`starter_ui_request`, `ui_features_available`) makes `sqllens validate` exit 2 and `sqllens serve` refuse to start, and the error names the record and the problem (at minimum these cases). [tests/unit/test_rule_set_file.py:86]\n  - VC-103: A rule-set file whose `source` records hold only `confirmed_against_production` loads, and a file whose `source` records hold every provenance field the version-1 format defines loads unchanged. [src/sqllens/rule_sets.py:120-165]\n  - VC-104: `sqllens validate` exits 2 and `sqllens serve` refuses to start, each with a message naming the cause, for a rule-set file that holds a `row_rule` (the message saying to remove the whole rule set, never only its row rules), for a non-MySQL `database.url`, and for a `binding.database` that differs from the database named in `database.url`, even when it equals `[database] name`. [src/sqllens/rule_sets.py:63-66,174-179,290-326]\n  - VC-105: For a rule-set file with unconfirmed sets, `sqllens validate` exits 0 and prints one `Warning:` line naming each unconfirmed set, and `sqllens serve` starts and logs one warning naming each unconfirmed set. [src/sqllens/cli.py]\n  - VC-106: With a listed table or listed column missing from the connected MySQL database, a listed name whose letter case differs from the database's, or a listed table that is a view, `sqllens serve` (preflight on) refuses to start and `sqllens validate --check-db` exits 2, each naming the mismatched table or column. [src/sqllens/rule_sets.py:441-512]\n  - VC-107: With `--no-preflight` and a listed column missing from the database, every rule-set request that passes the five request classes and the conversation-owner check is refused with `isError` before the agent runs, with text saying the rule-set file could not be confirmed against the database and naming no table or column. The server log names the missing column, and once the column exists the next such request is served. A request that also fails one of the five request classes is refused as that class. [src/sqllens/tools/query_database.py]\n  - VC-108: Each of exactly these five request classes is refused with `isError: true` before the agent runs, with text naming the class and no `_meta` value: rule-set key missing or empty; rule-set name not a string or whole number or naming no set; account key missing or its decimal text not in `binding.account_ids`; user key missing or not a positive whole number; the named set unconfirmed. [docs/external/rule-sets.md]\n  - VC-109: A rule-set name sent as the number `2` or the string `\"2\"` selects set `\"2\"`, while `\"02\"`, `2.0`, `true`, `null`, `[2]` and `{}` are refused as naming no set. A user ID sent as `7`, `\"7\"` or `\"007\"` is accepted as 7, while `0`, `-1`, `\"7a\"`, `true` and `7.0` are refused as an invalid user ID. [src/sqllens/rule_sets.py]\n  - VC-110: A request whose `_meta` has more than 64 keys is refused as rule-set key missing. [src/sqllens/server.py]\n  - VC-112: Under the example set, a statement that reads `customers.email`, `orders.discount` or the predicate column `customers.rep_id` fails with MySQL's unknown-column error (1054) and returns no value of that column, exactly as `customers.nosuch` does. At minimum these placements of `customers.email` fail this way: the select list, `WHERE`, `JOIN … ON`, `GROUP BY`, `HAVING MAX(customers.email) > ''`, an `ORDER BY` expression, a window `ORDER BY`, a function argument, `customers JOIN orders USING (email)`, a correlated reference from an `EXISTS` subquery, and `SELECT (SELECT x FROM (SELECT email AS x) d) FROM customers`. A statement that reads `salaries` is refused before execution. [src/sqllens/safety/rule_sets.py:192-215]\n  - VC-113: Under the example set, `SELECT o.total AS discount, COUNT(*) FROM orders o GROUP BY discount` groups by `o.total` and returns no value of `orders.discount`. With `database.refuse_whole_row_selects = false`, `SELECT * FROM customers` and `SELECT c.* FROM customers c` return only `id` and `name`. [src/sqllens/safety/rule_sets.py:192-225]\n  - VC-114: With no `[[rls]]` rules, the example set selected and the MySQL server's global `sql_mode` set to `ANSI`, `SELECT \"email\" FROM customers` returns the string `email` in every row, never a value of `customers.email`, and `SELECT name || '-' AS v FROM customers WHERE id = 1` returns the value it returns on a server in MySQL's default `sql_mode`. With `HIGH_NOT_PRECEDENCE` set, `SELECT COUNT(*) FROM customers WHERE name IS NOT NULL` returns the number of customers that have a name. With `NO_BACKSLASH_ESCAPES` set, `SELECT 'a\\\\b'` returns `a\\b`. When the session `sql_mode` step fails, the query is not run. [src/sqllens/agent/integrations/mysql/sql_runner.py:126-139]\n  - VC-115: Under a set that lists `customers` (`id`, `name`, `account_id`) and `orders` (`id`, `customer_id`, `total`), on tables that both have `account_id`, `SELECT name FROM customers c WHERE c.id IN (SELECT customer_id FROM orders WHERE account_id = 2)` runs with `account_id` resolved to `customers.account_id`. Part 1 adds no check for this beyond the prompt's guidance to qualify every column. [src/sqllens/safety/rule_sets.py:192-222]\n  - VC-116: Under the example set, each of these is refused before execution, at minimum: `SELECT name FROM otherdb.customers`, `SHOW TABLES`, `DESCRIBE customers`, two statements in one call, a write statement with `database.read_only = false`, a read of `INFORMATION_SCHEMA.STATISTICS`, a read of `mysql.user`, a read from a view, a stored function call, `JSON_TABLE`, `FROM DUAL`, `SELECT name /*!50000 , email */ FROM customers` with `database.read_only = false`, `SELECT name INTO @v FROM customers`, `SELECT c.name FROM customers PARTITION (p1) c`, `SELECT c.name FROM customers c FORCE INDEX (PRIMARY)`, and SQL that sqlglot cannot parse. [src/sqllens/safety/rule_sets.py]\n  - VC-117: Under the example set, `SELECT c.name FROM (customers c JOIN orders o ON o.customer_id = c.id AND o.discount > 5)` fails with MySQL's unknown-column error, and the same statement without `AND o.discount > 5` returns rows. `SELECT /*+ BKA('*\\/ email FROM customers -- ') */ name FROM customers` returns no value of `customers.email`. [src/sqllens/safety/rule_sets.py]\n  - VC-119: The rule-set guard refuses every statement to which no row of the Desired Behavior's guard table gives an outcome. [src/sqllens/safety/rule_sets.py:104-374]\n  - VC-120: Under the example set, a statement the rule-set guard cannot carry through is refused before execution, with no SQL reaching MySQL, at minimum in these cases: an exception raised in each of the guard's parse, analyze, rewrite and generate steps, including an exception type the guard does not name, and, with `database.refuse_whole_row_selects` set to false, a `run_sql` argument whose parse yields no statement (empty text and comment-only text). Each of those refusals' client-facing text begins with `Refused by the rule set:` and names no table, column or function. [src/sqllens/safety/rule_sets.py]\n  - VC-121: Under the example set, with `database.refuse_whole_row_selects` left at its default of true, a `run_sql` argument whose parse yields no statement — empty text and comment-only text — is refused before execution with no SQL reaching MySQL, and the client-facing text names no table, column or function. The change leaves that case to the whole-row guard, so its text does not begin with `Refused by the rule set:`. [src/sqllens/safety/rule_sets.py:406-420]\n  - VC-122: Under the example set, a read of `INFORMATION_SCHEMA.TABLES`, `INFORMATION_SCHEMA.COLUMNS` or `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` is refused before execution. [src/sqllens/safety/rule_sets.py:131-150]\n  - VC-123: With no `[[rls]]` rules and a rule-set file configured, a query that passes a listed column to a stored function the database defines is refused. [src/sqllens/safety/relations.py:98-212]\n  - VC-125: With a flat `[[rls]]` rule on `orders.account_id` (a column the example set does not list) and the example set selected, `SELECT o.total FROM orders o` runs and returns only rows that match the flat rule. [src/sqllens/safety/rule_sets.py:192-225,319-374]\n  - VC-126: While a rule-set file is configured, the text returned for a refusal by the rule-set guard, the whole-row guard, flat RLS, the relation check, the function denylist or the read-only guard names no table, column or function (`SELECT email FROM customers WHERE`, which fails to parse, included, with `database.refuse_whole_row_selects` on and off), and every rule-set guard refusal begins with `Refused by the rule set:`. [src/sqllens/safety/rule_sets.py:406-471]\n  - VC-127: While a rule-set file is configured, every refusal by the rule-set guard, the whole-row guard, flat `[[rls]]`, the relation check, the function denylist or the read-only guard writes one WARNING-level server log record carrying the full reason, including the table, column or function name the client-facing text omits, and no value returned to the client carries that detail. [src/sqllens/safety/rule_sets.py]\n  - VC-128: While a rule-set file is configured, the system prompt's MySQL guidance tells the model to qualify every column with its table name or alias, and its Tool Errors section tells the model to correct and rerun a query whose `run_sql` error says `Refused by the rule set:` (the model sees it after the `Error executing query: ` prefix), within the two-attempt limit. The prompt differs from today's prompt for the same configuration with `memory.save_queries` and `memory.save_text_memories` off by those two changes only, so no rule set's `scope` or provenance reaches the model. [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-129: Without a rule-set file configured, the system prompt is byte-identical to today's for the same configuration. [src/sqllens/agent/core/system_prompt/default.py:175-210]\n  - VC-130: While a rule-set file is configured, a conversation continues for requests with the identity that started it, a request presenting its `conversation_id` under another rule set, account ID or user ID is refused with `isError` before the agent runs, and the owner's next turn still sees the full history. This holds also for a request under another identity that arrives while the owner's first turn on that `conversation_id` is still running. [src/sqllens/tools/query_database.py]\n  - VC-131: While a rule-set file is configured, the agent has neither `save_question_tool_args` nor `save_text_memory`, even with `memory.save_queries` and `memory.save_text_memories` on. [src/sqllens/agent/factory.py]\n  - VC-132: While a rule-set file is configured, `list_data_sources` answers a call that carries no `_meta`. [src/sqllens/server.py:512-515]\n  - VC-133: While a rule-set file is configured, `sqllens verify-memory` exits non-zero before running any case, with a message that it does not support rule sets yet. [src/sqllens/cli.py]\n  - VC-134: Under a rule set, a request that names a profile whose `show_details` is on is served under the same rule-set guard: a query reading `customers.email` still fails as an unknown column. [src/sqllens/tools/query_database.py:637-649]\n  - VC-135: With no rule-set file configured, a `query_database` request that runs today runs with the same result, no request is refused for missing rule-set `_meta`, and the agent's memory-write tools follow `memory.save_queries` and `memory.save_text_memories` as today. [src/sqllens/agent/factory.py]\n  - VC-136: The change leaves these unchanged, each as one unit: the rule-set file is read once at startup, so an edit made while the server runs changes nothing until restart; memory retrieval, which stays shared by every rule set; the memory-admin, `import_memory` and profile-admin tools, which keep acting on the shared store and profiles for every rule set; `/readyz`, which reports ready while the existence check fails; and the MCPB bundle manifest, which gains no entry for the rule-set file. [docs/external/rule-sets.md]\n  - VC-137: This issue adds nothing for these, each as one unit: MySQL syntax that sqlglot writes back in a form MySQL rejects (for example a bare `UTC_DATE`, which comes back as a quoted identifier, or `UTC_DATE()`, which comes back as `CURRENT_DATE AT TIME ZONE 'UTC'`) fails with MySQL's error; `CAST(x AS REAL)`, which sqlglot writes back as single-precision `CAST(x AS FLOAT)`, runs with less precision; a query without `ORDER BY` can return rows in the order of an index on a column the set does not list, which can reveal the order of that column's values; and MySQL's `derived_merge` optimizer switch, which SQL Lens neither checks nor sets, so a server with it off materializes each derived table the guard builds. [sqllens]\n\n  </details>\n- Reviewed against issue #374 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] With the new config key naming a valid version-1 rule-set file and a MySQL `database.url`, `sqllens validate` exits 0 and `sqllens serve` starts.\n- [ ] A rule-set file with an unknown field in any record, a missing required field, a wrong-typed value (a Boolean where a number is expected, a TOML date for `generated_on` and a `role_id` other than its set's `name` included), an ID with a leading zero or a non-digit, an identifier outside `[A-Za-z_][A-Za-z0-9_]*`, a duplicate set or table name, a duplicate entry in any list (`columns = [\"id\", \"name\", \"id\"]` included), a predicate column also listed in `columns`, `metadata` key names that are not three distinct identifiers, or a `metadata` key name that SQL Lens reserves (`starter_ui_request`, `ui_features_available`) makes `sqllens validate` exit 2 and `sqllens serve` refuse to start, and the error names the record and the problem (at minimum these cases).\n- [ ] A rule-set file whose `source` records hold only `confirmed_against_production` loads, and a file whose `source` records hold every provenance field the version-1 format defines loads unchanged.\n- [ ] `sqllens validate` exits 2 and `sqllens serve` refuses to start, each with a message naming the cause, for a rule-set file that holds a `row_rule` (the message saying to remove the whole rule set, never only its row rules), for a non-MySQL `database.url`, and for a `binding.database` that differs from the database named in `database.url`, even when it equals `[database] name`.\n- [ ] For a rule-set file with unconfirmed sets, `sqllens validate` exits 0 and prints one `Warning:` line naming each unconfirmed set, and `sqllens serve` starts and logs one warning naming each unconfirmed set.\n- [ ] With a listed table or listed column missing from the connected MySQL database, a listed name whose letter case differs from the database's, or a listed table that is a view, `sqllens serve` (preflight on) refuses to start and `sqllens validate --check-db` exits 2, each naming the mismatched table or column.\n- [ ] With `--no-preflight` and a listed column missing from the database, every rule-set request that passes the five request classes and the conversation-owner check is refused with `isError` before the agent runs, with text saying the rule-set file could not be confirmed against the database and naming no table or column. The server log names the missing column, and once the column exists the next such request is served. A request that also fails one of the five request classes is refused as that class.\n- [ ] Each of exactly these five request classes is refused with `isError: true` before the agent runs, with text naming the class and no `_meta` value: rule-set key missing or empty; rule-set name not a string or whole number or naming no set; account key missing or its decimal text not in `binding.account_ids`; user key missing or not a positive whole number; the named set unconfirmed.\n- [ ] A rule-set name sent as the number `2` or the string `\"2\"` selects set `\"2\"`, while `\"02\"`, `2.0`, `true`, `null`, `[2]` and `{}` are refused as naming no set. A user ID sent as `7`, `\"7\"` or `\"007\"` is accepted as 7, while `0`, `-1`, `\"7a\"`, `true` and `7.0` are refused as an invalid user ID.\n- [ ] A request whose `_meta` has more than 64 keys is refused as rule-set key missing.\n- [ ] Under the example set, each of these runs and returns rows: `SELECT c.name, o.total FROM customers c JOIN orders o ON o.customer_id = c.id`; `SELECT COUNT(*) AS n FROM orders ORDER BY n`; `SELECT c.name AS nm FROM customers c JOIN orders o ON o.customer_id = c.id ORDER BY nm`; `SELECT name FROM customers UNION SELECT name FROM customers ORDER BY name`; `WITH t AS (SELECT c.name AS nm FROM customers c) SELECT t.nm FROM t`; `SELECT d.n FROM (SELECT COUNT(*) AS n FROM orders o) d`; `SELECT name, total FROM customers c JOIN orders o ON o.customer_id = c.id`; `SELECT name FROM customers WHERE id IN (SELECT customer_id FROM orders)`; `SELECT name FROM customers c WHERE NOT EXISTS (SELECT 1 FROM orders WHERE customer_id = c.id)`; `SELECT o.customer_id AS cust, SUM(o.total) AS revenue FROM orders o GROUP BY cust HAVING revenue > 100`; and `SELECT NAME FROM customers`. `SELECT name FROM CUSTOMERS` is refused.\n- [ ] Under the example set, a statement that reads `customers.email`, `orders.discount` or the predicate column `customers.rep_id` fails with MySQL's unknown-column error (1054) and returns no value of that column, exactly as `customers.nosuch` does. At minimum these placements of `customers.email` fail this way: the select list, `WHERE`, `JOIN … ON`, `GROUP BY`, `HAVING MAX(customers.email) > ''`, an `ORDER BY` expression, a window `ORDER BY`, a function argument, `customers JOIN orders USING (email)`, a correlated reference from an `EXISTS` subquery, and `SELECT (SELECT x FROM (SELECT email AS x) d) FROM customers`. A statement that reads `salaries` is refused before execution.\n- [ ] Under the example set, `SELECT o.total AS discount, COUNT(*) FROM orders o GROUP BY discount` groups by `o.total` and returns no value of `orders.discount`. With `database.refuse_whole_row_selects = false`, `SELECT * FROM customers` and `SELECT c.* FROM customers c` return only `id` and `name`.\n- [ ] With no `[[rls]]` rules, the example set selected and the MySQL server's global `sql_mode` set to `ANSI`, `SELECT \"email\" FROM customers` returns the string `email` in every row, never a value of `customers.email`, and `SELECT name || '-' AS v FROM customers WHERE id = 1` returns the value it returns on a server in MySQL's default `sql_mode`. With `HIGH_NOT_PRECEDENCE` set, `SELECT COUNT(*) FROM customers WHERE name IS NOT NULL` returns the number of customers that have a name. With `NO_BACKSLASH_ESCAPES` set, `SELECT 'a\\\\b'` returns `a\\b`. When the session `sql_mode` step fails, the query is not run.\n- [ ] Under a set that lists `customers` (`id`, `name`, `account_id`) and `orders` (`id`, `customer_id`, `total`), on tables that both have `account_id`, `SELECT name FROM customers c WHERE c.id IN (SELECT customer_id FROM orders WHERE account_id = 2)` runs with `account_id` resolved to `customers.account_id`. Part 1 adds no check for this beyond the prompt's guidance to qualify every column.\n- [ ] Under the example set, each of these is refused before execution, at minimum: `SELECT name FROM otherdb.customers`, `SHOW TABLES`, `DESCRIBE customers`, two statements in one call, a write statement with `database.read_only = false`, a read of `INFORMATION_SCHEMA.STATISTICS`, a read of `mysql.user`, a read from a view, a stored function call, `JSON_TABLE`, `FROM DUAL`, `SELECT name /*!50000 , email */ FROM customers` with `database.read_only = false`, `SELECT name INTO @v FROM customers`, `SELECT c.name FROM customers PARTITION (p1) c`, `SELECT c.name FROM customers c FORCE INDEX (PRIMARY)`, and SQL that sqlglot cannot parse.\n- [ ] Under the example set, `SELECT c.name FROM (customers c JOIN orders o ON o.customer_id = c.id AND o.discount > 5)` fails with MySQL's unknown-column error, and the same statement without `AND o.discount > 5` returns rows. `SELECT /*+ BKA('*\\/ email FROM customers -- ') */ name FROM customers` returns no value of `customers.email`.\n- [ ] Under the example set, `SELECT c.name, d.total FROM customers c JOIN LATERAL (SELECT o.total FROM orders o WHERE o.customer_id = c.id ORDER BY o.total DESC LIMIT 1) d ON TRUE` runs and returns rows, while the same statement whose lateral body reads `o.discount` fails with MySQL's unknown-column error (1054) and returns no value of `orders.discount`.\n- [ ] The rule-set guard refuses every statement to which no row of the Desired Behavior's guard table gives an outcome.\n- [ ] Under the example set, a statement the rule-set guard cannot carry through is refused before execution, with no SQL reaching MySQL, at minimum in these cases: an exception raised in each of the guard's parse, analyze, rewrite and generate steps, including an exception type the guard does not name, and, with `database.refuse_whole_row_selects` set to false, a `run_sql` argument whose parse yields no statement (empty text and comment-only text). Each of those refusals' client-facing text begins with `Refused by the rule set:` and names no table, column or function.\n- [ ] Under the example set, with `database.refuse_whole_row_selects` left at its default of true, a `run_sql` argument whose parse yields no statement — empty text and comment-only text — is refused before execution with no SQL reaching MySQL, and the client-facing text names no table, column or function. The change leaves that case to the whole-row guard, so its text does not begin with `Refused by the rule set:`.\n- [ ] Under the example set, a read of `INFORMATION_SCHEMA.TABLES`, `INFORMATION_SCHEMA.COLUMNS` or `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` is refused before execution.\n- [ ] With no `[[rls]]` rules and a rule-set file configured, a query that passes a listed column to a stored function the database defines is refused.\n- [ ] With a listed column dropped from the database after the existence check passed, a query that reads it fails with MySQL's unknown-column error, even inside a correlated subquery whose outer table has a column of the same name. A statement that reaches the rule-set guard for a request with no selected rule set is refused.\n- [ ] With a flat `[[rls]]` rule on `orders.account_id` (a column the example set does not list) and the example set selected, `SELECT o.total FROM orders o` runs and returns only rows that match the flat rule.\n- [ ] While a rule-set file is configured, the text returned for a refusal by the rule-set guard, the whole-row guard, flat RLS, the relation check, the function denylist or the read-only guard names no table, column or function (`SELECT email FROM customers WHERE`, which fails to parse, included, with `database.refuse_whole_row_selects` on and off), and every rule-set guard refusal begins with `Refused by the rule set:`.\n- [ ] While a rule-set file is configured, every refusal by the rule-set guard, the whole-row guard, flat `[[rls]]`, the relation check, the function denylist or the read-only guard writes one WARNING-level server log record carrying the full reason, including the table, column or function name the client-facing text omits, and no value returned to the client carries that detail.\n- [ ] While a rule-set file is configured, the system prompt's MySQL guidance tells the model to qualify every column with its table name or alias, and its Tool Errors section tells the model to correct and rerun a query whose `run_sql` error says `Refused by the rule set:` (the model sees it after the `Error executing query: ` prefix), within the two-attempt limit. The prompt differs from today's prompt for the same configuration with `memory.save_queries` and `memory.save_text_memories` off by those two changes only, so no rule set's `scope` or provenance reaches the model.\n- [ ] Without a rule-set file configured, the system prompt is byte-identical to today's for the same configuration.\n- [ ] While a rule-set file is configured, a conversation continues for requests with the identity that started it, a request presenting its `conversation_id` under another rule set, account ID or user ID is refused with `isError` before the agent runs, and the owner's next turn still sees the full history. This holds also for a request under another identity that arrives while the owner's first turn on that `conversation_id` is still running.\n- [ ] While a rule-set file is configured, the agent has neither `save_question_tool_args` nor `save_text_memory`, even with `memory.save_queries` and `memory.save_text_memories` on.\n- [ ] While a rule-set file is configured, `list_data_sources` answers a call that carries no `_meta`.\n- [ ] While a rule-set file is configured, `sqllens verify-memory` exits non-zero before running any case, with a message that it does not support rule sets yet.\n- [ ] Under a rule set, a request that names a profile whose `show_details` is on is served under the same rule-set guard: a query reading `customers.email` still fails as an unknown column.\n- [ ] With no rule-set file configured, a `query_database` request that runs today runs with the same result, no request is refused for missing rule-set `_meta`, and the agent's memory-write tools follow `memory.save_queries` and `memory.save_text_memories` as today.\n- [ ] The change leaves these unchanged, each as one unit: the rule-set file is read once at startup, so an edit made while the server runs changes nothing until restart; memory retrieval, which stays shared by every rule set; the memory-admin, `import_memory` and profile-admin tools, which keep acting on the shared store and profiles for every rule set; `/readyz`, which reports ready while the existence check fails; and the MCPB bundle manifest, which gains no entry for the rule-set file.\n- [ ] This issue adds nothing for these, each as one unit: MySQL syntax that sqlglot writes back in a form MySQL rejects (for example a bare `UTC_DATE`, which comes back as a quoted identifier, or `UTC_DATE()`, which comes back as `CURRENT_DATE AT TIME ZONE 'UTC'`) fails with MySQL's error; `CAST(x AS REAL)`, which sqlglot writes back as single-precision `CAST(x AS FLOAT)`, runs with less precision; a query without `ORDER BY` can return rows in the order of an index on a column the set does not list, which can reveal the order of that column's values; and MySQL's `derived_merge` optimizer switch, which SQL Lens neither checks nor sets, so a server with it off materializes each derived table the guard builds.",
+ "diff_produced_at_head": "d843f09f5d303b36c445dc20c9a99885241aa92d",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "api_contract:389.added.md:changelog behavior summary",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "data_format_assumption:configuration.md:rule_sets config section",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "category": "api_contract",
+   "claim": "The configuration.md note says [result_masking] and [rule_sets] reject unknown keys, like [[rls]].",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "An unrecognized key inside a `[[rls]]` block is rejected at config load rather than silently ignored, as it is in `[result_masking]` and `[rule_sets]`.",
+   "source_file": "docs/external/configuration.md",
+   "verify_against": "src/sqllens/config.py",
+   "verify_hint": "Check model_config of ResultMaskingConfig, RuleSetsConfig and RlsRule in config.py",
+   "claim_signature": "api_contract:configuration.md:extra forbid sections",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-3"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "Code: config.py:311 ResultMaskingConfig model_config=ConfigDict(extra=\"forbid\"); config.py:768 RuleSetsConfig extra=\"forbid\"; config.py:688 RlsRule extra=\"forbid\". So all three reject unknown keys. But the note at docs/external/configuration.md:234 reads \"rejected at config load rather than silently ignored, as it is in `[result_masking]` and `[rule_sets]`\". The natural parse of \"silently ignored, as it is in X\" says unknown keys ARE silently ignored in [result_masking] and [rule_sets], which contradicts the code. The note does not clearly say they reject like [[rls]]; it is misleading/wrong under its natural reading and should be reworded (e.g. 'as it is in ...' -> 'as in ... where unknown keys are also rejected').",
+   "file_checked": "docs/external/configuration.md:234",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "data_format_assumption:rule-sets.md:example file loads",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "data_format_assumption:rule-sets.md:source provenance fields",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "absolute_claim:rule-sets.md:provenance never to model",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:rule-sets.md:request refusal messages",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "absolute_claim:rule-sets.md:refusals name nothing",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "api_contract:rule-sets.md:verify-memory message",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "api_contract:rule-sets.md:unconfirmed set warnings",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "absolute_claim:rule-sets.md:refusal names no identifier",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "data_format_assumption:rule-sets.md:account id forms",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "api_contract:rule-sets.md:catalog retry next request",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "api_contract:rule-sets.md:refusal reason list",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "dependency_interaction:overview.md:count declared keys",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:rule-sets.md:runner call order",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:rule-sets.md:agent wiring list",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:rule-sets.md:base prompt untouched",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "api_contract:rule-sets.md:selection and owner check",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "api_contract:rule-sets.md:verify-memory exit paths",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "dependency_interaction:rule-sets.md:check_catalog contract",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "api_contract:rule-sets.md:url and binding check",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "category": "api_contract",
+   "claim": "RefusalRedactingRunner replaces other guards' UnsafeSqlError/RlsError text with its kind keeping type; a refusal whose __cause__ is neither is redacted to REDACTED_GUARD_ERROR (KIND_UNCHECKED) via _logged_by_guard and not logged twice; database errors pass unchanged.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "docs/internal/database-connectors/rule-sets.md",
+   "verify_against": "src/sqllens/safety/rule_sets.py",
+   "verify_hint": "Check RefusalRedactingRunner and _logged_by_guard",
+   "claim_signature": "api_contract:rule-sets.md:refusal redaction",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-23"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "FAIL stored INCONCLUSIVE (requirement quote is missing): Most of the claim holds. RefusalRedactingRunner.run_sql (rule_sets.py:457-471) catches UnsafeSqlError/RlsError, rebuilds the exception with type(exc).__new__ so the type is kept, and sets the text to redacted_refusal_text. It calls logger.warning only when not _logged_by_guard(exc). _logged_by_guard (432-441) is true when __cause__ is non-None and is not an UnsafeSqlError or RlsError. Non-guard exceptions pass through unchanged. The claim breaks as written ('a refusal whose __cause__ is neither is redacted to REDACTED_GUARD_ERROR'): redacted_refusal_text (406-429) returns REDACTED_GUARD_ERROR only after earlier branches. (1) An RlsError never reaches it: it returns REDACTED_VIEW, REDACTED_ROUTINE, REDACTED_RELATION or REDACTED_RLS at 411-418. rls.py:244-246 raises RlsError from a generic Exception (cause is neither), and the result is REDACTED_RLS. (2) A message containing a parse marker returns REDACTED_PARSE at 419-420, before the _logged_by_guard check at 421. readonly.py:551-552 raises UnsafeSqlError('could not parse SQL') from a sqlglot ParseError, so the cause is neither, yet the result is REDACTED_PARSE. Side effect: _logged_by_guard is true for that case, so the redactor skips its own warning, although that path shows no guard logging. The doc (rule-sets.md:64) describes the rule as covering a refusal from an unexpected internal exception, but the claim states it unconditionally.",
+   "file_checked": "src/sqllens/safety/rule_sets.py:406-471",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "api_contract:rule-sets.md:guard regenerate recheck",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "dependency_interaction:preflight.md:mysql probe catalog",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "api_contract:repo:upstream brand cleanliness",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "dependency_interaction:rule_sets.py:parse-statements-contract",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "dependency_interaction:rule_sets.py:readonly-helper-signatures",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "category": "dependency_interaction",
+   "claim": "In the locked sqlglot version, a MySQL Select stores its FROM clause under the arg key `from_`, table options under `partition`/`hints`/`indexed`, SELECT INTO under `into`, and JSON_TABLE parses to exp.JSONTable",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/safety/rule_sets.py",
+   "verify_against": "sqlglot expressions.py at the version locked in requirements.txt",
+   "verify_hint": "Check `Select.arg_types`, `Table.arg_types` and `JSONTable` in sqlglot/expressions.py",
+   "claim_signature": "dependency_interaction:rule_sets.py:sqlglot-arg-keys",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-3"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "requirements.txt:103 locks sqlglot==30.31.0. The item has no dependency_sources, and a Glob for **/sqlglot/expressions* under the review directory (which includes both views) found nothing. So sqlglot's expressions.py (Select.arg_types, Table.arg_types, JSONTable) was not available to read, and the claim about arg keys (from_, partition/hints/indexed, into, JSONTable) is unverified. Missing evidence: sqlglot 30.31.0 source.",
+   "file_checked": "requirements.txt:103",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-30",
+   "category": "dependency_interaction",
+   "claim": "sqlglot traverse_scope's Scope exposes `sources`, `tables` and `cte_sources`, with CTE references appearing in `tables` but not as exp.Table in `sources`",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/safety/rule_sets.py",
+   "verify_against": "sqlglot/optimizer/scope.py",
+   "verify_hint": "Check `Scope.sources`, `Scope.tables`, `Scope.cte_sources` in sqlglot/optimizer/scope.py",
+   "claim_signature": "dependency_interaction:rule_sets.py:scope-attributes",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-4"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Library claim about sqlglot Scope. The item has no dependency_sources and view-head holds no sqlglot/optimizer/scope.py (Glob found none), so the authorized evidence does not include the library source. rule_sets.py:157,167-170,261-270 uses scope.cte_sources, scope.sources and scope.tables, but that only shows usage, not library behavior. Searched: view-head glob for sqlglot/optimizer/scope.py. Missing: an installed sqlglot source directory supplied via dependency_sources. A grep outside the supplied directories turned up unrelated sqlglot copies; I did not rely on them.",
+   "file_checked": "src/sqllens/safety/rule_sets.py:157-170",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-31",
+   "category": "dependency_interaction",
+   "claim": "Expression.sql accepts comments=False, unsupported_level and normalize_functions=False, and removing exp.Hint nodes drops optimizer hints from generated MySQL output",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/safety/rule_sets.py",
+   "verify_against": "sqlglot generator.py",
+   "verify_hint": "Check `Generator.__init__` options and hint generation in sqlglot/generator.py",
+   "claim_signature": "dependency_interaction:rule_sets.py:generate-options",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-5"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The code at src/sqllens/safety/rule_sets.py:223-224 pops exp.Hint nodes, and :280-286 calls tree.sql(dialect=_DIALECT, comments=False, unsupported_level=ErrorLevel.RAISE, normalize_functions=False). Re-walk at :276 refuses if any Hint remains. The claim depends on installed sqlglot behaviour (Generator options and MySQL hint generation). The item has no dependency_sources, and the head view contains no sqlglot source (Glob **/sqlglot/** found nothing). Per the rules, a library claim without dependency_sources is verified from the views alone, so the library's source is unread. I did not read generator.py, and I did not run any command to check the behaviour.",
+   "file_checked": "src/sqllens/safety/rule_sets.py:223-286",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "absolute_claim:rule_sets.py:redaction-every-refusal",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "api_contract:rule_sets.py:rls-message-markers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "api_contract:rule_sets.py:parse-refusal-markers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "api_contract:rule_sets.py:whole-row-error-type",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "api_contract:rule_sets.py:redacted-exception-reconstruction",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-37",
+   "claim_signature": "api_contract:__init__.py:relation-executor-unwrap",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-38",
+   "claim_signature": "absolute_claim:__init__.py:protection-count",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-39",
+   "claim_signature": "absolute_claim:__init__.py:denylist-relation-always",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-40",
+   "claim_signature": "dependency_interaction:sql_runner.py:session-sql-mode",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-41",
+   "category": "data_format_assumption",
+   "claim": "Removing only HIGH_NOT_PRECEDENCE and NO_BACKSLASH_ESCAPES makes MySQL read sqlglot's regenerated SQL as sqlglot wrote it, including under ANSI/ANSI_QUOTES/PIPES_AS_CONCAT (criterion 14)",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/agent/factory.py",
+   "verify_against": "RULE_SET_REMOVED_SQL_MODES in factory.py and the identifier/string quoting sqlglot's MySQL generator emits",
+   "verify_hint": "Trace `SELECT \"email\" FROM customers` and `name || '-'` through apply_rule_set output under sql_mode ANSI",
+   "criterion": 14,
+   "claim_signature": "issue_acceptance:factory.py:removed-sql-modes",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-15"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "factory.py:67 defines RULE_SET_REMOVED_SQL_MODES = {HIGH_NOT_PRECEDENCE, NO_BACKSLASH_ESCAPES}. factory.py:116 passes it to the MySQL runner only when rule sets are loaded. mysql/sql_runner.py:126-139 reads @@SESSION.sql_mode, drops those flags and sets the rest, so ANSI, ANSI_QUOTES and PIPES_AS_CONCAT stay on. Whether MySQL reads sqlglot's output the way sqlglot wrote it under those modes depends on what sqlglot's MySQL generator emits: backtick identifiers, single-quoted strings, and what it does with `||`. The item gave no dependency_sources, and the views hold no sqlglot source. I did not run a live MySQL integration test (tests/connectors/test_rule_sets_mysql.py:383 test_ansi_mode_reads_double_quotes_as_strings) or the unit test tests/unit/test_safety_rule_sets.py:167 that pins the sqlglot output. The claim therefore cannot be settled from the views alone. Missing evidence: sqlglot's MySQL generator source, or a run of those tests.",
+   "file_checked": "src/sqllens/agent/factory.py:67",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-42",
+   "claim_signature": "api_contract:factory.py:runner-order",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-43",
+   "claim_signature": "api_contract:factory.py:rule-set-user-group",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-44",
+   "claim_signature": "absolute_claim:default.py:base-prompt-unchanged",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-45",
+   "claim_signature": "data_format_assumption:cli.py:validation-ctx-error",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-46",
+   "claim_signature": "dependency_interaction:cli.py:resolved-toml-path",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-47",
+   "claim_signature": "issue_acceptance:cli.py:rule-set-error-message",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-48",
+   "claim_signature": "api_contract:config.py:loaded-private-attr",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-49",
+   "claim_signature": "absolute_claim:config.py:read-once",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-50",
+   "claim_signature": "issue_acceptance:rule_sets.py:reserved-metadata-keys",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-51",
+   "claim_signature": "issue_acceptance:rule_sets.py:strict-types",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-52",
+   "claim_signature": "issue_acceptance:rule_sets.py:binding-database-match",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-53",
+   "claim_signature": "dependency_interaction:rule_sets.py:run-blocking-sql",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-54",
+   "claim_signature": "dependency_interaction:rule_sets.py:catalog-lock-loop",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-55",
+   "claim_signature": "issue_acceptance:rule_sets.py:catalog-case-view",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-56",
+   "claim_signature": "api_contract:preflight.py:connect-kwargs-errors",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-57",
+   "claim_signature": "issue_acceptance:preflight.py:catalog-preflight-exit",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-58",
+   "claim_signature": "api_contract:runner.py:verification-valueerror",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-59",
+   "claim_signature": "issue_acceptance:conversation_store.py:owner-id",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-60",
+   "claim_signature": "dependency_interaction:query_database.py:conversation owner lookup",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-61",
+   "claim_signature": "api_contract:query_database.py:rule-set refusal surfaces iserror",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-62",
+   "claim_signature": "dependency_interaction:query_database.py:strip reserved before select",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-63",
+   "claim_signature": "data_format_assumption:server.py:meta len type",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-64",
+   "claim_signature": "absolute_claim:server.py:count unchanged without rule sets",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-65",
+   "claim_signature": "api_contract:whole_row.py:runner chain position",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-66",
+   "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:chain mirrors factory",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-67",
+   "claim_signature": "dependency_interaction:test_rule_sets_mysql.py:mysqlrunner kwargs",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-68",
+   "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:1054 propagates",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-69",
+   "claim_signature": "dependency_interaction:test_rule_sets_mysql.py:preflight catalog messages",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-70",
+   "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:refusal exception types",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-71",
+   "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:stored function rlserror",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-72",
+   "claim_signature": "data_format_assumption:test_rule_sets_mysql.py:toml shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-73",
+   "claim_signature": "data_format_assumption:_rule_set_fixtures.py:full source fields",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-74",
+   "claim_signature": "data_format_assumption:_rule_set_fixtures.py:toml value serializer",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-75",
+   "claim_signature": "dependency_interaction:test_cli_rule_sets.py:cli error texts",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-76",
+   "claim_signature": "test_mock_alignment:test_cli_rule_sets.py:serve patch targets",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-77",
+   "claim_signature": "test_mock_alignment:test_cli_rule_sets.py:verify memory patch",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-78",
+   "claim_signature": "test_mock_alignment:test_cli_rule_sets.py:serve warning logger",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-79",
+   "claim_signature": "test_mock_alignment:test_factory_wiring.py:private attribute names",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-80",
+   "claim_signature": "test_mock_alignment:test_factory_wiring.py:engine run_sql stub",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-81",
+   "claim_signature": "api_contract:test_factory_wiring.py:user id format",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-82",
+   "claim_signature": "test_mock_alignment:test_factory_wiring.py:redacted parse text",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-83",
+   "claim_signature": "test_mock_alignment:test_http_transport.py:spy kwargs",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-84",
+   "claim_signature": "test_mock_alignment:test_metadata_bounds.py:progress token excluded",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-85",
+   "claim_signature": "test_mock_alignment:test_query_database_rule_sets.py:agent-stub-send-message:59",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-86",
+   "claim_signature": "test_mock_alignment:test_query_database_rule_sets.py:catalog-blocking-patch:94",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-87",
+   "claim_signature": "api_contract:test_query_database_rule_sets.py:request-metadata-count-flag:146",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-88",
+   "claim_signature": "dependency_interaction:test_query_database_rule_sets.py:tool-manager-fn:309",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-89",
+   "claim_signature": "absolute_claim:test_query_database_rule_sets.py:toolerror-reraise:310",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-90",
+   "claim_signature": "test_mock_alignment:test_rule_set_file.py:catalog-cursor-fake:327",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-91",
+   "claim_signature": "test_mock_alignment:test_rule_set_file.py:preflight-pymysql-connect:429",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-92",
+   "claim_signature": "absolute_claim:test_rule_set_file.py:every-set-columns-checked:417",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-93",
+   "category": "test_mock_alignment",
+   "claim": "_FakeConn/_FakeCursor (ping(reconnect), cursor(*args), execute(sql, params), fetchone, fetchmany, close) and the pymysql namespace with cursors.SSDictCursor/DictCursor cover every call MySQLRunner._run_sql_blocking makes, including reading the current sql_mode with fetchone before SET SESSION sql_mode = %s.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_safety_rule_sets.py",
+   "source_line": 629,
+   "source_line_end": 673,
+   "verify_against": "src/sqllens/agent/integrations/mysql/",
+   "verify_hint": "Check MySQLRunner.__init__ (remove_sql_modes kwarg, self.pymysql) and _run_sql_blocking",
+   "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:mysql-runner-fakes:629",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch4:VC-9"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Read-path alignment holds. sql_runner.py:113-172 calls pymysql.connect(**kw), conn.ping(reconnect=True), conn.cursor() with no args for setup, setup.execute('SELECT @@SESSION.sql_mode'), setup.fetchone() (row[0]), setup.execute('SET SESSION sql_mode = %s', (..,)), setup.close(), conn.cursor(pymysql.cursors.SSDictCursor), cursor.execute(sql), cursor.fetchmany(cap+1), conn.close(). Test fakes (test_safety_rule_sets.py:629-673) provide all of these, and the namespace has cursors.SSDictCursor and DictCursor, so the sql_mode read via fetchone before the SET is covered. The remove_sql_modes kwarg exists (sql_runner.py:34) and self.pymysql is overridden after __init__ (line 58). However the claim says the fakes cover 'every call' _run_sql_blocking makes. They do not cover conn.commit() or cursor.rowcount on the write path (sql_runner.py:172-186), or verify_base_tables(conn, ...) when require_base_tables=True (line 157). _FakeConn has no commit and _FakeCursor has no rowcount. The tests only run SELECT 1 with require_base_tables=False (lines 690, 704, 711), so those gaps are unexercised. As written the claim overstates coverage. I found no repository requirement in the views that the fakes must cover the write path, so I cannot show a broken requirement or confirm INVALID.",
+   "file_checked": "tests/unit/test_safety_rule_sets.py:629-673",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-94",
+   "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:recorder-require-base-tables:310",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-95",
+   "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:step-function-patch:376",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-96",
+   "category": "absolute_claim",
+   "claim": "The docstring asserts sqlglot unescapes \\/ inside an optimizer hint, so a kept hint would end early and run the rest.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "\"\"\"sqlglot unescapes ``\\\\/`` in a hint, so a kept hint would end early and run the rest.\"\"\"",
+   "source_file": "tests/unit/test_safety_rule_sets.py",
+   "source_line": 144,
+   "verify_against": "sqlglot MySQL generator/tokenizer at the version requirements.txt locks",
+   "verify_hint": "Trace SELECT /*+ BKA('*\\/ x') */ 1 through sqlglot mysql parse and generate",
+   "claim_signature": "absolute_claim:test_safety_rule_sets.py:hint-unescape:144",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch4:VC-12"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The docstring is at tests/unit/test_safety_rule_sets.py:143 and the test input is at line 145. requirements.txt:103 pins sqlglot==30.31.0. The item has no dependency_sources, and the head and base views do not contain sqlglot source, so I could not read the MySQL tokenizer or generator hint handling at that version. The claim depends on how sqlglot parses and re-emits a hint containing an escaped slash. That needs either the library source or a run of SELECT /*+ BKA('*\\/ x') */ 1 through sqlglot's MySQL parse and generate. I did not run that command. I did not use installed copies found elsewhere on the filesystem, because they are outside the views and dependency_sources and their versions are unverified.",
+   "file_checked": "tests/unit/test_safety_rule_sets.py:143",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-97",
+   "claim_signature": "data_format_assumption:test_safety_rule_sets.py:redaction-message-markers:487",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-98",
+   "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:whole-row-patch:575",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-99",
+   "claim_signature": "absolute_claim:test_safety_rule_sets.py:relation-check-logs-parse:596",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-100",
+   "claim_signature": "api_contract:test_system_prompt.py:prompt-builder-rule-sets:713",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-101",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-102",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-103",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-104",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-105",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-106",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-107",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-108",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-109",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-110",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "Under the example set, each of these runs and returns rows: `SELECT c.name, o.total FROM customers c JOIN orders o ON o.customer_id = c.id`; `SELECT COUNT(*) AS n FROM orders ORDER BY n`; `SELECT c.name AS nm FROM customers c JOIN orders o ON o.customer_id = c.id ORDER BY nm`; `SELECT name FROM customers UNION SELECT name FROM customers ORDER BY name`; `WITH t AS (SELECT c.name AS nm FROM customers c) SELECT t.nm FROM t`; `SELECT d.n FROM (SELECT COUNT(*) AS n FROM orders o) d`; `SELECT name, total FROM customers c JOIN orders o ON o.customer_id = c.id`; `SELECT name FROM customers WHERE id IN (SELECT customer_id FROM orders)`; `SELECT name FROM customers c WHERE NOT EXISTS (SELECT 1 FROM orders WHERE customer_id = c.id)`; `SELECT o.customer_id AS cust, SUM(o.total) AS revenue FROM orders o GROUP BY cust HAVING revenue > 100`; and `SELECT NAME FROM customers`. `SELECT name FROM CUSTOMERS` is refused.",
+   "claim_signature": "issue-acceptance-11",
+   "criteria_file": ".prflow/tmp/review/pr-389/local-20261113T232247Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-389/local-20261113T232247Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Under the example set, each of these runs and returns rows: `SELECT c.name, o.total FROM customers c JOIN orders o ON o.customer_id = c.id`; `SELECT COUNT(*) AS n FROM orders ORDER BY n`; `SELECT c.name AS nm FROM customers c JOIN orders o ON o.customer_id = c.id ORDER BY nm`; `SELECT name FROM customers UNION SELECT name FROM customers ORDER BY name`; `WITH t AS (SELECT c.name AS nm FROM customers c) SELECT t.nm FROM t`; `SELECT d.n FROM (SELECT COUNT(*) AS n FROM orders o) d`; `SELECT name, total FROM customers c JOIN orders o ON o.customer_id = c.id`; `SELECT name FROM customers WHERE id IN (SELECT customer_id FROM orders)`; `SELECT name FROM customers c WHERE NOT EXISTS (SELECT 1 FROM orders WHERE customer_id = c.id)`; `SELECT o.customer_id AS cust, SUM(o.total) AS revenue FROM orders o GROUP BY cust HAVING revenue > 100`; and `SELECT NAME FROM customers`. `SELECT name FROM CUSTOMERS` is refused.",
+   "id": "VC-111",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "criteria.json read: valid {criterion,text} list, criterion 11 matches, so graded with the full list. Read src/sqllens/safety/rule_sets.py (head view). Static trace: the guard parses with the MySQL dialect and requires one Query (rule_sets.py:108-128). It accepts only base tables whose case-sensitive name is in `tables` (:131-150), so `FROM CUSTOMERS` is refused with KIND_UNLISTED_TABLE (:149-150) and `SELECT NAME FROM customers` is not refused, because column case is not checked. CTE references (:153-158, 173-177), derived tables and subqueries are walked by traverse_scope, and each base table is replaced by a derived table of its listed columns (:192-225). The rewritten tree is re-walked, generated and re-parsed (:296-316), with unsupported_level=RAISE at :284. Nothing in the code obviously refuses the eleven listed statements. tests/connectors/test_rule_sets_mysql.py:266-279 lists these statements, using rs_ table names, as expected-to-run cases. tests/unit/test_safety_rule_sets.py:193,237 pin the CUSTOMERS refusal. Not settled: whether sqlglot's MySQL generation, with unsupported_level=RAISE, round-trips each statement (for example GROUP BY alias with HAVING, UNION with ORDER BY, correlated NOT EXISTS) and whether MySQL then returns rows. That needs the MySQL integration tests (tests/connectors/test_rule_sets_mysql.py) or a live run. I did not run them and could not confirm they pass. The fail-closed branch for an unexpected guard exception (:365-371) is not shown to be unreachable for these inputs without running sqlglot.",
+   "file_checked": "src/sqllens/safety/rule_sets.py:296-316",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-12",
+   "id": "VC-112",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-13",
+   "id": "VC-113",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-14",
+   "id": "VC-114",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-15",
+   "id": "VC-115",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-16",
+   "id": "VC-116",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-17",
+   "id": "VC-117",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "Under the example set, `SELECT c.name, d.total FROM customers c JOIN LATERAL (SELECT o.total FROM orders o WHERE o.customer_id = c.id ORDER BY o.total DESC LIMIT 1) d ON TRUE` runs and returns rows, while the same statement whose lateral body reads `o.discount` fails with MySQL's unknown-column error (1054) and returns no value of `orders.discount`.",
+   "claim_signature": "issue-acceptance-18",
+   "criteria_file": ".prflow/tmp/review/pr-389/local-20261113T232247Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-389/local-20261113T232247Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Under the example set, `SELECT c.name, d.total FROM customers c JOIN LATERAL (SELECT o.total FROM orders o WHERE o.customer_id = c.id ORDER BY o.total DESC LIMIT 1) d ON TRUE` runs and returns rows, while the same statement whose lateral body reads `o.discount` fails with MySQL's unknown-column error (1054) and returns no value of `orders.discount`.",
+   "id": "VC-118",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "criteria.json is a list of {criterion, text} objects and carries criterion 18, so it counts. The diff covers the criterion in three places. src/sqllens/safety/rule_sets.py apply_rule_set (296-316) and _derived (192-215) wrap every base table in a derived table that selects only the listed columns, and _analyze/_rewalk use sqlglot traverse_scope. For a lateral body over orders, that wrapper would expose only id, customer_id and total, so a read of o.discount would hit MySQL's 1054. tests/unit/test_safety_rule_sets.py:119-123 pins the rewritten shape for the lateral statement. tests/connectors/test_rule_sets_mysql.py:278 (runs and returns rows) and :318 (o.discount in the lateral body, expecting an unknown column) are the live-MySQL tests for both halves of the claim. What I could not settle: the claim is about runtime behaviour on a MySQL server. I did not run those integration tests or the unit tests. I also did not trace sqlglot's scope handling of exp.Lateral to confirm _analyze and _rewalk accept the lateral statement without refusing it, nor MySQL's execution of the rewritten JOIN LATERAL. Static reading of the guard supports the claim, but no run output backs it. Missing evidence: the pass/fail result of `pytest tests/connectors/test_rule_sets_mysql.py -k lateral` against a live MySQL, and of tests/unit/test_safety_rule_sets.py::test_lateral_derived_table_body_is_wrapped.",
+   "file_checked": "src/sqllens/safety/rule_sets.py:192-316",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-19",
+   "id": "VC-119",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-20",
+   "id": "VC-120",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-21",
+   "id": "VC-121",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-22",
+   "id": "VC-122",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-23",
+   "id": "VC-123",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "With a listed column dropped from the database after the existence check passed, a query that reads it fails with MySQL's unknown-column error, even inside a correlated subquery whose outer table has a column of the same name. A statement that reaches the rule-set guard for a request with no selected rule set is refused.",
+   "claim_signature": "issue-acceptance-24",
+   "criteria_file": ".prflow/tmp/review/pr-389/local-20261113T232247Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-389/local-20261113T232247Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: With a listed column dropped from the database after the existence check passed, a query that reads it fails with MySQL's unknown-column error, even inside a correlated subquery whose outer table has a column of the same name. A statement that reaches the rule-set guard for a request with no selected rule set is refused.",
+   "id": "VC-124",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Graded with criteria.json (criterion 24 present, valid list). Second sentence verified: src/sqllens/safety/rule_sets.py:343-345 RuleSetGuardRunner._rewrite raises RuleSetRefusal(KIND_NO_SELECTION) when current_rule_set_selection() is None; run_sql (357-364) re-raises it before the inner runner is called, so no SQL runs. First sentence is not settled by reading: the guard (rule_sets.py:192-222) rewrites each listed table to a derived table `(SELECT `t`.`col`... FROM `t`) AS alias`, so a dropped listed column is read by the derived body and MySQL should raise 1054. But whether MySQL resolves the qualified `rs_inner.name` inside that body to an outer column of the same name, as it can for outer references in derived tables (MySQL 8.0.14+), depends on MySQL name resolution at runtime. For example, an outer table aliased with the inner table's name could capture it. The only evidence is the live-MySQL test tests/connectors/test_rule_sets_mysql.py:364-377 (test_dropped_listed_column_fails_in_a_correlated_subquery), which I did not run. Missing evidence: a run of that test against MySQL, and a variant where the outer alias equals the inner table name. Trigger-condition split not completed because the first sentence is unsettled.",
+   "file_checked": "src/sqllens/safety/rule_sets.py:192-222,342-374",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-25",
+   "id": "VC-125",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-26",
+   "id": "VC-126",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-27",
+   "id": "VC-127",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-28",
+   "id": "VC-128",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-29",
+   "id": "VC-129",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-30",
+   "id": "VC-130",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-31",
+   "id": "VC-131",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-32",
+   "id": "VC-132",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-33",
+   "id": "VC-133",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-34",
+   "id": "VC-134",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-35",
+   "id": "VC-135",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-36",
+   "id": "VC-136",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-37",
+   "id": "VC-137",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
