@@ -14,13 +14,13 @@ docker-compose, GH Actions service containers, or a developer's local DBs.
 
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from typing import Any
 from urllib.parse import urlparse
 
 import pytest
+from _settings import MYSQL_URL, require_setting
 from pydantic import SecretStr
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
@@ -47,16 +47,9 @@ from sqllens.safety.limits import MAX_ROWS_ATTR, TRUNCATED_ATTR
 pytestmark = pytest.mark.asyncio
 
 
-def _need(env_var: str) -> str:
-    val = os.environ.get(env_var)
-    if not val:
-        pytest.skip(f"{env_var} not set; skipping connector test")
-    return val
-
-
 @pytest.fixture
 def mysql_url() -> str:
-    return _need("SQLLENS_TEST_MYSQL_URL")
+    return require_setting(MYSQL_URL)
 
 
 def _ctx() -> Any:

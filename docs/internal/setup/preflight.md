@@ -34,7 +34,7 @@ Connection probes catch the driver / SDK exception base for the subsystem they v
 | Probe | Caught (re-labelled as `PreflightError`) | Propagated as-is |
 |---|---|---|
 | `probe_database` (sqlite) | `sqlite3.Error`, `ValueError` (URL rejected by `sqlite_path_from_url`, or raised while opening) | everything else |
-| `probe_database` (mysql) | `pymysql.MySQLError`; URL-parser `ValueError` before connecting | everything else (the explicit `ImportError` branch above this catch handles the "driver not installed" case) |
+| `probe_database` (mysql) | `pymysql.MySQLError`; URL-parser `ValueError` before connecting | everything else (the explicit `ImportError` branch above this catch reports a broken install: PyMySQL is a core dependency, so its absence raises a `PreflightError` asking to reinstall `sqllens`) |
 | `probe_llm` | `anthropic.AnthropicError` | everything else, including `ImportError` from `import anthropic` or `from sqllens.agent.integrations import AnthropicLlmService` — these imports are deliberately kept **outside** the `try` block so a packaging breakage doesn't masquerade as an "llm" subsystem failure |
 | `probe_auth` | `ValueError` (and a residual `Exception` catch for parity with `build_authenticator`'s historic surface) | n/a |
 

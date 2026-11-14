@@ -129,7 +129,8 @@ def probe_database(cfg: Config) -> None:
         except ImportError as exc:
             raise PreflightError(
                 "database",
-                "mysql driver not installed — run: pip install 'sqllens[mysql]'",
+                "PyMySQL is missing, so this sqllens installation is broken — "
+                "reinstall sqllens",
             ) from exc
 
         try:

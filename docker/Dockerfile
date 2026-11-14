@@ -18,12 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md LICENSE CHANGELOG.md requirements.txt ./
-COPY docker/requirements-drivers.txt ./
 COPY src ./src
 COPY LICENSES ./LICENSES
 
-# Install with all optional DB drivers so the runtime image is universal.
-RUN pip install --user -c requirements.txt -c requirements-drivers.txt ".[all]"
+RUN pip install --user -c requirements.txt ".[all]"
 
 
 # ─────────────────────────── Stage 2: runtime ────────────────────────────────
