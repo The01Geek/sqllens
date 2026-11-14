@@ -125,7 +125,9 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     # injected predicates too. Only wrapped when rules exist so the no-RLS path
     # stays a zero-overhead passthrough.
     if cfg.rls:
-        sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
+        sql_runner = RlsGuardRunner(
+            sql_runner, cfg.rls, dialect=dialect, skip_catalog_views=rule_sets is not None
+        )
     # The rule-set guard sits outside flat RLS, so RLS adds its predicates
     # inside each derived table the guard builds, against the base table.
     if rule_sets is not None:

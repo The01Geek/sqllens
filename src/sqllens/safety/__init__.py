@@ -174,6 +174,7 @@ class RlsGuardRunner(SqlRunner):
         rules: list[RlsRule],
         *,
         dialect: str | None = None,
+        skip_catalog_views: bool = False,
     ) -> None:
         executor = _relation_check_executor(inner)
         if rules and not _declares_relation_check(executor):
@@ -188,6 +189,8 @@ class RlsGuardRunner(SqlRunner):
         # construction check above never saw.
         self._rules = list(rules)
         self._dialect = dialect
+        # True only beneath RuleSetGuardRunner (see apply_rls).
+        self._skip_catalog_views = skip_catalog_views
 
     async def run_sql(
         self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
@@ -198,6 +201,7 @@ class RlsGuardRunner(SqlRunner):
                 self._rules,
                 dialect=self._dialect,
                 metadata=context.metadata,
+                skip_catalog_views=self._skip_catalog_views,
             )
         except RlsError as e:
             # Actionable safety signal — surface verbatim like UnsafeSqlError

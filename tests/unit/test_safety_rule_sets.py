@@ -201,10 +201,13 @@ def test_from_less_select_passes_through() -> None:
         ("SELECT name INTO @v FROM customers", guard.KIND_NOT_ONE_SELECT),
         ("TABLE customers", guard.KIND_NOT_ONE_SELECT),
         ("SELECT * FROM INFORMATION_SCHEMA.STATISTICS", guard.KIND_CATALOG),
-        ("SELECT * FROM information_schema.tables", guard.KIND_CATALOG),
-        ("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES", guard.KIND_CATALOG),
-        ("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS", guard.KIND_CATALOG),
-        ("SELECT * FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE", guard.KIND_CATALOG),
+        ("SELECT * FROM information_schema.views", guard.KIND_CATALOG),
+        ("SELECT * FROM def.information_schema.tables", guard.KIND_CATALOG),
+        (
+            "SELECT t.TABLE_NAME FROM INFORMATION_SCHEMA.TABLES t FORCE INDEX (PRIMARY)",
+            guard.KIND_TABLE_OPTIONS,
+        ),
+        ("SHOW COLUMNS FROM customers", guard.KIND_NOT_ONE_SELECT),
         ("SELECT user FROM mysql.user", guard.KIND_CATALOG),
         ("SELECT * FROM performance_schema.threads", guard.KIND_CATALOG),
         ("SELECT * FROM SYS.version", guard.KIND_CATALOG),
@@ -302,6 +305,242 @@ def test_rewalk_accepts_the_guard_shape() -> None:
         dialect="mysql",
     )
     guard._rewalk(tree, EXAMPLE_TABLES)
+
+
+# --- catalog views (#379) ----------------------------------------------------------
+
+_TABLES_FIELDS = (
+    "`TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE`, NULL AS `ENGINE`,"
+    " NULL AS `VERSION`, NULL AS `ROW_FORMAT`, NULL AS `TABLE_ROWS`, NULL AS `AVG_ROW_LENGTH`,"
+    " NULL AS `DATA_LENGTH`, NULL AS `MAX_DATA_LENGTH`, NULL AS `INDEX_LENGTH`,"
+    " NULL AS `DATA_FREE`, NULL AS `AUTO_INCREMENT`, NULL AS `CREATE_TIME`,"
+    " NULL AS `UPDATE_TIME`, NULL AS `CHECK_TIME`, NULL AS `TABLE_COLLATION`,"
+    " NULL AS `CHECKSUM`, NULL AS `CREATE_OPTIONS`, NULL AS `TABLE_COMMENT`"
+)
+DERIVED_TABLES = (
+    f"(SELECT {_TABLES_FIELDS} FROM `information_schema`.`TABLES`"
+    " WHERE (`TABLE_SCHEMA` = SCHEMA()"
+    " AND CAST(`TABLE_SCHEMA` AS BINARY) = CAST(SCHEMA() AS BINARY))"
+    " AND (`TABLE_NAME` IN ('customers', 'orders')"
+    " AND CAST(`TABLE_NAME` AS BINARY) IN ('customers', 'orders'))"
+    " LIMIT 18446744073709551615)"
+)
+_PAIRS = (
+    "(('customers', 'id'), ('customers', 'name'), ('orders', 'id'),"
+    " ('orders', 'customer_id'), ('orders', 'total'))"
+)
+_SCHEMA = (
+    "(`{f}` = SCHEMA() AND CAST(`{f}` AS BINARY) = CAST(SCHEMA() AS BINARY))"
+)
+_OWN = (
+    _SCHEMA.format(f="TABLE_SCHEMA")
+    + " AND (`TABLE_NAME` IN ('customers', 'orders')"
+    " AND (CAST(`TABLE_NAME` AS BINARY), CAST(`COLUMN_NAME` AS BINARY)) IN " + _PAIRS + ")"
+)
+_COLUMNS_FILTER = "WHERE " + _OWN
+_KCU_FILTER = (
+    "WHERE (" + _OWN + ")"
+    " AND ((`REFERENCED_TABLE_SCHEMA` IS NULL AND `REFERENCED_TABLE_NAME` IS NULL"
+    " AND `REFERENCED_COLUMN_NAME` IS NULL)"
+    " OR (" + _SCHEMA.format(f="REFERENCED_TABLE_SCHEMA")
+    + " AND (`REFERENCED_TABLE_NAME` IN ('customers', 'orders')"
+    " AND (CAST(`REFERENCED_TABLE_NAME` AS BINARY), CAST(`REFERENCED_COLUMN_NAME` AS BINARY))"
+    " IN " + _PAIRS + ")))"
+)
+
+
+def test_tables_view_becomes_the_filtered_materialized_derived_table() -> None:
+    out = apply_rule_set(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()",
+        EXAMPLE_TABLES,
+    )
+    assert out == (
+        f"SELECT TABLE_NAME FROM {DERIVED_TABLES} AS `TABLES` WHERE TABLE_SCHEMA = SCHEMA()"
+    )
+
+
+@pytest.mark.parametrize(
+    ("reference", "alias"),
+    [
+        ("information_schema.tables", "`tables`"),
+        ("INFORMATION_SCHEMA.TABLES", "`TABLES`"),
+        ("`Information_Schema`.`Tables`", "`Tables`"),
+        ("information_schema.tables AS t", "t"),
+        ("information_schema.tables t", "t"),
+    ],
+)
+def test_catalog_schema_and_view_names_match_in_any_letter_case(
+    reference: str, alias: str
+) -> None:
+    out = apply_rule_set(f"SELECT 1 AS one FROM {reference}", EXAMPLE_TABLES)
+    assert out == f"SELECT 1 AS one FROM {DERIVED_TABLES} AS {alias}"
+
+
+def test_columns_view_keeps_listed_pairs_and_twelve_fields() -> None:
+    out = apply_rule_set("SELECT * FROM information_schema.columns", EXAMPLE_TABLES)
+    assert _COLUMNS_FILTER + " LIMIT 18446744073709551615) AS `columns`" in out
+    assert "rep_id" not in out and "email" not in out
+    assert out.count("NULL AS ") == 22 - 12
+    for field in ("ORDINAL_POSITION", "COLUMN_DEFAULT", "EXTRA", "PRIVILEGES",
+                  "COLUMN_COMMENT", "GENERATION_EXPRESSION", "SRS_ID"):
+        assert f"NULL AS `{field}`" in out
+
+
+def test_key_column_usage_view_checks_the_referenced_side_too() -> None:
+    out = apply_rule_set(
+        "SELECT CONSTRAINT_NAME FROM information_schema.key_column_usage", EXAMPLE_TABLES
+    )
+    assert _KCU_FILTER + " LIMIT 18446744073709551615) AS `key_column_usage`" in out
+    assert out.count("NULL AS ") == 12 - 9
+    for field in ("CONSTRAINT_CATALOG", "CONSTRAINT_SCHEMA", "CONSTRAINT_NAME"):
+        assert f"NULL AS `{field}`" in out
+
+
+def test_kept_fields_are_the_issue_s_twenty_five() -> None:
+    views = guard._CATALOG_VIEWS
+    assert [len(views[v].fields) for v in ("TABLES", "COLUMNS", "KEY_COLUMN_USAGE")] == [
+        21, 22, 12
+    ]
+    assert sum(len(view.kept) for view in views.values()) == 25
+    for view in views.values():
+        assert view.kept <= set(view.fields)
+        assert len(set(view.fields)) == len(view.fields)
+
+
+def test_catalog_view_joined_with_a_listed_table_wraps_both() -> None:
+    out = apply_rule_set(
+        "SELECT c.name, t.TABLE_TYPE FROM customers c JOIN information_schema.tables t"
+        " ON t.TABLE_NAME = 'customers'",
+        EXAMPLE_TABLES,
+    )
+    assert out == (
+        f"SELECT c.name, t.TABLE_TYPE FROM {DERIVED_CUSTOMERS} AS c JOIN {DERIVED_TABLES}"
+        " AS t ON t.TABLE_NAME = 'customers'"
+    )
+
+
+def test_catalog_filter_lists_names_byte_for_byte() -> None:
+    out = apply_rule_set(
+        "SELECT TABLE_NAME FROM information_schema.tables", {"Mixed_Case": ("Id",)}
+    )
+    assert "IN ('Mixed_Case')" in out
+
+
+def test_unqualified_table_named_like_a_view_is_an_ordinary_table() -> None:
+    assert _refusal("SELECT * FROM tables").kind == guard.KIND_UNLISTED_TABLE
+
+
+def _rewritten(sql: str) -> exp.Expression:
+    return sqlglot.parse_one(apply_rule_set(sql, EXAMPLE_TABLES), dialect="mysql")
+
+
+def test_rewalk_accepts_the_catalog_shape() -> None:
+    for view in ("tables", "columns", "key_column_usage"):
+        guard._rewalk(_rewritten(f"SELECT 1 AS one FROM information_schema.{view} v"),
+                      EXAMPLE_TABLES)
+
+
+def test_rewalk_refuses_a_catalog_reference_planted_outside_the_derived_table() -> None:
+    """A planted defect: a bare catalog view joined beside the guard's derived table."""
+    for view in ("TABLES", "COLUMNS", "KEY_COLUMN_USAGE"):
+        tree = _rewritten("SELECT 1 AS one FROM information_schema.tables v")
+        tree.args["from_"].this.set(
+            "joins",
+            [sqlglot.parse_one(
+                f"SELECT 1 FROM x JOIN information_schema.{view} raw ON TRUE", dialect="mysql"
+            ).args["joins"][0]],
+        )
+        with pytest.raises(RuleSetRefusal, match="could not be checked"):
+            guard._rewalk(tree, EXAMPLE_TABLES)
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda body: body.set("where", None),
+        lambda body: body.set("limit", None),
+        lambda body: body.expressions[7].replace(exp.column("TABLE_ROWS")),
+        lambda body: body.find(exp.In).expressions[1].replace(exp.Literal.string("salaries")),
+    ],
+    ids=["no-where", "no-limit", "kept-hidden-field", "other-table"],
+)
+def test_rewalk_refuses_an_altered_catalog_body(tamper) -> None:
+    tree = _rewritten("SELECT 1 AS one FROM information_schema.tables v")
+    body = tree.find(exp.Subquery).this
+    tamper(body)
+    with pytest.raises(RuleSetRefusal, match="could not be checked"):
+        guard._rewalk(tree, EXAMPLE_TABLES)
+
+
+def test_two_catalog_views_in_one_statement_each_get_their_own_body() -> None:
+    sql = (
+        "SELECT t.TABLE_TYPE, c.COLUMN_NAME FROM information_schema.tables t"
+        " JOIN information_schema.columns c ON c.TABLE_NAME = t.TABLE_NAME"
+    )
+    out = apply_rule_set(sql, EXAMPLE_TABLES)
+    assert f"FROM {DERIVED_TABLES} AS t JOIN (SELECT " in out
+    assert _COLUMNS_FILTER + " LIMIT 18446744073709551615) AS c ON" in out
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "WITH v AS (SELECT t.TABLE_NAME FROM information_schema.tables t) SELECT v.TABLE_NAME"
+        " FROM v",
+        "SELECT d.TABLE_NAME FROM (SELECT t.TABLE_NAME FROM information_schema.tables t) d",
+        "SELECT t.TABLE_NAME FROM information_schema.tables t UNION"
+        " SELECT c.name FROM customers c",
+        "SELECT t.TABLE_NAME FROM (information_schema.tables t JOIN customers c ON TRUE)",
+        "SELECT c.name FROM customers c WHERE 'customers' IN"
+        " (SELECT t.TABLE_NAME FROM information_schema.tables t)",
+    ],
+    ids=["cte", "derived", "union", "parenthesized-join", "predicate-subquery"],
+)
+def test_catalog_view_is_wrapped_wherever_it_stands(sql: str) -> None:
+    out = apply_rule_set(sql, EXAMPLE_TABLES)
+    assert f"{DERIVED_TABLES} AS t" in out
+    assert out.count("`information_schema`.`TABLES`") == 1
+
+
+def test_catalog_view_spec_refuses_kept_fields_outside_the_view() -> None:
+    with pytest.raises(ValueError, match="kept fields not in the view"):
+        guard._CatalogView(fields=("A",), kept=frozenset({"B"}), row_filter="table")
+    with pytest.raises(ValueError, match="unknown catalog row filter"):
+        guard._CatalogView(fields=("A",), kept=frozenset(), row_filter="index")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="distinct"):
+        guard._CatalogView(fields=("A", "A"), kept=frozenset(), row_filter="table")
+
+
+def test_body_text_cache_refuses_another_rule_set_s_tables() -> None:
+    cache = guard._BodyTextCache(EXAMPLE_TABLES)
+    assert "`information_schema`.`TABLES`" in cache.text("TABLES")
+    tree = _rewritten("SELECT 1 AS one FROM information_schema.tables v")
+    with pytest.raises(ValueError, match="another rule set"):
+        guard._rewalk(tree, {"customers": ("id",)}, cache)
+
+
+def test_rls_skip_list_is_the_rule_set_guard_s_view_list() -> None:
+    """rls.py cannot import the guard's list (import cycle), so the two copies are pinned."""
+    from sqllens.safety.rls import _RULE_SET_CATALOG_VIEWS
+
+    assert _RULE_SET_CATALOG_VIEWS == {view.lower() for view in guard._CATALOG_VIEWS}
+
+
+@pytest.mark.parametrize("tables", [{}, {"customers": ()}])
+def test_catalog_filter_refuses_tables_that_would_generate_an_empty_list(tables) -> None:
+    with pytest.raises(ValueError, match="at least one table"):
+        guard._catalog_filter("TABLES", tables)
+
+
+def test_catalog_filter_refuses_a_view_it_has_no_filter_for() -> None:
+    with pytest.raises(ValueError, match="no catalog filter"):
+        guard._catalog_filter("STATISTICS", EXAMPLE_TABLES)
+
+
+def test_rewalk_refuses_the_catalog_body_built_for_another_set() -> None:
+    tree = _rewritten("SELECT 1 AS one FROM information_schema.columns v")
+    with pytest.raises(RuleSetRefusal, match="could not be checked"):
+        guard._rewalk(tree, {"customers": ("id", "name")})
 
 
 # --- runner ---------------------------------------------------------------------
@@ -402,11 +641,11 @@ async def test_failed_rewalk_of_the_reparsed_output_refuses(runner, selected, mo
     real = guard._rewalk
     calls = []
 
-    def second_fails(tree, tables):
+    def second_fails(tree, tables, expected=None):
         calls.append(tree)
         if len(calls) == 2:
             raise RuleSetRefusal(guard.KIND_UNCHECKED, "planted")
-        return real(tree, tables)
+        return real(tree, tables, expected)
 
     monkeypatch.setattr(guard, "_rewalk", second_fails)
     with pytest.raises(RuleSetRefusal):
@@ -469,6 +708,62 @@ async def test_flat_rls_adds_its_predicate_inside_the_derived_table(tmp_path, se
         "SELECT c.name FROM (SELECT `customers`.`id`, `customers`.`name` FROM `customers`"
         " WHERE customers.rep_id = 9) AS c"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("view", ["tables", "columns", "key_column_usage"])
+async def test_flat_rls_rule_named_like_a_catalog_view_leaves_the_catalog_body_alone(
+    tmp_path, selected, view
+) -> None:
+    """An [[rls]] rule on an application table named like a view never reaches the view."""
+    from sqllens.config import RlsRule
+
+    recorder = _Recorder()
+    loaded = load_rule_sets(write_rule_set_file(tmp_path), database_url=MYSQL_URL)
+    rls = RlsGuardRunner(
+        recorder, [RlsRule(table=view, column="tenant_id", operator="=", value=9)],
+        dialect="mysql", skip_catalog_views=True,
+    )
+    sql = f"SELECT v.TABLE_NAME FROM information_schema.{view} v"
+    await _run(RuleSetGuardRunner(rls, loaded), sql)
+    (out, _), = recorder.calls
+    assert out == apply_rule_set(sql, EXAMPLE_TABLES)
+    assert "tenant_id" not in out
+
+
+def test_flat_rls_still_scopes_an_application_table_named_like_a_view() -> None:
+    from sqllens.config import RlsRule
+    from sqllens.safety.rls import apply_rls
+
+    rules = [RlsRule(table="tables", column="tenant_id", operator="=", value=9)]
+    for sql in ("SELECT t.id FROM tables t", "SELECT t.id FROM shop.tables t"):
+        for skip in (False, True):
+            out = apply_rls(sql, rules, dialect="mysql", skip_catalog_views=skip)
+            assert "tenant_id = 9" in out
+
+
+def test_without_rule_sets_rls_still_matches_a_catalog_view_by_name() -> None:
+    """Criterion 8: with no rule-set file, flat RLS behaves exactly as before."""
+    from sqllens.config import RlsRule
+    from sqllens.safety.rls import apply_rls
+
+    rules = [RlsRule(table="tables", column="tenant_id", operator="=", value=9)]
+    sql = "SELECT t.TABLE_NAME FROM information_schema.tables t"
+    assert "tenant_id = 9" in apply_rls(sql, rules, dialect="mysql")
+
+
+def test_skipped_catalog_view_keeps_the_alias_backstop() -> None:
+    """A catalog view aliased like a protected table is still refused, flag or not."""
+    from sqllens.config import RlsRule
+    from sqllens.safety.rls import RlsError, apply_rls
+
+    rules = [RlsRule(table="orders", column="tenant_id", operator="=", value=9)]
+    for skip in (False, True):
+        with pytest.raises(RlsError, match="could not prove"):
+            apply_rls(
+                "SELECT orders.TABLE_NAME FROM information_schema.tables AS orders",
+                rules, dialect="mysql", skip_catalog_views=skip,
+            )
 
 
 # --- redaction ------------------------------------------------------------------

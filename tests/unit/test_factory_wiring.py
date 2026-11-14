@@ -677,6 +677,27 @@ def test_rule_sets_drop_both_save_tools_even_when_enabled(tmp_path: Path) -> Non
     assert agent.agent_memory._track_usage is False
 
 
+def test_rls_skips_catalog_views_only_with_a_rule_set_file(tmp_path: Path) -> None:
+    from sqllens.config import RlsRule
+    from sqllens.safety import RlsGuardRunner
+
+    rules = [RlsRule(table="tables", column="tenant_id", operator="=", value=9)]
+
+    def rls_runner(cfg: Config) -> RlsGuardRunner:
+        node = _unwrap(build_agent(cfg).tool_registry._tools["run_sql"]).sql_runner  # type: ignore[attr-defined]
+        while not isinstance(node, RlsGuardRunner):
+            node = node._inner
+        return node
+
+    with_sets = _rule_set_cfg(tmp_path, rls=rules)
+    from sqllens.config import RuleSetsConfig
+
+    without = with_sets.model_copy(update={"rule_sets": RuleSetsConfig()})
+    assert without.rule_sets.loaded is None
+    assert rls_runner(with_sets)._skip_catalog_views is True
+    assert rls_runner(without)._skip_catalog_views is False
+
+
 def test_runner_chain_with_rule_sets(tmp_path: Path) -> None:
     from sqllens.agent.factory import RULE_SET_REMOVED_SQL_MODES
     from sqllens.agent.integrations.mysql import MySQLRunner
@@ -748,7 +769,9 @@ async def test_rule_set_user_resolver_keys_by_identity_and_keeps_default_group(
     assert {t.name for t in await agent.get_available_tools(user)} >= {"run_sql"}
 
 
-async def test_rule_set_agent_prompt_differs_from_todays_by_two_lines(tmp_path: Path) -> None:
+async def test_rule_set_agent_prompt_adds_two_lines_and_switches_schema_lookup(
+    tmp_path: Path,
+) -> None:
     import difflib
 
     pytest.importorskip("pymysql")
@@ -762,9 +785,13 @@ async def test_rule_set_agent_prompt_differs_from_todays_by_two_lines(tmp_path: 
     )
     off = await _prompt_from_agent_tools(build_agent(off_cfg))
     diff = [d for d in difflib.ndiff(off.splitlines(), on.splitlines()) if d[:2] in ("+ ", "- ")]
-    assert [d[:2] for d in diff] == ["+ ", "+ "]
-    assert "Qualify every column" in diff[0]
-    assert "Refused by the rule set:" in diff[1]
+    added = [d[2:] for d in diff if d.startswith("+ ")]
+    removed = [d[2:] for d in diff if d.startswith("- ")]
+    assert len(added) == 3 and len(removed) == 1
+    assert "Qualify every column" in added[0]
+    assert "Refused by the rule set:" in added[1]
+    assert "INFORMATION_SCHEMA.KEY_COLUMN_USAGE" in added[2] and "SHOW TABLES" not in added[2]
+    assert "structural SHOW variants" in removed[0]
     for text in ("Sales reps see their customers", "confirmed_against_production"):
         assert text not in on
 

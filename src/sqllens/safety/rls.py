@@ -181,14 +181,41 @@ def _predicate(rule: RlsRule, qualifier: str, value: _Scalar | list[_Scalar]) ->
     return op_cls(this=col, expression=exp.convert(value))
 
 
+# The views the rule-set guard rewrites into derived tables of its own.
+_RULE_SET_CATALOG_VIEWS = frozenset({"tables", "columns", "key_column_usage"})
+
+
+def _is_rule_set_catalog_view(table: exp.Table, dialect: str | None) -> bool:
+    """True for a MySQL ``information_schema`` view the rule-set guard rewrites.
+
+    Under a rule set, an ``[[rls]]`` rule for an application table named like
+    one of these views (say ``tables``) must not match it: matching would
+    inject the rule's column into the guard-built catalog body, which MySQL
+    then rejects.
+    """
+    db = table.args.get("db")
+    return (
+        dialect == "mysql"
+        and isinstance(db, exp.Identifier)
+        and table.args.get("catalog") is None
+        and db.name.lower() == "information_schema"
+        and table.name.lower() in _RULE_SET_CATALOG_VIEWS
+    )
+
+
 def apply_rls(
     sql: str,
     rules: list[RlsRule],
     *,
     dialect: str | None = None,
     metadata: Mapping[str, Any] | None = None,
+    skip_catalog_views: bool = False,
 ) -> str:
     """Rewrite ``sql`` so every configured RLS predicate is enforced.
+
+    ``skip_catalog_views`` (set only while a rule-set file is configured)
+    keeps any rule, whatever table it names, from matching the MySQL
+    ``information_schema`` views the rule-set guard rewrites.
 
     Returns the rewritten SQL. Raises :class:`RlsError` if the statement
     cannot be parsed or scope-analyzed, a dynamic value is missing/suspicious,
@@ -270,7 +297,9 @@ def apply_rls(
         base_source_ids: set[int] = {id(t) for t in base_table_sources}
         for table in base_table_sources:
             name = table.name.lower()
-            if name not in rules_by_table:
+            if name not in rules_by_table or (
+                skip_catalog_views and _is_rule_set_catalog_view(table, dialect)
+            ):
                 continue
             qualifier = table.alias_or_name
             for rule in rules_by_table[name]:
@@ -297,8 +326,11 @@ def apply_rls(
         # and the alias check stays as a backstop for similar misparses).
         name = table.name.lower()
         alias = (table.alias or "").lower()
+        # A skipped catalog view never matches by its own name; its alias
+        # still goes through the backstop below.
+        own_name_skipped = skip_catalog_views and _is_rule_set_catalog_view(table, dialect)
         match = (
-            name if name in rules_by_table
+            name if name in rules_by_table and not own_name_skipped
             else alias if alias in rules_by_table
             else None
         )

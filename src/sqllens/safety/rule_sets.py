@@ -15,8 +15,18 @@ selects exactly that table's listed ``columns``::
                            FROM `customers`) AS c
 
 MySQL then resolves every column the model wrote against the derived table,
-so a column the set does not list fails as an unknown column. The guard
-re-walks the rewritten tree, generates sqlglot's MySQL output without
+so a column the set does not list fails as an unknown column.
+
+A reference to ``INFORMATION_SCHEMA.TABLES``, ``COLUMNS`` or
+``KEY_COLUMN_USAGE`` becomes a derived table over that view (see
+:func:`_catalog_body`): it keeps only rows for the connected database and the
+set's tables (for ``COLUMNS`` and ``KEY_COLUMN_USAGE``, its tables' listed
+columns), projects every field of the view under its
+own name with only :data:`_CATALOG_VIEWS`' kept fields carrying values, and
+ends in a ``LIMIT`` so MySQL materializes it before the model's expressions
+read it. Every other catalog relation is refused.
+
+The guard re-walks the rewritten tree, generates sqlglot's MySQL output without
 comments or optimizer hints, parses that output again and re-walks it; the
 inner runners and MySQL receive that output, never the model's text.
 
@@ -33,7 +43,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
 from sqlglot import expressions as exp
@@ -75,6 +87,84 @@ KIND_DENIED_FUNCTION = "the query calls a function the guard does not allow"
 KIND_UNCHECKED = "the statement could not be checked"
 
 _CATALOG_SCHEMAS = frozenset({"information_schema", "mysql", "performance_schema", "sys"})
+
+_INFORMATION_SCHEMA = "information_schema"
+
+
+@dataclass(frozen=True)
+class _CatalogView:
+    """A rewritten ``information_schema`` view.
+
+    ``fields`` lists every field in view order, ``kept`` the ones that keep
+    their values, and ``row_filter`` which rows survive (see
+    :func:`_catalog_filter`): ``"table"`` keeps a listed table,
+    ``"column"`` a listed table's listed column, and ``"key"`` a listed
+    column whose referenced column, if any, is listed too.
+    """
+
+    fields: tuple[str, ...]
+    kept: frozenset[str]
+    row_filter: Literal["table", "column", "key"]
+
+    def __post_init__(self) -> None:
+        if not self.fields or len(set(self.fields)) != len(self.fields):
+            raise ValueError("catalog view fields must be non-empty and distinct")
+        if self.row_filter not in ("table", "column", "key"):
+            raise ValueError(f"unknown catalog row filter {self.row_filter!r}")
+        if not self.kept <= set(self.fields):
+            raise ValueError(f"kept fields not in the view: {sorted(self.kept - set(self.fields))}")
+
+
+# Every field of each view in MySQL 8.0+, in the view's own order. A field
+# missing here would disappear from ``SELECT *``; a field added to ``kept``
+# exposes its value under every rule set.
+_CATALOG_VIEWS: Mapping[str, _CatalogView] = MappingProxyType({
+    "TABLES": _CatalogView(
+        fields=(
+            "TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE", "ENGINE", "VERSION",
+            "ROW_FORMAT", "TABLE_ROWS", "AVG_ROW_LENGTH", "DATA_LENGTH", "MAX_DATA_LENGTH",
+            "INDEX_LENGTH", "DATA_FREE", "AUTO_INCREMENT", "CREATE_TIME", "UPDATE_TIME",
+            "CHECK_TIME", "TABLE_COLLATION", "CHECKSUM", "CREATE_OPTIONS", "TABLE_COMMENT",
+        ),
+        kept=frozenset({"TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE"}),
+        row_filter="table",
+    ),
+    "COLUMNS": _CatalogView(
+        fields=(
+            "TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "ORDINAL_POSITION",
+            "COLUMN_DEFAULT", "IS_NULLABLE", "DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH",
+            "CHARACTER_OCTET_LENGTH", "NUMERIC_PRECISION", "NUMERIC_SCALE",
+            "DATETIME_PRECISION", "CHARACTER_SET_NAME", "COLLATION_NAME", "COLUMN_TYPE",
+            "COLUMN_KEY", "EXTRA", "PRIVILEGES", "COLUMN_COMMENT", "GENERATION_EXPRESSION",
+            "SRS_ID",
+        ),
+        kept=frozenset({
+            "TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "IS_NULLABLE",
+            "DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "NUMERIC_PRECISION", "NUMERIC_SCALE",
+            "DATETIME_PRECISION", "COLUMN_TYPE", "COLUMN_KEY",
+        }),
+        row_filter="column",
+    ),
+    "KEY_COLUMN_USAGE": _CatalogView(
+        fields=(
+            "CONSTRAINT_CATALOG", "CONSTRAINT_SCHEMA", "CONSTRAINT_NAME", "TABLE_CATALOG",
+            "TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "ORDINAL_POSITION",
+            "POSITION_IN_UNIQUE_CONSTRAINT", "REFERENCED_TABLE_SCHEMA", "REFERENCED_TABLE_NAME",
+            "REFERENCED_COLUMN_NAME",
+        ),
+        kept=frozenset({
+            "TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "ORDINAL_POSITION",
+            "POSITION_IN_UNIQUE_CONSTRAINT", "REFERENCED_TABLE_SCHEMA", "REFERENCED_TABLE_NAME",
+            "REFERENCED_COLUMN_NAME",
+        }),
+        row_filter="key",
+    ),
+})
+
+# Removing this LIMIT lets MySQL merge the derived table into the outer query
+# or push the model's conditions into it, so a model expression could run on
+# a hidden catalog row. It is the largest value MySQL's LIMIT takes.
+_MATERIALIZE_LIMIT = "18446744073709551615"
 
 # A base-table reference may carry only these arguments; any other one
 # (PARTITION, index hints, TABLESAMPLE, ...) is refused.
@@ -128,6 +218,17 @@ def _parse(sql: str) -> exp.Expression:
     return tree
 
 
+def _check_wrappable(table: exp.Table, allowed: frozenset[str]) -> None:
+    """Refuse table options, any argument outside ``allowed``, and column aliases."""
+    extra = _set_args(table) - allowed
+    if extra:
+        kind = KIND_TABLE_OPTIONS if extra & _TABLE_OPTION_ARGS else KIND_UNSUPPORTED
+        raise RuleSetRefusal(kind, f"table {table.name} carries {sorted(extra)}")
+    alias = table.args.get("alias")
+    if alias is not None and alias.args.get("columns"):
+        raise RuleSetRefusal(KIND_UNSUPPORTED, f"column aliases on table {table.name}")
+
+
 def _check_reference(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) -> None:
     """Refuse a base-table reference the guard cannot wrap."""
     if not isinstance(table.this, exp.Identifier):
@@ -137,17 +238,25 @@ def _check_reference(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) ->
         schema = (table.db or table.catalog or "").lower()
         kind = KIND_CATALOG if schema in _CATALOG_SCHEMAS else KIND_QUALIFIED_TABLE
         raise RuleSetRefusal(kind, f"qualified table {table.sql(_DIALECT)}")
-    extra = _set_args(table) - _TABLE_ARGS
-    if extra:
-        kind = KIND_TABLE_OPTIONS if extra & _TABLE_OPTION_ARGS else KIND_UNSUPPORTED
-        raise RuleSetRefusal(kind, f"table {table.name} carries {sorted(extra)}")
-    alias = table.args.get("alias")
-    if alias is not None and alias.args.get("columns"):
-        raise RuleSetRefusal(KIND_UNSUPPORTED, f"column aliases on table {table.name}")
+    _check_wrappable(table, _TABLE_ARGS)
     if table.name.lower() == "dual" and table.name not in tables:
         raise RuleSetRefusal(KIND_TABLE_FUNCTION, "FROM DUAL")
     if table.name not in tables:
         raise RuleSetRefusal(KIND_UNLISTED_TABLE, f"table {table.name} is not listed")
+
+
+def _catalog_view(table: exp.Table) -> str | None:
+    """The rewritten view ``table`` names (``information_schema.<view>``), else ``None``."""
+    db = table.args.get("db")
+    if (
+        not isinstance(table.this, exp.Identifier)
+        or not isinstance(db, exp.Identifier)
+        or table.args.get("catalog") is not None
+        or db.name.lower() != _INFORMATION_SCHEMA
+    ):
+        return None
+    view = table.name.upper()
+    return view if view in _CATALOG_VIEWS else None
 
 
 def _is_cte_reference(table: exp.Table, scope: object) -> bool:
@@ -160,9 +269,10 @@ def _is_cte_reference(table: exp.Table, scope: object) -> bool:
 
 def _analyze(
     tree: exp.Expression, tables: Mapping[str, tuple[str, ...]]
-) -> list[exp.Table]:
-    """Return every base-table reference in ``tree``; refuse any table left unaccounted."""
+) -> tuple[list[exp.Table], list[tuple[exp.Table, str]]]:
+    """Return ``tree``'s listed-table and (catalog reference, view) pairs; refuse any other."""
     base: list[exp.Table] = []
+    catalog: list[tuple[exp.Table, str]] = []
     accounted: set[int] = set()
     for scope in traverse_scope(tree):
         sources = [s for s in scope.sources.values() if isinstance(s, exp.Table)]
@@ -176,8 +286,13 @@ def _analyze(
                 raise RuleSetRefusal(KIND_TABLE_OPTIONS, f"options on CTE {table.name}")
             accounted.add(id(table))
         for table in sources:
-            _check_reference(table, tables)
-            base.append(table)
+            view = _catalog_view(table)
+            if view is not None:
+                _check_wrappable(table, _TABLE_ARGS | {"db"})
+                catalog.append((table, view))
+            else:
+                _check_reference(table, tables)
+                base.append(table)
             accounted.add(id(table))
     for table in tree.find_all(exp.Table):
         if id(table) not in accounted:
@@ -186,7 +301,7 @@ def _analyze(
             # read is reported as one.
             _check_reference(table, tables)
             raise RuleSetRefusal(KIND_UNSUPPORTED, f"unaccounted table {table.name}")
-    return base
+    return base, catalog
 
 
 def _derived(table: exp.Table, columns: tuple[str, ...]) -> exp.Subquery:
@@ -199,6 +314,11 @@ def _derived(table: exp.Table, columns: tuple[str, ...]) -> exp.Subquery:
             for column in columns
         ]
     ).from_(exp.Table(this=exp.to_identifier(table.name, quoted=True)), copy=False)
+    return _wrap(table, body)
+
+
+def _wrap(table: exp.Table, body: exp.Select) -> exp.Subquery:
+    """``body`` as a derived table standing where ``table`` stood, under its alias or name."""
     alias = table.args.get("alias")
     alias_id = (
         alias.this.copy()
@@ -215,11 +335,128 @@ def _derived(table: exp.Table, columns: tuple[str, ...]) -> exp.Subquery:
     return derived
 
 
+def _quoted(name: str) -> exp.Column:
+    return exp.column(exp.to_identifier(name, quoted=True))
+
+
+def _binary(node: exp.Expression) -> exp.Cast:
+    """``CAST(node AS BINARY)``, MySQL's ``BINARY node``.
+
+    So a comparison matches byte for byte, as the existence check does.
+    """
+    return exp.Cast(this=node, to=exp.DataType.build("BINARY", dialect=_DIALECT))
+
+
+def _in_schema(field: str) -> exp.Expression:
+    """``field`` is the connected database, byte for byte.
+
+    The plain comparison lets MySQL look the schema up in its data
+    dictionary; dropping it makes every lookup read every schema, since a
+    column inside ``CAST`` cannot drive that lookup. The binary one is the
+    exact match.
+    """
+    return exp.and_(
+        exp.EQ(this=_quoted(field), expression=exp.CurrentSchema()),
+        exp.EQ(this=_binary(_quoted(field)), expression=_binary(exp.CurrentSchema())),
+    )
+
+
+def _in_names(field: str, names: list[str]) -> exp.Expression:
+    """``field`` is one of ``names``, byte for byte (plain list for the lookup, as above)."""
+    literals = [exp.Literal.string(name) for name in names]
+    return exp.and_(
+        exp.In(this=_quoted(field), expressions=literals),
+        exp.In(this=_binary(_quoted(field)), expressions=[lit.copy() for lit in literals]),
+    )
+
+
+def _in_pairs(table_field: str, column_field: str, pairs: list[tuple[str, str]]) -> exp.Expression:
+    """(``table_field``, ``column_field``) is one of ``pairs``, byte for byte."""
+    table_names = list(dict.fromkeys(table for table, _ in pairs))
+    return exp.and_(
+        exp.In(
+            this=_quoted(table_field),
+            expressions=[exp.Literal.string(name) for name in table_names],
+        ),
+        exp.In(
+            this=exp.Tuple(
+                expressions=[_binary(_quoted(table_field)), _binary(_quoted(column_field))]
+            ),
+            expressions=[
+                exp.Tuple(expressions=[exp.Literal.string(t), exp.Literal.string(c)])
+                for t, c in pairs
+            ],
+        ),
+    )
+
+
+def _catalog_filter(view: str, tables: Mapping[str, tuple[str, ...]]) -> exp.Expression:
+    """The row filter for ``view``, chosen by its ``_CatalogView.row_filter``.
+
+    Every filter requires the connected database and a listed table. One
+    literal list per comparison keeps the filter compact at the scale of a
+    real rule-set file. Raises ``ValueError`` for a view not in
+    :data:`_CATALOG_VIEWS`, and for an empty ``tables`` or a table with no
+    columns, which would generate ``IN ()``.
+    """
+    spec = _CATALOG_VIEWS.get(view)
+    if spec is None:
+        raise ValueError(f"no catalog filter for view {view!r}")
+    if not tables or not all(tables.values()):
+        raise ValueError("catalog filter needs at least one table, each with a column")
+    if spec.row_filter == "table":
+        return exp.and_(_in_schema("TABLE_SCHEMA"), _in_names("TABLE_NAME", list(tables)))
+    pairs = [(name, column) for name, columns in tables.items() for column in columns]
+    own = exp.and_(_in_schema("TABLE_SCHEMA"), _in_pairs("TABLE_NAME", "COLUMN_NAME", pairs))
+    if spec.row_filter == "column":
+        return own
+    # row_filter == "key"; _CatalogView refuses any other value.
+    no_reference = exp.and_(
+        *(
+            exp.Is(this=_quoted(field), expression=exp.Null())
+            for field in (
+                "REFERENCED_TABLE_SCHEMA", "REFERENCED_TABLE_NAME", "REFERENCED_COLUMN_NAME"
+            )
+        )
+    )
+    listed_reference = exp.and_(
+        _in_schema("REFERENCED_TABLE_SCHEMA"),
+        _in_pairs("REFERENCED_TABLE_NAME", "REFERENCED_COLUMN_NAME", pairs),
+    )
+    return exp.and_(own, exp.paren(exp.or_(no_reference, listed_reference)))
+
+
+def _catalog_body(view: str, tables: Mapping[str, tuple[str, ...]]) -> exp.Select:
+    """The body of the derived table that stands in for ``information_schema.<view>``."""
+    spec = _CATALOG_VIEWS[view]
+    projection: list[exp.Expression] = [
+        _quoted(field)
+        if field in spec.kept
+        else exp.alias_(exp.Null(), exp.to_identifier(field, quoted=True))
+        for field in spec.fields
+    ]
+    source = exp.Table(
+        this=exp.to_identifier(view, quoted=True),
+        db=exp.to_identifier(_INFORMATION_SCHEMA, quoted=True),
+    )
+    return (
+        exp.Select(expressions=projection)
+        .from_(source, copy=False)
+        .where(_catalog_filter(view, tables), copy=False)
+        .limit(exp.Literal.number(_MATERIALIZE_LIMIT), copy=False)
+    )
+
+
 def _rewrite(
-    tree: exp.Expression, base: list[exp.Table], tables: Mapping[str, tuple[str, ...]]
+    tree: exp.Expression,
+    base: list[exp.Table],
+    catalog: list[tuple[exp.Table, str]],
+    tables: Mapping[str, tuple[str, ...]],
 ) -> exp.Expression:
     for table in base:
         table.replace(_derived(table, tables[table.name]))
+    for table, view in catalog:
+        table.replace(_wrap(table, _catalog_body(view, tables)))
     for hint in list(tree.find_all(exp.Hint)):
         hint.pop()
     return tree
@@ -255,14 +492,76 @@ def _is_guard_derived(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) -
     return alias is None or not alias.args.get("columns")
 
 
-def _rewalk(tree: exp.Expression, tables: Mapping[str, tuple[str, ...]]) -> None:
-    """Refuse ``tree`` unless every base-table reference is in a guard-shaped derived table."""
+def _is_catalog_derived(
+    table: exp.Table, tables: Mapping[str, tuple[str, ...]], expected: _BodyTextCache
+) -> bool:
+    """True if ``table`` is a catalog view inside exactly the derived table the guard builds.
+
+    The body must generate the same MySQL text as :func:`_catalog_body` for
+    that view and ``tables``; text, not sqlglot's node equality, which folds
+    letter case. ``expected`` caches that text per view for one statement.
+    """
+    view = _catalog_view(table)
+    if view is None or _set_args(table) != {"this", "db"}:
+        return False
+    from_ = table.parent
+    body = from_.parent if isinstance(from_, exp.From) else None
+    if not isinstance(body, exp.Select) or body.args.get("from_") is not from_:
+        return False
+    wrapper = body.parent
+    if not isinstance(wrapper, exp.Subquery) or wrapper.this is not body:
+        return False
+    if _set_args(wrapper) - {"this", "alias", "joins"}:
+        return False
+    alias = wrapper.args.get("alias")
+    if alias is not None and alias.args.get("columns"):
+        return False
+    return _generate(body) == expected.text(view)
+
+
+class _BodyTextCache:
+    """Each catalog view's expected body text for one ``tables`` mapping.
+
+    Holds the mapping it was built for and refuses any other, so text built
+    for one rule set can never be compared against another.
+    """
+
+    def __init__(self, tables: Mapping[str, tuple[str, ...]]) -> None:
+        self._tables = tables
+        self._text: dict[str, str] = {}
+
+    def built_for(self, tables: Mapping[str, tuple[str, ...]]) -> bool:
+        return tables is self._tables
+
+    def text(self, view: str) -> str:
+        if view not in self._text:
+            self._text[view] = _generate(_catalog_body(view, self._tables))
+        return self._text[view]
+
+
+def _rewalk(
+    tree: exp.Expression,
+    tables: Mapping[str, tuple[str, ...]],
+    expected: _BodyTextCache | None = None,
+) -> None:
+    """Refuse ``tree`` unless every base-table and catalog reference is in a guard-built wrapper.
+
+    ``expected`` caches each catalog view's body text for ``tables`` across
+    the two re-walks of one statement.
+    """
+    if expected is None:
+        expected = _BodyTextCache(tables)
+    elif not expected.built_for(tables):
+        raise ValueError("catalog body cache used with another rule set's tables")
     accounted: set[int] = set()
     for scope in traverse_scope(tree):
         sources = [s for s in scope.sources.values() if isinstance(s, exp.Table)]
         source_ids = {id(s) for s in sources}
         for table in sources:
-            if not _is_guard_derived(table, tables):
+            if not (
+                _is_guard_derived(table, tables)
+                or _is_catalog_derived(table, tables, expected)
+            ):
                 raise RuleSetRefusal(
                     KIND_UNCHECKED, f"re-walk: table {table.name} is not wrapped"
                 )
@@ -297,14 +596,17 @@ def apply_rule_set(sql: str, tables: Mapping[str, tuple[str, ...]]) -> str:
     """Rewrite ``sql`` so every listed table exposes only its listed columns.
 
     ``tables`` maps each listed table name (compared case-sensitively) to its
-    listed ``columns``. Raises :class:`RuleSetRefusal` for a statement the
-    guard refuses; any other exception from a step is the caller's to turn
-    into a refusal.
+    listed ``columns``. A reference to ``INFORMATION_SCHEMA.TABLES``,
+    ``COLUMNS`` or ``KEY_COLUMN_USAGE`` is rewritten to show only those tables
+    and columns. Raises :class:`RuleSetRefusal` for a statement the guard
+    refuses; any other exception from a step is the caller's to turn into a
+    refusal.
     """
     tree = _parse(sql)
-    base = _analyze(tree, tables)
-    _rewrite(tree, base, tables)
-    _rewalk(tree, tables)
+    base, catalog = _analyze(tree, tables)
+    _rewrite(tree, base, catalog, tables)
+    expected = _BodyTextCache(tables)
+    _rewalk(tree, tables, expected)
     output = _generate(tree)
     try:
         reparsed = _reparse(output)
@@ -312,7 +614,7 @@ def apply_rule_set(sql: str, tables: Mapping[str, tuple[str, ...]]) -> str:
         if isinstance(exc, RuleSetRefusal):
             raise
         raise RuleSetRefusal(KIND_UNCHECKED, f"re-parse failed: {exc}") from exc
-    _rewalk(reparsed, tables)
+    _rewalk(reparsed, tables, expected)
     return output
 
 
