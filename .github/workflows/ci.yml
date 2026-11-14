@@ -142,7 +142,78 @@ jobs:
         env:
           SQLLENS_TEST_MYSQL_OTHER_DATABASE: sqllens_other
 
-  # Auto-request a PRFlow review once both CI jobs above are green, by posting a
+  # The same connector tests on MySQL 8.4, which also checks the rule-set
+  # guard's hard-coded information_schema field lists against that server.
+  connectors-mysql84:
+    name: Connector tests (MySQL 8.4)
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: sqllens
+          MYSQL_DATABASE: sqllens
+          MYSQL_USER: sqllens
+          MYSQL_PASSWORD: sqllens
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -psqllens --silent"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      SQLLENS_TEST_MYSQL_URL: mysql+pymysql://sqllens:sqllens@127.0.0.1:3306/sqllens
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -c requirements.txt -c docker/requirements-drivers.txt -e ".[dev,all]"
+      - run: pip check
+
+      # Wait for MySQL to accept a connection. The service-container health
+      # check usually catches this, but MySQL on first boot is slow.
+      - name: Wait for databases
+        run: |
+          ready=0
+          for i in $(seq 1 30); do
+            if python <<'PY'
+          import pymysql
+          pymysql.connect(host='127.0.0.1', user='sqllens', password='sqllens', database='sqllens').close()
+          print('ready')
+          PY
+            then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then
+            echo "::error::MySQL service container never accepted connections after 30 attempts (~60s)"
+            exit 1
+          fi
+
+      # MySQL 8.0 enables binary logging, so a user without SUPER cannot create
+      # the stored function the RLS connector test needs.
+      - name: Allow the test user to create MySQL stored functions
+        run: python -c "import pymysql; c = pymysql.connect(host='127.0.0.1', user='root', password='sqllens'); c.cursor().execute('SET GLOBAL log_bin_trust_function_creators = 1'); c.close()"
+
+      # The rule-set catalog tests need a second database the test user can
+      # write, to check that its same-named tables never show under a rule set.
+      - name: Create a second database for the test user
+        run: python -c "import pymysql; c = pymysql.connect(host='127.0.0.1', user='root', password='sqllens'); cur = c.cursor(); cur.execute('CREATE DATABASE IF NOT EXISTS sqllens_other'); cur.execute(\"GRANT ALL ON sqllens_other.* TO 'sqllens'@'%'\"); c.close()"
+
+      - run: pytest -q tests/connectors -v
+        env:
+          SQLLENS_TEST_MYSQL_OTHER_DATABASE: sqllens_other
+
+  # Auto-request a PRFlow review once every CI job above is green, by posting a
   # standalone `/prflow:review` comment that devflow.yml's `command` job picks
   # up, the same path a hand-typed comment takes. The vendored helper makes every
   # post/skip/dedupe decision; this job supplies only the five eligibility
@@ -155,7 +226,7 @@ jobs:
   # bot login must be in prflow.allowed_bots on main for the comment to start a
   # review.
   request-review:
-    needs: [unit, connectors]
+    needs: [unit, connectors, connectors-mysql84]
     # Keep this workflow on `pull_request`; never `pull_request_target`, which
     # would expose secrets to fork runs. Non-draft, same-repository head (forks
     # never request), not dependabot, and an App configured. Push and

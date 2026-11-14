@@ -44,7 +44,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
 from sqlglot import expressions as exp
@@ -92,14 +92,24 @@ _INFORMATION_SCHEMA = "information_schema"
 
 @dataclass(frozen=True)
 class _CatalogView:
-    """A rewritten ``information_schema`` view: every field in view order, and the kept ones."""
+    """A rewritten ``information_schema`` view.
+
+    ``fields`` lists every field in view order, ``kept`` the ones that keep
+    their values, and ``row_filter`` which rows survive (see
+    :func:`_catalog_filter`): ``"table"`` keeps a listed table,
+    ``"column"`` a listed table's listed column, and ``"key"`` a listed
+    column whose referenced column, if any, is listed too.
+    """
 
     fields: tuple[str, ...]
     kept: frozenset[str]
+    row_filter: Literal["table", "column", "key"]
 
     def __post_init__(self) -> None:
         if not self.fields or len(set(self.fields)) != len(self.fields):
             raise ValueError("catalog view fields must be non-empty and distinct")
+        if self.row_filter not in ("table", "column", "key"):
+            raise ValueError(f"unknown catalog row filter {self.row_filter!r}")
         if not self.kept <= set(self.fields):
             raise ValueError(f"kept fields not in the view: {sorted(self.kept - set(self.fields))}")
 
@@ -116,6 +126,7 @@ _CATALOG_VIEWS: dict[str, _CatalogView] = {
             "CHECK_TIME", "TABLE_COLLATION", "CHECKSUM", "CREATE_OPTIONS", "TABLE_COMMENT",
         ),
         kept=frozenset({"TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE"}),
+        row_filter="table",
     ),
     "COLUMNS": _CatalogView(
         fields=(
@@ -131,6 +142,7 @@ _CATALOG_VIEWS: dict[str, _CatalogView] = {
             "DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "NUMERIC_PRECISION", "NUMERIC_SCALE",
             "DATETIME_PRECISION", "COLUMN_TYPE", "COLUMN_KEY",
         }),
+        row_filter="column",
     ),
     "KEY_COLUMN_USAGE": _CatalogView(
         fields=(
@@ -144,6 +156,7 @@ _CATALOG_VIEWS: dict[str, _CatalogView] = {
             "POSITION_IN_UNIQUE_CONSTRAINT", "REFERENCED_TABLE_SCHEMA", "REFERENCED_TABLE_NAME",
             "REFERENCED_COLUMN_NAME",
         }),
+        row_filter="key",
     ),
 }
 
@@ -348,16 +361,17 @@ def _in_pairs(table_field: str, column_field: str, pairs: list[tuple[str, str]])
 
 
 def _catalog_filter(view: str, tables: Mapping[str, tuple[str, ...]]) -> exp.Expression:
-    """The row filter for ``view``: the connected database and the set's tables.
+    """The row filter for ``view``, chosen by its ``_CatalogView.row_filter``.
 
-    ``COLUMNS`` and ``KEY_COLUMN_USAGE`` also require a listed column, and
-    ``KEY_COLUMN_USAGE`` a listed referenced column or none. One literal list
-    per comparison keeps the filter compact at the scale of a real rule-set
-    file. Raises ``ValueError`` for a view it has no filter for.
+    Every filter requires the connected database and a listed table. One
+    literal list per comparison keeps the filter compact at the scale of a
+    real rule-set file. Raises ``ValueError`` for a view not in
+    :data:`_CATALOG_VIEWS`.
     """
-    if view not in ("TABLES", "COLUMNS", "KEY_COLUMN_USAGE"):
+    spec = _CATALOG_VIEWS.get(view)
+    if spec is None:
         raise ValueError(f"no catalog filter for view {view!r}")
-    if view == "TABLES":
+    if spec.row_filter == "table":
         return exp.and_(
             _in_schema("TABLE_SCHEMA"),
             exp.In(
@@ -367,8 +381,10 @@ def _catalog_filter(view: str, tables: Mapping[str, tuple[str, ...]]) -> exp.Exp
         )
     pairs = [(name, column) for name, columns in tables.items() for column in columns]
     own = exp.and_(_in_schema("TABLE_SCHEMA"), _in_pairs("TABLE_NAME", "COLUMN_NAME", pairs))
-    if view == "COLUMNS":
+    if spec.row_filter == "column":
         return own
+    if spec.row_filter != "key":
+        raise ValueError(f"unknown catalog row filter {spec.row_filter!r}")
     no_reference = exp.and_(
         *(
             exp.Is(this=_quoted(field), expression=exp.Null())
@@ -451,7 +467,7 @@ def _is_guard_derived(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) -
 
 
 def _is_catalog_derived(
-    table: exp.Table, tables: Mapping[str, tuple[str, ...]], expected: dict[tuple[int, str], str]
+    table: exp.Table, tables: Mapping[str, tuple[str, ...]], expected: _BodyTextCache
 ) -> bool:
     """True if ``table`` is a catalog view inside exactly the derived table the guard builds.
 
@@ -474,25 +490,39 @@ def _is_catalog_derived(
     alias = wrapper.args.get("alias")
     if alias is not None and alias.args.get("columns"):
         return False
-    # Keyed by the mapping's identity too, so text built for another rule set
-    # is never compared against this one.
-    key = (id(tables), view)
-    if key not in expected:
-        expected[key] = _generate(_catalog_body(view, tables))
-    return _generate(body) == expected[key]
+    return _generate(body) == expected.text(view, tables)
+
+
+class _BodyTextCache:
+    """Each catalog view's expected body text for one ``tables`` mapping.
+
+    Holds the mapping it was built for and refuses any other, so text built
+    for one rule set can never be compared against another.
+    """
+
+    def __init__(self, tables: Mapping[str, tuple[str, ...]]) -> None:
+        self._tables = tables
+        self._text: dict[str, str] = {}
+
+    def text(self, view: str, tables: Mapping[str, tuple[str, ...]]) -> str:
+        if tables is not self._tables:
+            raise ValueError("catalog body cache used with another rule set's tables")
+        if view not in self._text:
+            self._text[view] = _generate(_catalog_body(view, tables))
+        return self._text[view]
 
 
 def _rewalk(
     tree: exp.Expression,
     tables: Mapping[str, tuple[str, ...]],
-    expected: dict[tuple[int, str], str] | None = None,
+    expected: _BodyTextCache | None = None,
 ) -> None:
     """Refuse ``tree`` unless every base-table and catalog reference is in a guard-built wrapper.
 
-    ``expected`` caches each catalog view's body text, per ``tables`` mapping,
-    across the two re-walks of one statement.
+    ``expected`` caches each catalog view's body text for ``tables`` across
+    the two re-walks of one statement.
     """
-    expected = {} if expected is None else expected
+    expected = _BodyTextCache(tables) if expected is None else expected
     accounted: set[int] = set()
     for scope in traverse_scope(tree):
         sources = [s for s in scope.sources.values() if isinstance(s, exp.Table)]
@@ -545,7 +575,7 @@ def apply_rule_set(sql: str, tables: Mapping[str, tuple[str, ...]]) -> str:
     tree = _parse(sql)
     base, catalog = _analyze(tree, tables)
     _rewrite(tree, base, catalog, tables)
-    expected: dict[tuple[int, str], str] = {}
+    expected = _BodyTextCache(tables)
     _rewalk(tree, tables, expected)
     output = _generate(tree)
     try:

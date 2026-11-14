@@ -484,8 +484,10 @@ def test_two_catalog_views_in_one_statement_each_get_their_own_body() -> None:
         "SELECT t.TABLE_NAME FROM information_schema.tables t UNION"
         " SELECT c.name FROM customers c",
         "SELECT t.TABLE_NAME FROM (information_schema.tables t JOIN customers c ON TRUE)",
+        "SELECT c.name FROM customers c WHERE 'customers' IN"
+        " (SELECT t.TABLE_NAME FROM information_schema.tables t)",
     ],
-    ids=["cte", "derived", "union", "parenthesized-join"],
+    ids=["cte", "derived", "union", "parenthesized-join", "predicate-subquery"],
 )
 def test_catalog_view_is_wrapped_wherever_it_stands(sql: str) -> None:
     out = apply_rule_set(sql, EXAMPLE_TABLES)
@@ -495,9 +497,18 @@ def test_catalog_view_is_wrapped_wherever_it_stands(sql: str) -> None:
 
 def test_catalog_view_spec_refuses_kept_fields_outside_the_view() -> None:
     with pytest.raises(ValueError, match="kept fields not in the view"):
-        guard._CatalogView(fields=("A",), kept=frozenset({"B"}))
+        guard._CatalogView(fields=("A",), kept=frozenset({"B"}), row_filter="table")
+    with pytest.raises(ValueError, match="unknown catalog row filter"):
+        guard._CatalogView(fields=("A",), kept=frozenset(), row_filter="index")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="distinct"):
-        guard._CatalogView(fields=("A", "A"), kept=frozenset())
+        guard._CatalogView(fields=("A", "A"), kept=frozenset(), row_filter="table")
+
+
+def test_body_text_cache_refuses_another_rule_set_s_tables() -> None:
+    cache = guard._BodyTextCache(EXAMPLE_TABLES)
+    assert "`information_schema`.`TABLES`" in cache.text("TABLES", EXAMPLE_TABLES)
+    with pytest.raises(ValueError, match="another rule set"):
+        cache.text("TABLES", {"customers": ("id",)})
 
 
 def test_catalog_filter_refuses_a_view_it_has_no_filter_for() -> None:
@@ -690,7 +701,7 @@ async def test_flat_rls_rule_named_like_a_catalog_view_leaves_the_catalog_body_a
     loaded = load_rule_sets(write_rule_set_file(tmp_path), database_url=MYSQL_URL)
     rls = RlsGuardRunner(
         recorder, [RlsRule(table=view, column="tenant_id", operator="=", value=9)],
-        dialect="mysql",
+        dialect="mysql", skip_catalog_views=True,
     )
     sql = f"SELECT v.TABLE_NAME FROM information_schema.{view} v"
     await _run(RuleSetGuardRunner(rls, loaded), sql)
@@ -705,7 +716,33 @@ def test_flat_rls_still_scopes_an_application_table_named_like_a_view() -> None:
 
     rules = [RlsRule(table="tables", column="tenant_id", operator="=", value=9)]
     for sql in ("SELECT t.id FROM tables t", "SELECT t.id FROM shop.tables t"):
-        assert "tenant_id = 9" in apply_rls(sql, rules, dialect="mysql")
+        for skip in (False, True):
+            out = apply_rls(sql, rules, dialect="mysql", skip_catalog_views=skip)
+            assert "tenant_id = 9" in out
+
+
+def test_without_rule_sets_rls_still_matches_a_catalog_view_by_name() -> None:
+    """Criterion 8: with no rule-set file, flat RLS behaves exactly as before."""
+    from sqllens.config import RlsRule
+    from sqllens.safety.rls import apply_rls
+
+    rules = [RlsRule(table="tables", column="tenant_id", operator="=", value=9)]
+    sql = "SELECT t.TABLE_NAME FROM information_schema.tables t"
+    assert "tenant_id = 9" in apply_rls(sql, rules, dialect="mysql")
+
+
+def test_skipped_catalog_view_keeps_the_alias_backstop() -> None:
+    """A catalog view aliased like a protected table is still refused, flag or not."""
+    from sqllens.config import RlsRule
+    from sqllens.safety.rls import RlsError, apply_rls
+
+    rules = [RlsRule(table="orders", column="tenant_id", operator="=", value=9)]
+    for skip in (False, True):
+        with pytest.raises(RlsError, match="could not prove"):
+            apply_rls(
+                "SELECT orders.TABLE_NAME FROM information_schema.tables AS orders",
+                rules, dialect="mysql", skip_catalog_views=skip,
+            )
 
 
 # --- redaction ------------------------------------------------------------------

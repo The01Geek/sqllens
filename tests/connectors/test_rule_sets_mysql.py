@@ -14,6 +14,7 @@ table, an ``rs_customer_view`` view and an ``rs_shout`` stored function.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from collections.abc import Iterator
@@ -153,19 +154,31 @@ def _other_setup(other: str) -> list[str]:
 def database() -> Iterator[str]:
     url = _url()
     other = _other_database()
-    conn = _connect(url)
-    cursor = conn.cursor()
-    for statement in [*_SETUP, *(_other_setup(other) if other else [])]:
-        cursor.execute(statement)
-    conn.close()
-    yield url
-    conn = _connect(url)
-    cursor = conn.cursor()
-    for statement in _TEARDOWN:
-        cursor.execute(statement)
+    teardown = [*_TEARDOWN]
     if other:
-        cursor.execute(f"DROP TABLE IF EXISTS `{other}`.rs_orders, `{other}`.rs_customers")
-    conn.close()
+        teardown.append(f"DROP TABLE IF EXISTS `{other}`.rs_orders, `{other}`.rs_customers")
+    conn = _connect(url)
+    try:
+        cursor = conn.cursor()
+        for statement in [*_SETUP, *(_other_setup(other) if other else [])]:
+            cursor.execute(statement)
+    except Exception:
+        # Best-effort cleanup; the setup error is the one to report.
+        with contextlib.suppress(pymysql.err.MySQLError):
+            for statement in teardown:
+                conn.cursor().execute(statement)
+        raise
+    finally:
+        conn.close()
+    try:
+        yield url
+    finally:
+        conn = _connect(url)
+        try:
+            for statement in teardown:
+                conn.cursor().execute(statement)
+        finally:
+            conn.close()
 
 
 def _loaded(tmp_path: Path, url: str, tables=EXAMPLE, predicate=None):
@@ -205,7 +218,7 @@ def _chain(
     if read_only:
         runner = ReadOnlyGuardRunner(runner, dialect="mysql")
     if rls:
-        runner = RlsGuardRunner(runner, rls, dialect="mysql")
+        runner = RlsGuardRunner(runner, rls, dialect="mysql", skip_catalog_views=True)
     runner = RuleSetGuardRunner(runner, loaded)
     if whole_row:
         runner = WholeRowSelectGuardRunner(runner, dialect="mysql")
