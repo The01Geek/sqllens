@@ -1,0 +1,285 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "severity": "suggestion",
+   "agent": "prflow:type-design-analyzer",
+   "description": "redacted_refusal_text recognizes the locking-read refusal by substring-matching 'locking reads are not allowed', which readonly.py writes; nothing but tests keeps the two strings equal, so rewording either side silently changes the redacted text to the generic read-only text. Existing branches follow the same pattern.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/rule_sets.py",
+    "line_range": [
+     433,
+     434
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (one suggestion and four inconclusive checklist items)\nThe pull request is ready to merge: no reviewer or checklist item found a defect at or above the important threshold, and every acceptance criterion has a checklist item.\nRule applied: rule 6 — a finding below the threshold and inconclusive checklist items → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (1)\n<details><summary>1 item</summary>\n\n1. In `src/sqllens/safety/rule_sets.py` (lines 433-434), `redacted_refusal_text` recognizes the locking-read refusal by searching its message for the text `locking reads are not allowed`, which `src/sqllens/safety/readonly.py` (line 645) writes. Nothing but the tests keeps the two strings equal, so rewording one side would silently change the redacted text to the generic read-only text. Other branches of the same function already work this way. (raised by 1/6 agents)\n\n</details>\n\n### ℹ️ Informational — Deferred (4)\n- VC-1: INCONCLUSIVE (important) — Under the pinned sqlglot and MySQL dialect, every lock clause (FOR UPDATE, FOR SHARE, LOCK IN SHARE MODE, with OF/NOWAIT/SKIP LOCKED/WAIT options) parses to an exp.Lock node reachable by stmt.walk(), including locks attached to a Union node and locks in CTEs, derived tables and IN subqueries. [src/sqllens/safety/readonly.py:643]\n\n  <details><summary>Evidence</summary>\n\n  The claim depends on sqlglot 30.31.0 (requirements.txt:103) parser and Expression.walk behavior. The item has no dependency_sources, and a Glob of the head view for sqlglot/parser.py and sqlglot/expressions* found nothing, so the library source was not available. The repo code at src/sqllens/safety/readonly.py:629-645 does check isinstance(sub, exp.Lock) in stmt.walk(), but whether every lock form (including those on a Union, in CTEs, derived tables and IN subqueries) parses to exp.Lock and is visited by walk() could not be read. Missing evidence: sqlglot 30.31.0 source, or running parse_one with read='mysql' on those forms (not run).\n\n  </details>\n\n- VC-2: INCONCLUSIVE (suggestion) — sqlglot's exp.Lock 'update' arg is truthy for FOR UPDATE and falsy for FOR SHARE and LOCK IN SHARE MODE under MySQL, so the message picks the right strength. [src/sqllens/safety/readonly.py:644]\n\n  <details><summary>Evidence</summary>\n\n  The code at src/sqllens/safety/readonly.py:643-645 uses `sub.args.get(\"update\")` to choose between 'FOR UPDATE' and 'FOR SHARE / LOCK IN SHARE MODE'. Whether sqlglot's _parse_locks sets Lock(update=...) truthy only for FOR UPDATE depends on sqlglot's source. The item has no dependency_sources, and sqlglot is not vendored in the head view. I did not read sqlglot/parser.py. I did not run sqlglot to parse the three forms under MySQL.\n\n  </details>\n\n- VC-7: INCONCLUSIVE (important) — The doc asserts the guard refuses a lock clause, with any options, anywhere in the statement. [docs/internal/database-connectors/read-only-safety.md]\n\n  <details><summary>Evidence</summary>\n\n  The guard side is verified: src/sqllens/safety/readonly.py:629-645 walks every node of the single parsed statement (stmt.walk()) and raises UnsafeSqlError on any exp.Lock, so a lock nested in a subquery, a set-operation operand or a CTE is refused once sqlglot produces an exp.Lock node. Whether the claim holds for all the listed forms (FOR UPDATE WAIT 5, lock in a scalar subquery in the SELECT list, lock in an INTERSECT/EXCEPT operand, lock after an accepted SHOW) depends on how sqlglot's MySQL parser handles them: whether it emits exp.Lock, raises a parse error (which still fails closed), or silently drops the clause. The review supplied no dependency_sources and sqlglot source is not in the views, so I could not read the parser from an authorized location, and I did not run any command. Missing evidence: sqlglot's MySQL parser lock handling (_parse_locks) for those four inputs, or a run of assert_select_only on them.\n\n  </details>\n\n- VC-14: INCONCLUSIVE (critical) — Under the MySQL dialect, the `UnsafeSqlError` message for a statement whose only lock clause is exclusive (`SELECT a FROM t FOR UPDATE`) is exactly `locking reads are not allowed (found FOR UPDATE)`, and for one whose only lock clause is shared (`SELECT a FROM t FOR SHARE` and `SELECT a FROM t LOCK IN SHARE MODE`) is exactly `locking reads are not allowed (found FOR SHARE / LOCK IN SHARE MODE)`. For `SELECT a FROM t FOR SHARE OF secret_table /* note */`, the message contains neither `secret_table` nor `note`. [src/sqllens/safety/readonly.py:644]\n\n  <details><summary>Evidence</summary>\n\n  Graded with criteria.json (criterion 2 present and matches). readonly.py:643-645 (head) raises UnsafeSqlError(f\"locking reads are not allowed (found {found})\") with found = \"FOR UPDATE\" if sub.args.get(\"update\") else \"FOR SHARE / LOCK IN SHARE MODE\". The text is built only from constants, not sub.sql(), so no table name or comment can enter the message; the fixed strings contain no 'secret_table' or 'note' (\"not allowed\" does not contain \"note\"). Tests test_message_names_lock_strength / test_message_names_no_table_or_comment (tests/unit/test_safety.py:678-689) assert these exact strings. What I could not settle by reading: that sqlglot's MySQL parser yields exp.Lock with update=True for FOR UPDATE and update falsy for FOR SHARE / LOCK IN SHARE MODE, and that no earlier deny-walk branch fires first. No dependency_sources were supplied, and I did not run pytest tests/unit/test_safety.py. The code strongly suggests PASS, but the update-flag mapping rests on the library's behavior.\n\n  </details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: 7 changed files, 156 changed lines; has_new_types and test_relevant set; detect_all_audit not set.\n- Working tree: checked at the start of the run, clean; the dirty-tree check after the reviewers found no change.\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass extension (requesting-code-review): PROMPT-EXTENSION-STATUS: content-present.\n- CI evidence: no CI results were supplied for head 66f2203f57c0244f2a6a82829dae407a8efafc89, and no test suite was run in this review.\n- Normalized (wording-only): 0\n- Verification: the first verifier dispatch for item VC-8 produced no usable verdict; a second dispatch returned PASS. Items VC-20 and VC-21 were refused at first by the concurrent-agent limit and then dispatched and returned PASS.\n- The checklist generator's first output failed validation (item 4 had no claim); the generator then rewrote its output, which passed.\n- prior-report: none\n- Checklist: 17 passed, 0 failed, 4 inconclusive\n- <details><summary>✅ Passed items (17 of 21)</summary>\n\n  - VC-3: No step of assert_select_only before the lock check (TABLE shorthand tokenizer check, parse, root-type check, earlier walk checks) refuses or accepts a plain locking SELECT with a different message, so the lock message is what callers see. [src/sqllens/safety/readonly.py:629]\n  - VC-4: redacted_refusal_text maps a ReadOnlyGuardRunner refusal containing 'locking reads are not allowed' to REDACTED_LOCKING_READ; the refusal reaches it as a non-RlsError, non-WholeRowSelectError exception whose message matches no _PARSE_REFUSAL_MARKERS entry, is not flagged by _logged_by_guard, and does not contain 'side-effecting / DoS / RCE'. [src/sqllens/safety/rule_sets.py:433]\n  - VC-5: The test's _Inner stub matches the SqlRunner interface ReadOnlyGuardRunner calls (async run_sql(args, context)), RunSqlToolArgs(sql=...) and ToolContext.model_construct() are valid inputs to ReadOnlyGuardRunner.run_sql, and the async test runs under the repo's pytest asyncio mode. [tests/unit/test_safety.py]\n  - VC-6: _BYPASS_CORPUS three-tuple entries (sql, dialect, match) are consumed by TestCorpusStaysRejected as a match against the UnsafeSqlError message, so 'locking reads' matches the new refusals. [tests/unit/test_safety.py]\n  - VC-8: The doc asserts the check is only in assert_select_only, so with read_only = false no lock clause is refused. [docs/internal/database-connectors/read-only-safety.md]\n  - VC-9: The doc states that while a rule-set file is configured, RefusalRedactingRunner shows the locking-read redacted text instead of the raw refusal. [docs/internal/database-connectors/read-only-safety.md]\n  - VC-10: The doc asserts that on MySQL only the parser guard's rule 8 keeps shared-lock reads out. [docs/internal/database-connectors/read-only-safety.md]\n  - VC-11: The doc says an accepted SHOW passes through the deny-walk in rules 5–8; rules 5–8 must all be enforced in the walk loop of assert_select_only. [docs/internal/database-connectors/read-only-safety.md]\n  - VC-12: The changelog states that with read_only = true (the default) locking reads with any options are refused anywhere in a query before it runs. [changelog.d/392.security.md:1]\n  - VC-13: `assert_select_only(sql, dialect=\"mysql\")` raises `UnsafeSqlError` for each of these statements (at minimum): `SELECT a FROM t FOR UPDATE`, `SELECT a FROM t FOR SHARE`, `SELECT a FROM t LOCK IN SHARE MODE`, `SELECT a FROM t FOR UPDATE NOWAIT`, `SELECT a FROM t FOR UPDATE SKIP LOCKED`, `SELECT a FROM t FOR SHARE OF t`, `SELECT a FROM t FOR UPDATE OF t FOR SHARE OF u`, `WITH x AS (SELECT a FROM t FOR UPDATE) SELECT a FROM x`, `SELECT a FROM (SELECT a FROM t FOR SHARE) s`, `SELECT a FROM t WHERE a IN (SELECT a FROM u FOR UPDATE)`, `(SELECT a FROM t) UNION (SELECT a FROM u FOR SHARE)`, `SELECT a FROM t UNION SELECT a FROM u FOR UPDATE` and `SELECT a FROM t UNION (SELECT a FROM u) FOR UPDATE`. [src/sqllens/safety/readonly.py:643]\n  - VC-15: `ReadOnlyGuardRunner.run_sql` given `SELECT a FROM t FOR SHARE` under the MySQL dialect raises `UnsafeSqlError` and never calls its inner runner. [tests/unit/test_safety.py]\n  - VC-16: `assert_select_only(sql, dialect=\"mysql\")` still accepts `SELECT a FROM t`, `SELECT a FROM t WHERE a IN (SELECT a FROM u)`, `(SELECT a FROM t) UNION (SELECT a FROM u)` and ``SELECT `lock`, `share` FROM `update` `` (which holds the words `lock`, `share` and `update` but no lock clause). [tests/unit/test_safety.py]\n  - VC-17: A test pins the sqlglot tree shape the check relies on, under the version `requirements.txt` locks and the MySQL dialect: `SELECT a FROM t FOR UPDATE` parses to one `exp.Lock` node with `update` true, and `SELECT a FROM t FOR SHARE` and `SELECT a FROM t LOCK IN SHARE MODE` each parse to one `exp.Lock` node with `update` false. [tests/unit/test_safety.py]\n  - VC-18: `redacted_refusal_text` maps the read-only guard's refusal of a locking read (`refusing to execute non-SELECT SQL: locking reads are not allowed (found FOR UPDATE)`, and the same with `(found FOR SHARE / LOCK IN SHARE MODE)`) to exactly `refusing to execute SQL: locking reads (FOR UPDATE, FOR SHARE, LOCK IN SHARE MODE) are not allowed`, and still maps `refusing to execute non-SELECT SQL: only SELECT (got DELETE)` to `refusing to execute SQL: only a single SELECT query is allowed`. [src/sqllens/safety/rule_sets.py:433]\n  - VC-19: `docs/internal/database-connectors/read-only-safety.md` states, in its \"What the guard does\" rules, that the guard refuses a lock clause (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`, with any options) anywhere in the statement, and why: MySQL 8.0's read-only session (checked on 8.0.46) refuses `FOR UPDATE` (error 1792) but runs `FOR SHARE` and `LOCK IN SHARE MODE`, whose shared row locks block other sessions' writes until the connection closes. Its MySQL row under \"Driver-level read-only enforcement\" states that the read-only session does not stop shared-lock reads. [docs/internal/database-connectors/read-only-safety.md]\n  - VC-20: `docs/external/configuration.md`'s `read_only` row lists locking reads (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`) among the statements rejected while `read_only` is true. [docs/external/configuration.md]\n  - VC-21: The change adds no lock-clause check outside `assert_select_only`: `assert_no_denied_functions` (the function-denylist check that RLS runs while `read_only = false`) does not refuse `SELECT a FROM t FOR SHARE` under the MySQL dialect. The change also leaves the Tool Errors rules in `src/sqllens/agent/core/system_prompt/default.py` unchanged, so they name no lock refusal, and adds no connector test of how MySQL's read-only session handles locking reads. [tests/unit/test_safety.py]\n\n  </details>\n- Reviewed against issue #385 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] `assert_select_only(sql, dialect=\"mysql\")` raises `UnsafeSqlError` for each of these statements (at minimum): `SELECT a FROM t FOR UPDATE`, `SELECT a FROM t FOR SHARE`, `SELECT a FROM t LOCK IN SHARE MODE`, `SELECT a FROM t FOR UPDATE NOWAIT`, `SELECT a FROM t FOR UPDATE SKIP LOCKED`, `SELECT a FROM t FOR SHARE OF t`, `SELECT a FROM t FOR UPDATE OF t FOR SHARE OF u`, `WITH x AS (SELECT a FROM t FOR UPDATE) SELECT a FROM x`, `SELECT a FROM (SELECT a FROM t FOR SHARE) s`, `SELECT a FROM t WHERE a IN (SELECT a FROM u FOR UPDATE)`, `(SELECT a FROM t) UNION (SELECT a FROM u FOR SHARE)`, `SELECT a FROM t UNION SELECT a FROM u FOR UPDATE` and `SELECT a FROM t UNION (SELECT a FROM u) FOR UPDATE`.\n- [ ] Under the MySQL dialect, the `UnsafeSqlError` message for a statement whose only lock clause is exclusive (`SELECT a FROM t FOR UPDATE`) is exactly `locking reads are not allowed (found FOR UPDATE)`, and for one whose only lock clause is shared (`SELECT a FROM t FOR SHARE` and `SELECT a FROM t LOCK IN SHARE MODE`) is exactly `locking reads are not allowed (found FOR SHARE / LOCK IN SHARE MODE)`. For `SELECT a FROM t FOR SHARE OF secret_table /* note */`, the message contains neither `secret_table` nor `note`.\n- [ ] `ReadOnlyGuardRunner.run_sql` given `SELECT a FROM t FOR SHARE` under the MySQL dialect raises `UnsafeSqlError` and never calls its inner runner.\n- [ ] `assert_select_only(sql, dialect=\"mysql\")` still accepts `SELECT a FROM t`, `SELECT a FROM t WHERE a IN (SELECT a FROM u)`, `(SELECT a FROM t) UNION (SELECT a FROM u)` and ``SELECT `lock`, `share` FROM `update` `` (which holds the words `lock`, `share` and `update` but no lock clause).\n- [ ] A test pins the sqlglot tree shape the check relies on, under the version `requirements.txt` locks and the MySQL dialect: `SELECT a FROM t FOR UPDATE` parses to one `exp.Lock` node with `update` true, and `SELECT a FROM t FOR SHARE` and `SELECT a FROM t LOCK IN SHARE MODE` each parse to one `exp.Lock` node with `update` false.\n- [ ] `redacted_refusal_text` maps the read-only guard's refusal of a locking read (`refusing to execute non-SELECT SQL: locking reads are not allowed (found FOR UPDATE)`, and the same with `(found FOR SHARE / LOCK IN SHARE MODE)`) to exactly `refusing to execute SQL: locking reads (FOR UPDATE, FOR SHARE, LOCK IN SHARE MODE) are not allowed`, and still maps `refusing to execute non-SELECT SQL: only SELECT (got DELETE)` to `refusing to execute SQL: only a single SELECT query is allowed`.\n- [ ] `docs/internal/database-connectors/read-only-safety.md` states, in its \"What the guard does\" rules, that the guard refuses a lock clause (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`, with any options) anywhere in the statement, and why: MySQL 8.0's read-only session (checked on 8.0.46) refuses `FOR UPDATE` (error 1792) but runs `FOR SHARE` and `LOCK IN SHARE MODE`, whose shared row locks block other sessions' writes until the connection closes. Its MySQL row under \"Driver-level read-only enforcement\" states that the read-only session does not stop shared-lock reads.\n- [ ] `docs/external/configuration.md`'s `read_only` row lists locking reads (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`) among the statements rejected while `read_only` is true.\n- [ ] The change adds no lock-clause check outside `assert_select_only`: `assert_no_denied_functions` (the function-denylist check that RLS runs while `read_only = false`) does not refuse `SELECT a FROM t FOR SHARE` under the MySQL dialect. The change also leaves the Tool Errors rules in `src/sqllens/agent/core/system_prompt/default.py` unchanged, so they name no lock refusal, and adds no connector test of how MySQL's read-only session handles locking reads.",
+ "diff_produced_at_head": "66f2203f57c0244f2a6a82829dae407a8efafc89",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "category": "dependency_interaction",
+   "claim": "Under the pinned sqlglot and MySQL dialect, every lock clause (FOR UPDATE, FOR SHARE, LOCK IN SHARE MODE, with OF/NOWAIT/SKIP LOCKED/WAIT options) parses to an exp.Lock node reachable by stmt.walk(), including locks attached to a Union node and locks in CTEs, derived tables and IN subqueries.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/safety/readonly.py",
+   "source_line": 643,
+   "source_line_end": 645,
+   "verify_against": "sqlglot (version locked in requirements.txt) MySQL parser and Expression.walk",
+   "verify_hint": "Check sqlglot's parser _parse_locks / Lock expression and how Union/SetOperation stores 'locks' in sqlglot/expressions.py and sqlglot/parser.py; confirm walk() visits list-valued args",
+   "claim_signature": "dependency_interaction:readonly.py:lock-node-walk-coverage:643",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim depends on sqlglot 30.31.0 (requirements.txt:103) parser and Expression.walk behavior. The item has no dependency_sources, and a Glob of the head view for sqlglot/parser.py and sqlglot/expressions* found nothing, so the library source was not available. The repo code at src/sqllens/safety/readonly.py:629-645 does check isinstance(sub, exp.Lock) in stmt.walk(), but whether every lock form (including those on a Union, in CTEs, derived tables and IN subqueries) parses to exp.Lock and is visited by walk() could not be read. Missing evidence: sqlglot 30.31.0 source, or running parse_one with read='mysql' on those forms (not run).",
+   "file_checked": "src/sqllens/safety/readonly.py:643-645",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-2",
+   "category": "dependency_interaction",
+   "claim": "sqlglot's exp.Lock 'update' arg is truthy for FOR UPDATE and falsy for FOR SHARE and LOCK IN SHARE MODE under MySQL, so the message picks the right strength.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/safety/readonly.py",
+   "source_line": 644,
+   "verify_against": "sqlglot parser _parse_locks",
+   "verify_hint": "Check how sqlglot/parser.py sets Lock(update=...) for FOR UPDATE, FOR SHARE and LOCK IN SHARE MODE",
+   "claim_signature": "dependency_interaction:readonly.py:lock-update-arg:644",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The code at src/sqllens/safety/readonly.py:643-645 uses `sub.args.get(\"update\")` to choose between 'FOR UPDATE' and 'FOR SHARE / LOCK IN SHARE MODE'. Whether sqlglot's _parse_locks sets Lock(update=...) truthy only for FOR UPDATE depends on sqlglot's source. The item has no dependency_sources, and sqlglot is not vendored in the head view. I did not read sqlglot/parser.py. I did not run sqlglot to parse the three forms under MySQL.",
+   "file_checked": "src/sqllens/safety/readonly.py:643-645",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:readonly.py:lock-check-ordering:629",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "api_contract:rule_sets.py:locking-read-redaction:433",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "test_mock_alignment:test_safety.py:guard-runner-inner-stub",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "data_format_assumption:test_safety.py:corpus-match-tuple",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "category": "absolute_claim",
+   "claim": "The doc asserts the guard refuses a lock clause, with any options, anywhere in the statement.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "The guard refuses a lock clause (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`, with any options such as `OF`, `NOWAIT`, `SKIP LOCKED` or `WAIT n`) anywhere in the statement",
+   "source_file": "docs/internal/database-connectors/read-only-safety.md",
+   "verify_against": "assert_select_only walk in readonly.py and sqlglot MySQL lock parsing",
+   "verify_hint": "Trace 'SELECT a FROM t FOR UPDATE WAIT 5', a lock inside a scalar subquery in the SELECT list, a lock in an INTERSECT/EXCEPT operand, and a lock after an accepted SHOW, through sqlglot's MySQL parser to see whether each yields an exp.Lock or a parse error",
+   "claim_signature": "absolute_claim:read-only-safety.md:lock-anywhere-any-options",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The guard side is verified: src/sqllens/safety/readonly.py:629-645 walks every node of the single parsed statement (stmt.walk()) and raises UnsafeSqlError on any exp.Lock, so a lock nested in a subquery, a set-operation operand or a CTE is refused once sqlglot produces an exp.Lock node. Whether the claim holds for all the listed forms (FOR UPDATE WAIT 5, lock in a scalar subquery in the SELECT list, lock in an INTERSECT/EXCEPT operand, lock after an accepted SHOW) depends on how sqlglot's MySQL parser handles them: whether it emits exp.Lock, raises a parse error (which still fails closed), or silently drops the clause. The review supplied no dependency_sources and sqlglot source is not in the views, so I could not read the parser from an authorized location, and I did not run any command. Missing evidence: sqlglot's MySQL parser lock handling (_parse_locks) for those four inputs, or a run of assert_select_only on them.",
+   "file_checked": "src/sqllens/safety/readonly.py:629-649",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "absolute_claim:read-only-safety.md:read-only-false-no-refusal",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "api_contract:read-only-safety.md:redacting-runner-condition",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "absolute_claim:read-only-safety.md:only-rule-8",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "api_contract:read-only-safety.md:rule-range-5-8",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "api_contract:392.security.md:changelog-scope",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-13",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "Under the MySQL dialect, the `UnsafeSqlError` message for a statement whose only lock clause is exclusive (`SELECT a FROM t FOR UPDATE`) is exactly `locking reads are not allowed (found FOR UPDATE)`, and for one whose only lock clause is shared (`SELECT a FROM t FOR SHARE` and `SELECT a FROM t LOCK IN SHARE MODE`) is exactly `locking reads are not allowed (found FOR SHARE / LOCK IN SHARE MODE)`. For `SELECT a FROM t FOR SHARE OF secret_table /* note */`, the message contains neither `secret_table` nor `note`.",
+   "claim_signature": "issue-acceptance-2",
+   "criteria_file": ".prflow/tmp/review/pr-392/local-20261114T093943Z-1/criteria.json",
+   "source_file": "src/sqllens/safety/readonly.py",
+   "source_line": 644,
+   "verify_hint": "readonly.py 644-645; test_message_names_lock_strength and test_message_names_no_table_or_comment",
+   "id": "VC-14",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Graded with criteria.json (criterion 2 present and matches). readonly.py:643-645 (head) raises UnsafeSqlError(f\"locking reads are not allowed (found {found})\") with found = \"FOR UPDATE\" if sub.args.get(\"update\") else \"FOR SHARE / LOCK IN SHARE MODE\". The text is built only from constants, not sub.sql(), so no table name or comment can enter the message; the fixed strings contain no 'secret_table' or 'note' (\"not allowed\" does not contain \"note\"). Tests test_message_names_lock_strength / test_message_names_no_table_or_comment (tests/unit/test_safety.py:678-689) assert these exact strings. What I could not settle by reading: that sqlglot's MySQL parser yields exp.Lock with update=True for FOR UPDATE and update falsy for FOR SHARE / LOCK IN SHARE MODE, and that no earlier deny-walk branch fires first. No dependency_sources were supplied, and I did not run pytest tests/unit/test_safety.py. The code strongly suggests PASS, but the update-flag mapping rests on the library's behavior.",
+   "file_checked": "src/sqllens/safety/readonly.py:643-645",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-15",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-16",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-17",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-18",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-20",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-21",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}

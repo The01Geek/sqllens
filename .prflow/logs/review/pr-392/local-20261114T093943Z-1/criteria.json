@@ -1,0 +1,38 @@
+[
+  {
+    "criterion": 1,
+    "text": "`assert_select_only(sql, dialect=\"mysql\")` raises `UnsafeSqlError` for each of these statements (at minimum): `SELECT a FROM t FOR UPDATE`, `SELECT a FROM t FOR SHARE`, `SELECT a FROM t LOCK IN SHARE MODE`, `SELECT a FROM t FOR UPDATE NOWAIT`, `SELECT a FROM t FOR UPDATE SKIP LOCKED`, `SELECT a FROM t FOR SHARE OF t`, `SELECT a FROM t FOR UPDATE OF t FOR SHARE OF u`, `WITH x AS (SELECT a FROM t FOR UPDATE) SELECT a FROM x`, `SELECT a FROM (SELECT a FROM t FOR SHARE) s`, `SELECT a FROM t WHERE a IN (SELECT a FROM u FOR UPDATE)`, `(SELECT a FROM t) UNION (SELECT a FROM u FOR SHARE)`, `SELECT a FROM t UNION SELECT a FROM u FOR UPDATE` and `SELECT a FROM t UNION (SELECT a FROM u) FOR UPDATE`."
+  },
+  {
+    "criterion": 2,
+    "text": "Under the MySQL dialect, the `UnsafeSqlError` message for a statement whose only lock clause is exclusive (`SELECT a FROM t FOR UPDATE`) is exactly `locking reads are not allowed (found FOR UPDATE)`, and for one whose only lock clause is shared (`SELECT a FROM t FOR SHARE` and `SELECT a FROM t LOCK IN SHARE MODE`) is exactly `locking reads are not allowed (found FOR SHARE / LOCK IN SHARE MODE)`. For `SELECT a FROM t FOR SHARE OF secret_table /* note */`, the message contains neither `secret_table` nor `note`."
+  },
+  {
+    "criterion": 3,
+    "text": "`ReadOnlyGuardRunner.run_sql` given `SELECT a FROM t FOR SHARE` under the MySQL dialect raises `UnsafeSqlError` and never calls its inner runner."
+  },
+  {
+    "criterion": 4,
+    "text": "`assert_select_only(sql, dialect=\"mysql\")` still accepts `SELECT a FROM t`, `SELECT a FROM t WHERE a IN (SELECT a FROM u)`, `(SELECT a FROM t) UNION (SELECT a FROM u)` and ``SELECT `lock`, `share` FROM `update` `` (which holds the words `lock`, `share` and `update` but no lock clause)."
+  },
+  {
+    "criterion": 5,
+    "text": "A test pins the sqlglot tree shape the check relies on, under the version `requirements.txt` locks and the MySQL dialect: `SELECT a FROM t FOR UPDATE` parses to one `exp.Lock` node with `update` true, and `SELECT a FROM t FOR SHARE` and `SELECT a FROM t LOCK IN SHARE MODE` each parse to one `exp.Lock` node with `update` false."
+  },
+  {
+    "criterion": 6,
+    "text": "`redacted_refusal_text` maps the read-only guard's refusal of a locking read (`refusing to execute non-SELECT SQL: locking reads are not allowed (found FOR UPDATE)`, and the same with `(found FOR SHARE / LOCK IN SHARE MODE)`) to exactly `refusing to execute SQL: locking reads (FOR UPDATE, FOR SHARE, LOCK IN SHARE MODE) are not allowed`, and still maps `refusing to execute non-SELECT SQL: only SELECT (got DELETE)` to `refusing to execute SQL: only a single SELECT query is allowed`."
+  },
+  {
+    "criterion": 7,
+    "text": "`docs/internal/database-connectors/read-only-safety.md` states, in its \"What the guard does\" rules, that the guard refuses a lock clause (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`, with any options) anywhere in the statement, and why: MySQL 8.0's read-only session (checked on 8.0.46) refuses `FOR UPDATE` (error 1792) but runs `FOR SHARE` and `LOCK IN SHARE MODE`, whose shared row locks block other sessions' writes until the connection closes. Its MySQL row under \"Driver-level read-only enforcement\" states that the read-only session does not stop shared-lock reads."
+  },
+  {
+    "criterion": 8,
+    "text": "`docs/external/configuration.md`'s `read_only` row lists locking reads (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`) among the statements rejected while `read_only` is true."
+  },
+  {
+    "criterion": 9,
+    "text": "The change adds no lock-clause check outside `assert_select_only`: `assert_no_denied_functions` (the function-denylist check that RLS runs while `read_only = false`) does not refuse `SELECT a FROM t FOR SHARE` under the MySQL dialect. The change also leaves the Tool Errors rules in `src/sqllens/agent/core/system_prompt/default.py` unchanged, so they name no lock refusal, and adds no connector test of how MySQL's read-only session handles locking reads."
+  }
+]
