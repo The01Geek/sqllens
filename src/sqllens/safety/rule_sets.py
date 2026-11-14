@@ -20,7 +20,8 @@ so a column the set does not list fails as an unknown column.
 A reference to ``INFORMATION_SCHEMA.TABLES``, ``COLUMNS`` or
 ``KEY_COLUMN_USAGE`` becomes a derived table over that view (see
 :func:`_catalog_body`): it keeps only rows for the connected database and the
-set's tables and listed columns, projects every field of the view under its
+set's tables (for ``COLUMNS`` and ``KEY_COLUMN_USAGE``, its tables' listed
+columns), projects every field of the view under its
 own name with only :data:`_CATALOG_VIEWS`' kept fields carrying values, and
 ends in a ``LIMIT`` so MySQL materializes it before the model's expressions
 read it. Every other catalog relation is refused.
@@ -95,6 +96,12 @@ class _CatalogView:
 
     fields: tuple[str, ...]
     kept: frozenset[str]
+
+    def __post_init__(self) -> None:
+        if not self.fields or len(set(self.fields)) != len(self.fields):
+            raise ValueError("catalog view fields must be non-empty and distinct")
+        if not self.kept <= set(self.fields):
+            raise ValueError(f"kept fields not in the view: {sorted(self.kept - set(self.fields))}")
 
 
 # Every field of each view in MySQL 8.0+, in the view's own order. A field
@@ -319,7 +326,10 @@ def _quoted(name: str) -> exp.Column:
 
 
 def _binary(node: exp.Expression) -> exp.Cast:
-    """``BINARY node``, so a comparison matches byte for byte, as the existence check does."""
+    """``CAST(node AS BINARY)``, MySQL's ``BINARY node``.
+
+    So a comparison matches byte for byte, as the existence check does.
+    """
     return exp.Cast(this=node, to=exp.DataType.build("BINARY", dialect=_DIALECT))
 
 
@@ -338,11 +348,15 @@ def _in_pairs(table_field: str, column_field: str, pairs: list[tuple[str, str]])
 
 
 def _catalog_filter(view: str, tables: Mapping[str, tuple[str, ...]]) -> exp.Expression:
-    """The row filter for ``view``: the connected database and the set's tables and columns.
+    """The row filter for ``view``: the connected database and the set's tables.
 
-    One literal list per comparison keeps the filter compact at the scale of a
-    real rule-set file.
+    ``COLUMNS`` and ``KEY_COLUMN_USAGE`` also require a listed column, and
+    ``KEY_COLUMN_USAGE`` a listed referenced column or none. One literal list
+    per comparison keeps the filter compact at the scale of a real rule-set
+    file. Raises ``ValueError`` for a view it has no filter for.
     """
+    if view not in ("TABLES", "COLUMNS", "KEY_COLUMN_USAGE"):
+        raise ValueError(f"no catalog filter for view {view!r}")
     if view == "TABLES":
         return exp.and_(
             _in_schema("TABLE_SCHEMA"),
@@ -437,7 +451,7 @@ def _is_guard_derived(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) -
 
 
 def _is_catalog_derived(
-    table: exp.Table, tables: Mapping[str, tuple[str, ...]], expected: dict[str, str]
+    table: exp.Table, tables: Mapping[str, tuple[str, ...]], expected: dict[tuple[int, str], str]
 ) -> bool:
     """True if ``table`` is a catalog view inside exactly the derived table the guard builds.
 
@@ -460,20 +474,23 @@ def _is_catalog_derived(
     alias = wrapper.args.get("alias")
     if alias is not None and alias.args.get("columns"):
         return False
-    if view not in expected:
-        expected[view] = _generate(_catalog_body(view, tables))
-    return _generate(body) == expected[view]
+    # Keyed by the mapping's identity too, so text built for another rule set
+    # is never compared against this one.
+    key = (id(tables), view)
+    if key not in expected:
+        expected[key] = _generate(_catalog_body(view, tables))
+    return _generate(body) == expected[key]
 
 
 def _rewalk(
     tree: exp.Expression,
     tables: Mapping[str, tuple[str, ...]],
-    expected: dict[str, str] | None = None,
+    expected: dict[tuple[int, str], str] | None = None,
 ) -> None:
     """Refuse ``tree`` unless every base-table and catalog reference is in a guard-built wrapper.
 
-    ``expected`` caches each catalog view's body text across the two re-walks
-    of one statement; it must be built from this same ``tables``.
+    ``expected`` caches each catalog view's body text, per ``tables`` mapping,
+    across the two re-walks of one statement.
     """
     expected = {} if expected is None else expected
     accounted: set[int] = set()
@@ -528,7 +545,7 @@ def apply_rule_set(sql: str, tables: Mapping[str, tuple[str, ...]]) -> str:
     tree = _parse(sql)
     base, catalog = _analyze(tree, tables)
     _rewrite(tree, base, catalog, tables)
-    expected: dict[str, str] = {}
+    expected: dict[tuple[int, str], str] = {}
     _rewalk(tree, tables, expected)
     output = _generate(tree)
     try:

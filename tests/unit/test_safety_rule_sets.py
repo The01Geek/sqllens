@@ -465,6 +465,46 @@ def test_rewalk_refuses_an_altered_catalog_body(tamper) -> None:
         guard._rewalk(tree, EXAMPLE_TABLES)
 
 
+def test_two_catalog_views_in_one_statement_each_get_their_own_body() -> None:
+    sql = (
+        "SELECT t.TABLE_TYPE, c.COLUMN_NAME FROM information_schema.tables t"
+        " JOIN information_schema.columns c ON c.TABLE_NAME = t.TABLE_NAME"
+    )
+    out = apply_rule_set(sql, EXAMPLE_TABLES)
+    assert f"FROM {DERIVED_TABLES} AS t JOIN (SELECT " in out
+    assert _COLUMNS_FILTER + " LIMIT 18446744073709551615) AS c ON" in out
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "WITH v AS (SELECT t.TABLE_NAME FROM information_schema.tables t) SELECT v.TABLE_NAME"
+        " FROM v",
+        "SELECT d.TABLE_NAME FROM (SELECT t.TABLE_NAME FROM information_schema.tables t) d",
+        "SELECT t.TABLE_NAME FROM information_schema.tables t UNION"
+        " SELECT c.name FROM customers c",
+        "SELECT t.TABLE_NAME FROM (information_schema.tables t JOIN customers c ON TRUE)",
+    ],
+    ids=["cte", "derived", "union", "parenthesized-join"],
+)
+def test_catalog_view_is_wrapped_wherever_it_stands(sql: str) -> None:
+    out = apply_rule_set(sql, EXAMPLE_TABLES)
+    assert f"{DERIVED_TABLES} AS t" in out
+    assert out.count("`information_schema`.`TABLES`") == 1
+
+
+def test_catalog_view_spec_refuses_kept_fields_outside_the_view() -> None:
+    with pytest.raises(ValueError, match="kept fields not in the view"):
+        guard._CatalogView(fields=("A",), kept=frozenset({"B"}))
+    with pytest.raises(ValueError, match="distinct"):
+        guard._CatalogView(fields=("A", "A"), kept=frozenset())
+
+
+def test_catalog_filter_refuses_a_view_it_has_no_filter_for() -> None:
+    with pytest.raises(ValueError, match="no catalog filter"):
+        guard._catalog_filter("STATISTICS", EXAMPLE_TABLES)
+
+
 def test_rewalk_refuses_the_catalog_body_built_for_another_set() -> None:
     tree = _rewritten("SELECT 1 AS one FROM information_schema.columns v")
     with pytest.raises(RuleSetRefusal, match="could not be checked"):
@@ -636,6 +676,36 @@ async def test_flat_rls_adds_its_predicate_inside_the_derived_table(tmp_path, se
         "SELECT c.name FROM (SELECT `customers`.`id`, `customers`.`name` FROM `customers`"
         " WHERE customers.rep_id = 9) AS c"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("view", ["tables", "columns", "key_column_usage"])
+async def test_flat_rls_rule_named_like_a_catalog_view_leaves_the_catalog_body_alone(
+    tmp_path, selected, view
+) -> None:
+    """An [[rls]] rule on an application table named like a view never reaches the view."""
+    from sqllens.config import RlsRule
+
+    recorder = _Recorder()
+    loaded = load_rule_sets(write_rule_set_file(tmp_path), database_url=MYSQL_URL)
+    rls = RlsGuardRunner(
+        recorder, [RlsRule(table=view, column="tenant_id", operator="=", value=9)],
+        dialect="mysql",
+    )
+    sql = f"SELECT v.TABLE_NAME FROM information_schema.{view} v"
+    await _run(RuleSetGuardRunner(rls, loaded), sql)
+    (out, _), = recorder.calls
+    assert out == apply_rule_set(sql, EXAMPLE_TABLES)
+    assert "tenant_id" not in out
+
+
+def test_flat_rls_still_scopes_an_application_table_named_like_a_view() -> None:
+    from sqllens.config import RlsRule
+    from sqllens.safety.rls import apply_rls
+
+    rules = [RlsRule(table="tables", column="tenant_id", operator="=", value=9)]
+    for sql in ("SELECT t.id FROM tables t", "SELECT t.id FROM shop.tables t"):
+        assert "tenant_id = 9" in apply_rls(sql, rules, dialect="mysql")
 
 
 # --- redaction ------------------------------------------------------------------

@@ -189,7 +189,7 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
         if self.rule_sets:
             # The rule-set guard rewrites only these three views and refuses
             # every other catalog read and every SHOW statement.
-            introspection_how = "Look up tables, columns and keys only with a SELECT against INFORMATION_SCHEMA.TABLES, INFORMATION_SCHEMA.COLUMNS or INFORMATION_SCHEMA.KEY_COLUMN_USAGE. No SHOW statement, DESCRIBE or other catalog lookup is permitted."
+            introspection_how = "Look up tables, columns and keys only with a SELECT against INFORMATION_SCHEMA.TABLES, INFORMATION_SCHEMA.COLUMNS or INFORMATION_SCHEMA.KEY_COLUMN_USAGE. Their fields other than names, types and keys are withheld and read as NULL, so a NULL there says nothing about the database. No SHOW statement, DESCRIBE or other catalog lookup is permitted."
         else:
             introspection_how = f"Express introspection as a SELECT against the catalog {catalog_example}; on MySQL the structural SHOW variants (SHOW TABLES, SHOW COLUMNS, SHOW DATABASES, SHOW INDEX, SHOW CREATE TABLE/VIEW) are also permitted. DESCRIBE and the information-disclosing SHOW variants (SHOW GRANTS, SHOW PROCESSLIST, SHOW VARIABLES, SHOW STATUS, replication-status) are not permitted."
 

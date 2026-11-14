@@ -112,7 +112,8 @@ Common reasons a query is refused:
 
 - It reads a table the selected rule set does not list.
 - It is not a single `SELECT` statement.
-- It names a database or schema explicitly, or reads a catalog schema, other than the three schema-lookup views below, or runs a `SHOW` statement.
+- It names a database or schema explicitly, or reads a catalog schema. The one exception is the three schema-lookup views described below.
+- It runs a `SHOW` statement.
 - It uses a table function, `JSON_TABLE` or `DUAL`, a partition list, or an index hint.
 - It calls a function SQL Lens does not allow.
 

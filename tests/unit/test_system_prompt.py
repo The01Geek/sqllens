@@ -744,8 +744,9 @@ _RULE_SET_INTROSPECTION = (
     _INTROSPECTION_PREFIX
     + "Look up tables, columns and keys only with a SELECT against"
     " INFORMATION_SCHEMA.TABLES, INFORMATION_SCHEMA.COLUMNS or"
-    " INFORMATION_SCHEMA.KEY_COLUMN_USAGE. No SHOW statement, DESCRIBE or other catalog"
-    " lookup is permitted."
+    " INFORMATION_SCHEMA.KEY_COLUMN_USAGE. Their fields other than names, types and keys"
+    " are withheld and read as NULL, so a NULL there says nothing about the database."
+    " No SHOW statement, DESCRIBE or other catalog lookup is permitted."
     + _INTROSPECTION_SUFFIX
 )
 

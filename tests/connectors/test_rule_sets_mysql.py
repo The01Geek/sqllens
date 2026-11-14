@@ -587,11 +587,28 @@ async def test_key_column_usage_lists_only_keys_inside_the_set(
     )
     assert (schema, "rs_customers", "id", schema, "rs_salaries") in hidden
     assert (schema, "rs_orders", "discount", schema, "rs_customers") in hidden
+
+
+async def test_other_database_keys_exist_but_are_hidden(database, tmp_path, selected) -> None:
+    """The same-named tables and cross-database key the main KCU test must hide are present."""
     other = _other_database()
     if other is None:
         pytest.skip("SQLLENS_TEST_MYSQL_OTHER_DATABASE not set; other-database rows not checked")
-    assert (other, "rs_orders", "id", None, None) in hidden
-    assert (schema, "rs_orders", "customer_id", other, "rs_customers") in hidden
+    schema = urlparse(database).path.lstrip("/")
+    unguarded = _unguarded(
+        database,
+        "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_SCHEMA,"
+        " REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE"
+        " WHERE TABLE_NAME LIKE 'rs\\_%'",
+    )
+    assert (other, "rs_orders", "id", None, None) in unguarded
+    assert (schema, "rs_orders", "customer_id", other, "rs_customers") in unguarded
+    frame = await _run(
+        _chain(database, _loaded(tmp_path, database)),
+        "SELECT k.TABLE_SCHEMA, k.REFERENCED_TABLE_SCHEMA"
+        " FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE k",
+    )
+    assert other not in set(frame["TABLE_SCHEMA"]) | set(frame["REFERENCED_TABLE_SCHEMA"])
 
 
 async def test_error_raising_condition_never_sees_a_hidden_row(
@@ -644,11 +661,32 @@ async def test_star_returns_every_field_of_the_view(database, tmp_path, selected
 
 async def test_without_a_rule_set_catalog_reads_are_unchanged(database) -> None:
     runner = ReadOnlyGuardRunner(RowCapRunner(_engine(database), max_rows=1000), dialect="mysql")
+    sql = (
+        "SELECT TABLE_NAME, TABLE_TYPE, ENGINE FROM INFORMATION_SCHEMA.TABLES"
+        " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'rs\\_%' ORDER BY TABLE_NAME"
+    )
+    frame = await _run(runner, sql)
+    assert [
+        tuple(None if pd.isna(v) else v for v in row) for row in frame.values.tolist()
+    ] == [tuple(row) for row in _unguarded(database, sql)]
+    assert {"rs_customers", "rs_orders", "rs_salaries"} <= set(frame["TABLE_NAME"])
+
+
+async def test_catalog_read_with_rls_rules_named_like_the_views(
+    database, tmp_path, selected
+) -> None:
+    """[[rls]] rules on application tables named like the views leave schema lookup working."""
+    rls = [
+        RlsRule(table=name, column="account_id", operator="=", value=2)
+        for name in ("tables", "columns", "key_column_usage", "rs_orders")
+    ]
+    runner = _chain(database, _loaded(tmp_path, database), rls=rls)
     frame = await _run(
         runner,
-        "SELECT TABLE_NAME, TABLE_ROWS FROM INFORMATION_SCHEMA.TABLES"
-        " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'rs\\_%'"
-        " AND TABLE_TYPE = 'BASE TABLE'",
+        "SELECT t.TABLE_NAME FROM INFORMATION_SCHEMA.TABLES t WHERE t.TABLE_SCHEMA = DATABASE()",
     )
-    assert {"rs_customers", "rs_orders", "rs_salaries"} <= set(frame["TABLE_NAME"])
-    assert frame["TABLE_ROWS"].notna().all()
+    assert sorted(frame["TABLE_NAME"].tolist()) == ["rs_customers", "rs_orders"]
+    for view in ("COLUMNS", "KEY_COLUMN_USAGE"):
+        assert len(await _run(runner, f"SELECT v.TABLE_NAME FROM INFORMATION_SCHEMA.{view} v")) > 0
+    orders = await _run(runner, "SELECT o.total FROM rs_orders o")
+    assert sorted(orders["total"].tolist()) == [20, 150]
