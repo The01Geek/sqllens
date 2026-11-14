@@ -171,16 +171,14 @@ name = "orders"
 columns = ["id", "customer_id", "total"]
 predicate_columns = ["deleted_at"]
 row_rule = { kind = "all_of", rules = [
-  { kind = "inherit", column = "customer_id", parent_table = "customers", parent_column = "id",
-    parent_rule = { kind = "compare", column = "region_id", operator = "=", value_type = "integer", value = 1 } },
+  { kind = "inherit", column = "customer_id", parent_table = "customers", parent_column = "id", parent_rule = { kind = "compare", column = "region_id", operator = "=", value_type = "integer", value = 1 } },
   { kind = "is_null", column = "deleted_at" },
 ] }
 
 [[rule_sets.tables]]
 name = "products"
 columns = ["id", "name"]
-row_rule = { kind = "referenced_by", id_column = "id", source_table = "customers", source_id_column = "id",
-  link = { table = "customer_products", source_column = "customer_id", target_column = "product_id" } }
+row_rule = { kind = "referenced_by", id_column = "id", source_table = "customers", source_id_column = "id", link = { table = "customer_products", source_column = "customer_id", target_column = "product_id" } }
 ```
 
 Here `customers` must also declare `region_id`. A reader that knows only the six original kinds refuses a file that uses `is_null`, `is_not_null`, `parent_rule` or an unlisted `referenced_by` link table, so upgrade SQL Lens before deploying such a file.
@@ -194,7 +192,7 @@ Here `customers` must also declare `region_id`. A reader that knows only the six
 | `string` | `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`, `enum` |
 | `boolean` | `tinyint`, `smallint`, `mediumint`, `int`, `bigint` |
 
-Once the check has passed, it does not run again in that server process, so a column dropped or retyped later is not noticed until the server restarts. **Restart SQL Lens after renaming or dropping any table or column a rule set names**, unlisted link tables included. Until it restarts, a query that reaches a renamed or dropped table is refused before it runs, and a query that reaches a renamed or dropped column fails with the database's own error, whose text can name the table and column.
+Once the check has passed, it does not run again in that server process, so a column dropped or retyped later is not noticed until the server restarts. **Restart SQL Lens after renaming or dropping any table or column a rule set names**, unlisted link tables included.
 
 ## Asking a Question Under a Rule Set
 
