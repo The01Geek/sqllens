@@ -136,7 +136,8 @@ async def test_query_database_returns_calltoolresult_with_meta_when_table_block(
                    "column_types": {}, "row_count": 1, "truncated": 0}
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "| a |\n|---|\n| 1 |", [table_block], None, None, None
 
@@ -171,7 +172,8 @@ async def test_query_database_meta_carries_query_info_when_present(
                   "row_count": 1}
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "md\n\n```sql\nSELECT a FROM t\n```", [table_block], query_info, None, None
 
@@ -197,7 +199,8 @@ async def test_query_database_meta_query_info_without_blocks(
     query_info = {"sql": "SELECT 1 WHERE 1=0", "query_type": "SELECT"}
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", [], query_info, None, None
 
@@ -223,7 +226,8 @@ async def test_query_database_returns_conversation_meta_when_no_blocks(
     mcp = build_server(cfg)
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "just text", [], None, None, None
 
@@ -249,7 +253,8 @@ async def test_query_database_mints_and_threads_conversation_id(
     seen: dict = {}
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         seen["conversation_id"] = conversation_id
         return "answer", [], None, None, None
@@ -296,7 +301,8 @@ async def test_query_database_meta_carries_memory_info_when_present(
     }
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "answer", [], None, memory_info, None
 
@@ -318,7 +324,8 @@ async def test_query_database_returns_chart_block_in_blocks(
     mcp = build_server(cfg)
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "rendered chart", [_CHART_BLOCK], None, None, None
 
@@ -355,7 +362,8 @@ async def test_query_database_attaches_ordered_multi_block_payload(
                   "row_count": 1}
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "answer", blocks, query_info, None, None
 
@@ -406,7 +414,8 @@ async def test_query_database_meta_carries_agent_trace_when_present(
     mcp = build_server(cfg)
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "answer", [], None, None, _AGENT_TRACE
 
@@ -445,7 +454,8 @@ async def test_query_database_attaches_trace_on_error_result(
     }
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         raise AgentRunError(
             "SQL execution error: the query failed", agent_trace=error_trace
@@ -475,7 +485,8 @@ async def test_query_database_reraises_error_without_trace(
     mcp = build_server(cfg)
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         raise AgentRunError("SQL execution error: boom", agent_trace=None)
 
@@ -503,7 +514,8 @@ async def test_query_database_meta_carries_configured_model_info(
     mcp = build_server(cfg)
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "answer", [], None, None, None
 
@@ -532,7 +544,8 @@ async def test_query_database_model_info_reports_null_effort_when_unconfigured(
     assert cfg.llm.effort is None
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "answer", [], None, None, None
 
@@ -559,7 +572,8 @@ async def test_query_database_model_info_present_when_show_details_off(
     mcp = build_server(cfg)
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         return "answer", [], None, None, None
 
@@ -581,7 +595,8 @@ async def test_query_database_error_result_carries_no_model_info(
     mcp = build_server(cfg)
 
     async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+        _cfg, _q, *, metadata=None, metadata_discarded=False, conversation_id=None,
+        profile=None, profile_store=None,
     ):
         raise AgentRunError("SQL execution error: boom", agent_trace=_AGENT_TRACE)
 

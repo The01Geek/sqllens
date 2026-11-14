@@ -33,9 +33,13 @@ from sqllens.rule_sets import (
     REFUSED_CONVERSATION_OWNER,
     RuleSetRequestError,
     RuleSetSelection,
+    audit_line,
     ensure_catalog_confirmed,
+    refusal_log_fields,
+    reset_kept_metadata_keys,
     reset_rule_set_selection,
     select_rule_set,
+    set_kept_metadata_keys,
     set_rule_set_selection,
 )
 from sqllens.runtime import (
@@ -248,7 +252,6 @@ async def _check_conversation_owner(
         logger.exception("conversation owner check failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
     if owner is not None and owner != user.id:
-        logger.info("query_database refused: conversation owned by another identity")
         raise RuleSetRequestError(REFUSED_CONVERSATION_OWNER)
 
 
@@ -551,6 +554,7 @@ async def query_database_impl_with_widgets(
     question: str,
     *,
     metadata: Mapping[str, Any] | None = None,
+    metadata_discarded: bool = False,
     conversation_id: str | None = None,
     profile: str | None = None,
     profile_store: ProfileStore | None = None,
@@ -572,6 +576,16 @@ async def query_database_impl_with_widgets(
     dialect, adds no block: only the agent sees it. The blocks array
     is the single structured-data channel: apps-aware hosts render each block
     in order, and ``server.py`` attaches it to ``_meta["sqllens/blocks"]``.
+
+    While a rule-set file is configured, a ``RuleSetRequestError`` raised
+    before the agent runs (the five request classes, the conversation-owner
+    check, the existence check) is logged once at WARNING with its class and
+    the kept ``_meta`` key names, or, when ``metadata_discarded`` says the
+    server dropped the request's ``_meta`` for exceeding its limits, with that
+    note instead. Every call then writes one INFO ``rule-set audit:`` line on
+    any ending, cancellation included: ``served``, ``refused: <class>`` or
+    ``failed``, with the rule set, account ID and user ID that passed their
+    checks. Without a rule-set file neither line is written.
 
     Invalid non-empty profile names raise ``ProfileNameError`` before agent work.
     Tool-internal failures raise
@@ -635,13 +649,65 @@ async def query_database_impl_with_widgets(
     # While a rule-set file is configured, the five request classes run first,
     # before the named-profile lookup, so a refused request does no other work.
     rule_sets = cfg.rule_sets.loaded
-    selection: RuleSetSelection | None = None
-    if rule_sets is not None:
+    if rule_sets is None:
+        return await _query_database_turn(
+            cfg, question, None, metadata=metadata, conversation_id=conversation_id,
+            profile=profile, profile_store=profile_store, agent=agent,
+        )
+    kept = strip_reserved_metadata(metadata)
+    outcome = "failed"
+    identity: dict[str, Any] = {}
+    keys_token = set_kept_metadata_keys(tuple(kept))
+    try:
         try:
-            selection = select_rule_set(rule_sets, strip_reserved_metadata(metadata))
+            try:
+                selection = select_rule_set(rule_sets, kept)
+            except RuleSetRequestError as e:
+                identity = {
+                    "rule_set": e.rule_set, "account_id": e.account_id, "user_id": e.user_id
+                }
+                raise
+            identity = {
+                "rule_set": selection.name,
+                "account_id": selection.account_id,
+                "user_id": selection.user_id,
+            }
+            result = await _query_database_turn(
+                cfg, question, selection, metadata=metadata,
+                conversation_id=conversation_id, profile=profile,
+                profile_store=profile_store, agent=agent,
+            )
         except RuleSetRequestError as e:
-            logger.info("query_database refused before the agent ran: %s", e)
+            outcome = f"refused: {e.refusal_class}"
+            logger.warning(
+                "rule-set request refused: %s",
+                refusal_log_fields(
+                    e.refusal_class, kept, metadata_discarded=metadata_discarded
+                ),
+            )
             raise
+        outcome = "served"
+        return result
+    finally:
+        # Every other ending, a cancellation included, keeps ``outcome`` at
+        # "failed"; the line must be written here, not after a return.
+        logger.info("%s", audit_line(outcome, **identity))
+        reset_kept_metadata_keys(keys_token)
+
+
+async def _query_database_turn(
+    cfg: Config,
+    question: str,
+    selection: RuleSetSelection | None,
+    *,
+    metadata: Mapping[str, Any] | None,
+    conversation_id: str | None,
+    profile: str | None,
+    profile_store: ProfileStore | None,
+    agent: Agent | None,
+) -> tuple[str, list[dict], dict | None, dict | None, dict | None]:
+    """Run one ``query_database`` turn under ``selection``; see the public wrapper."""
+    rule_sets = cfg.rule_sets.loaded
     effective: EffectiveSettings = resolve_effective_settings(
         cfg, profile, store=profile_store
     )

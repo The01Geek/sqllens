@@ -182,6 +182,8 @@ These are instructions to the assistant, not enforced rules, so it may occasiona
 
 Defines the audit-logging surface. These fields are accepted and validated today but are **not yet wired to any behavior** — they reserve the configuration shape for a future audit-logging feature.
 
+**Note:** The per-request `rule-set audit:` line that SQL Lens writes while a [rule-set file](rule-sets.md#logging-and-auditing) is configured is not controlled by this section. It is written whatever `enabled` says.
+
 | Field | Type | Description |
 |---|---|---|
 | `enabled` | Boolean | Defaults to `false`. The master switch for audit logging. When it is off, the other fields in this section have no effect. |
@@ -288,7 +290,7 @@ file = "rule-sets.toml"
 
 As an environment variable: `SQLLENS_RULE_SETS__FILE=rule-sets.toml`. An unknown key inside `[rule_sets]` makes the configuration fail to load.
 
-While a rule-set file is configured, every `query_database` request must name a rule set, an account and a user, the assistant saves nothing to memory, and `sqllens verify-memory` is not available. For the file format, the request fields and the refusal messages, see [Per-role rule sets](rule-sets.md).
+While a rule-set file is configured, every `query_database` request must name a rule set, an account and a user, the assistant saves nothing to memory, and `sqllens verify-memory` is not available. Each request also writes one `rule-set audit:` line at info level, and each refusal one line at warning level. For the file format, the request fields, the refusal messages, the log lines and the limits, see [Per-role rule sets](rule-sets.md), the canonical definition of the file format.
 
 ## Top-level field: `config_version`
 

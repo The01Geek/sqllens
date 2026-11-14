@@ -68,6 +68,43 @@ What each part means:
 
 Every key is checked, and an unknown key makes the file fail to load. When a value is wrong, the error names the exact place in the file.
 
+### Format reference (version 1)
+
+This section is the canonical definition of the version-1 file as SQL Lens loads it. Types are strict: a value of the wrong TOML type is refused, never converted, so `"1"` is not accepted where an integer is required, and `1` is not accepted where a string is required.
+
+Two value rules recur below:
+
+- An **identifier** is a string that starts with an ASCII letter or underscore, followed by ASCII letters, digits or underscores (`customers`, `rep_id`, `_tmp1`). Spaces, hyphens, dots and quotes are not allowed.
+- An **ID** is a string of ASCII digits with no leading zero (`"0"`, `"2"`, `"105"`). `"05"`, `"-1"`, `"2.0"` and the bare number `2` are refused.
+
+| Record | Key | Type | Rules |
+|---|---|---|---|
+| top level | `format_version` | integer | Required. Must be `1`. |
+| top level | `binding` | table | Required. |
+| top level | `metadata` | table | Required. |
+| top level | `rule_sets` | array of tables | Required. Each `name` must be unique. |
+| `[binding]` | `database` | identifier | Required. Must equal the database named in `database.url`, byte for byte. |
+| `[binding]` | `account_ids` | array of IDs | Required. At least one, no duplicates. |
+| `[metadata]` | `rule_set`, `account_id`, `user_id` | identifier | All three required and different from each other. None may be `starter_ui_request` or `ui_features_available`, which SQL Lens reserves. |
+| `[[rule_sets]]` | `name` | ID | Required. The value a request names to select this set. |
+| `[[rule_sets]]` | `scope` | string | Required, not empty. |
+| `[[rule_sets]]` | `source` | table | Required. |
+| `[[rule_sets]]` | `tables` | array of tables | Required. At least one; each table `name` must be unique within the set. |
+| `[rule_sets.source]` | `confirmed_against_production` | Boolean | Required. A set is used only when this is `true`. |
+| `[rule_sets.source]` | `role_id` | ID | Optional. When set, must equal the set's `name`. |
+| `[rule_sets.source]` | `role_name`, `role_copy` | string | Optional, not empty. |
+| `[rule_sets.source]` | `permission_list_version` | integer | Optional, zero or more. |
+| `[rule_sets.source]` | `global_switches` | array of tables | Optional. Each entry has `name` (identifier) and `value` (Boolean); names must be unique. |
+| `[rule_sets.source]` | `permission_fingerprint` | string | Optional. `sha256:` followed by 64 lowercase hexadecimal digits. |
+| `[rule_sets.source]` | `application_commit` | string | Optional. 40 or 64 lowercase hexadecimal digits. |
+| `[rule_sets.source]` | `generated_on` | string | Optional. A real calendar date written `YYYY-MM-DD`. |
+| `[[rule_sets.tables]]` | `name` | identifier | Required. |
+| `[[rule_sets.tables]]` | `columns` | array of identifiers | Required. At least one, no duplicates. |
+| `[[rule_sets.tables]]` | `predicate_columns` | array of identifiers | Optional, empty by default. No duplicates, and none may also be in `columns`. |
+| `[[rule_sets.tables]]` | `row_rule` | — | Not supported yet. Its presence makes the file fail to load. |
+
+Names are compared exactly, letter case included, everywhere: in the file, against the database, and against request fields.
+
 **Warning:** Every table and column you list must exist in the connected database with exactly that spelling, down to letter case. SQL Lens checks this when the server starts, or on the first request if it could not check at startup, and refuses requests until it matches.
 
 ## Asking a Question Under a Rule Set
@@ -79,6 +116,15 @@ While a rule-set file is configured, every `query_database` request must carry t
 | Rule set | `role` | The `name` of the rule set to use, for example `"2"`. |
 | Account | `account` | An account identifier listed in `binding.account_ids`, for example `"5"`. |
 | User | `user` | The identifier of the person asking, a positive whole number. |
+
+How the values are matched:
+
+- Field names are matched exactly, letter case included.
+- **Rule set:** a string, or a whole number (not `true` or `false`). Its text must equal a set's `name` exactly, so the number `2` and the string `"2"` both select set `"2"`, and `"02"` selects nothing. An empty string counts as missing.
+- **Account:** a string or a whole number, matched the same way against `binding.account_ids`.
+- **User:** a whole number greater than zero, or a string of the digits `0`–`9` whose value is greater than zero (`"7"` and `"007"` both mean user 7). Negative numbers, zero, fractions, `true` and `false` are refused.
+- Any other `_meta` keys are ignored by the rule-set check.
+- SQL Lens drops the whole `_meta` when it is too large: more than 64 keys (counting the keys the MCP protocol itself adds, such as the progress token), more than 16 KiB, more than 1,024 values and keys, or nested more than eight levels deep. The request then has no rule-set field and is refused as `rule-set key missing`.
 
 SQL Lens checks these before the assistant does any work. A request that does not pass is refused with one of these messages, and nothing is sent to the model or the database:
 
@@ -117,9 +163,58 @@ Common reasons a query is refused:
 - It uses a table function, `JSON_TABLE` or `DUAL`, a partition list, or an index hint.
 - It calls a function SQL Lens does not allow.
 
-Columns are handled differently: a column the set does not list is simply not visible to the query, so MySQL reports it as an unknown column.
+Columns are handled differently. SQL Lens rewrites each reference to a listed table into a subquery that selects only that table's listed `columns`, under the table's own name or the query's alias for it. A column the set does not list is therefore simply not visible to the query, so MySQL reports it as an unknown column. Predicate columns are not readable. MySQL never receives the SQL the model wrote: it receives SQL Lens's rewrite, regenerated without comments or optimizer hints.
 
-To look up the schema, the assistant can read `information_schema.TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE`. Under a rule set these show only the selected set's tables, its listed columns and the keys among them, in the connected database. Their names, types, nullability and key details are filled in; every other field, such as row counts, sizes, defaults, comments and constraint names, comes back as `NULL`.
+To look up the schema, the assistant can read `information_schema.TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE`. Under a rule set SQL Lens rewrites each of these into a subquery that shows only the selected set's tables, its listed columns and the keys among them, in the connected database. Every field of the view keeps its name, but only these 25 carry values; every other field, such as row counts, sizes, defaults, comments and constraint names, comes back as `NULL`:
+
+| View | Fields that carry values |
+|---|---|
+| `TABLES` (4) | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE` |
+| `COLUMNS` (12) | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_SCALE`, `DATETIME_PRECISION`, `COLUMN_TYPE`, `COLUMN_KEY` |
+| `KEY_COLUMN_USAGE` (9) | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `POSITION_IN_UNIQUE_CONSTRAINT`, `REFERENCED_TABLE_SCHEMA`, `REFERENCED_TABLE_NAME`, `REFERENCED_COLUMN_NAME` |
+
+A `KEY_COLUMN_USAGE` row that references another table appears only when that table and column are in the set too.
+
+## Logging and Auditing
+
+While a rule-set file is configured, SQL Lens writes two kinds of log line about each `query_database` request. Neither carries the value of any `_meta` field other than the rule set, account and user identifiers described below.
+
+**Refusals, at warning level.** Every refusal writes one line naming its class and the names, never the values, of the `_meta` keys SQL Lens kept from the request, for example:
+
+```
+rule-set request refused: class="user ID invalid"; kept _meta keys=["account", "role", "user"]
+```
+
+The classes are the five request classes above, `this conversation was started under another rule set, account or user`, and `the rule-set file could not be confirmed against the database`. When SQL Lens dropped the request's `_meta` for being too large, the line says `SQL Lens discarded the request _meta for exceeding its limits` instead of naming keys. A query the guards refuse during the assistant's turn is logged with its full reason, and that line also names its class (the kind of refusal) and the same key names. When a guard failed with an internal error, its reason and traceback are on a separate line just before. Key names are written JSON-escaped, so a key name cannot break the log line.
+
+**One audit line per request, at info level.** Every `query_database` request writes exactly one line when it ends, for example:
+
+```
+rule-set audit: {"outcome": "served", "rule_set": "2", "account_id": "5", "user_id": 7}
+```
+
+`outcome` is `served`, `refused: <class>` for a refusal before the assistant runs, or `failed` for any other ending, including a turn that ends on a guard refusal and a call the client cancelled. The line names only the rule set, account ID and user ID that passed their checks, which are checked in the order of the five request classes above; a set counts as passed only when it is confirmed. A refusal as `rule-set key missing` or `no such rule set` names none of them; `account not bound` names the set; `user ID invalid` names the set and account; `rule set not confirmed` names the account and user but not the set; and every other ending names all three. A call the MCP SDK rejects for malformed arguments never reaches SQL Lens and writes no line.
+
+The audit line is written whatever `[agent.audit] enabled` says; that setting does not control it. With no rule-set file configured, neither kind of line is written.
+
+## Limits
+
+Rule sets limit which tables and columns a query can read. They do not separate everything else, so plan around these limits:
+
+- **Memory is shared by every rule set.** Nothing is saved to memory while rule sets are on, but memory you load yourself (with `sqllens import-memory` or the memory administration tools) is searched for every request. Table and column names, SQL literal values, notes and chart data in curated memory can reach any role. Load only what every role may see.
+- **The administration tools act for every rule set.** The memory and profile administration tools are not limited by rule sets. Register them only where end users' assistants cannot call them.
+- **`show_details` shows the model's SQL.** When a profile turns `show_details` on, the SQL in the answer is the SQL the model wrote, before the guard's rewrite, not the SQL MySQL ran.
+- **Conversations are bound to identity.** A follow-up must carry the same rule set, account and user as the turn that started the conversation.
+- **`sqllens verify-memory` is not supported** while a rule-set file is configured.
+- **SQL Lens trusts `_meta`.** It does not check who sent a request. Any caller that can reach `query_database` chooses its own rule set, account and user, so only your application should be able to reach it.
+- **`agent.standing_instructions` is shared by every rule set.** Do not put anything in it that one role may not see.
+- **Dropped keys look like missing keys.** A calling application that drops its own `_meta` keys (for example because its own size limit was exceeded) looks like one that sent none. SQL Lens can only report a `_meta` it dropped itself.
+- **SQL is read with MySQL's default `sql_mode`.** Rule-set queries run with `HIGH_NOT_PRECEDENCE` and `NO_BACKSLASH_ESCAPES` removed from the session's `sql_mode`, and in the model's SQL `||` is read as `OR`, double-quoted text as a string, and backslashes as escapes, whatever your server's mode says.
+- **Some syntax is refused or dropped.** `PARTITION` lists and index hints are refused, and optimizer hints are dropped.
+- **`CAST(x AS REAL)` loses precision.** It is sent to MySQL as `CAST(x AS FLOAT)`, which is single precision.
+- **Row order is not guaranteed without `ORDER BY`.** A query without `ORDER BY` can return rows in the order of an index on a column the set hides.
+- **Unqualified names can resolve elsewhere.** When a query reads several tables, an unqualified column name the set hides on one table can resolve to a column of the same name on another table in the query. The assistant is told to qualify every column with its table name or alias.
+- **SQL Lens rewrites the model's SQL with sqlglot.** Syntax that sqlglot writes back in a form MySQL rejects fails in MySQL, and syntax sqlglot cannot write for MySQL is refused.
 
 ## Troubleshooting
 

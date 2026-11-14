@@ -53,7 +53,7 @@ async def test_reserved_meta_keys_of_2026_session_are_not_forwarded(
 
     seen = []
     raw_keys = []
-    real_request_metadata = server_module._request_metadata
+    real_request_metadata = server_module._bounded_request_metadata
 
     def spy(ctx, **kwargs):
         raw_keys.append(set(ctx.request_context.meta or {}))
@@ -63,7 +63,7 @@ async def test_reserved_meta_keys_of_2026_session_are_not_forwarded(
         seen.append(kwargs["metadata"])
         return "ok", [], None, None, None
 
-    monkeypatch.setattr(server_module, "_request_metadata", spy)
+    monkeypatch.setattr(server_module, "_bounded_request_metadata", spy)
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_query)
     handle = make_server(AuthConfig(mode="none"))
     async with streamable_http_client(handle.mcp_url) as (read, write):

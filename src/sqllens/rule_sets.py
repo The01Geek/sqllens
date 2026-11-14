@@ -17,10 +17,11 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import datetime
+import json
 import logging
 import re
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any
@@ -344,7 +345,80 @@ REFUSED_CATALOG_UNCONFIRMED = (
 
 
 class RuleSetRequestError(RuntimeError):
-    """A rule-set request refused before its agent runs. The message names only the class."""
+    """A rule-set request refused before its agent runs. The message names only the class.
+
+    ``refusal_class`` is the class without the ``Request refused: `` prefix.
+    ``rule_set``, ``account_id`` and ``user_id`` hold the values that passed
+    their checks before the refusal, ``None`` otherwise; they feed the audit line.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        rule_set: str | None = None,
+        account_id: str | None = None,
+        user_id: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.refusal_class = message.removeprefix("Request refused: ")
+        self.rule_set = rule_set
+        self.account_id = account_id
+        self.user_id = user_id
+
+
+_KEPT_METADATA_KEYS: contextvars.ContextVar[tuple[str, ...] | None] = contextvars.ContextVar(
+    "sqllens_rule_set_kept_metadata_keys", default=None
+)
+
+
+def set_kept_metadata_keys(
+    keys: tuple[str, ...] | None,
+) -> contextvars.Token[tuple[str, ...] | None]:
+    """Publish the request's kept ``_meta`` key names; reset the token in ``finally``."""
+    return _KEPT_METADATA_KEYS.set(keys)
+
+
+def reset_kept_metadata_keys(token: contextvars.Token[tuple[str, ...] | None]) -> None:
+    _KEPT_METADATA_KEYS.reset(token)
+
+
+METADATA_DISCARDED_NOTE = "SQL Lens discarded the request _meta for exceeding its limits"
+
+
+def refusal_log_fields(
+    refusal_class: str,
+    keys: Iterable[str] | None = None,
+    *,
+    metadata_discarded: bool = False,
+) -> str:
+    """A refusal's class and the names, never the values, of its kept ``_meta`` keys.
+
+    ``keys`` defaults to the names published for the current request. Both
+    are JSON-encoded with ASCII escapes, so a caller-chosen key name cannot
+    break the log line. With ``metadata_discarded`` no key is named.
+    """
+    fields = f"class={json.dumps(refusal_class)}"
+    if metadata_discarded:
+        return f"{fields}; {METADATA_DISCARDED_NOTE}"
+    if keys is None:
+        keys = _KEPT_METADATA_KEYS.get() or ()
+    return f"{fields}; kept _meta keys={json.dumps(sorted(str(key) for key in keys))}"
+
+
+def audit_line(
+    outcome: str,
+    *,
+    rule_set: str | None = None,
+    account_id: str | None = None,
+    user_id: int | None = None,
+) -> str:
+    """The one INFO audit line of a rule-set request; identity values left ``None`` are omitted."""
+    record: dict[str, Any] = {"outcome": outcome}
+    for name, value in (("rule_set", rule_set), ("account_id", account_id), ("user_id", user_id)):
+        if value is not None:
+            record[name] = value
+    return "rule-set audit: " + json.dumps(record)
 
 
 @dataclass(frozen=True)
@@ -422,14 +496,21 @@ def select_rule_set(loaded: LoadedRuleSets, metadata: Mapping[str, Any]) -> Rule
     rule_set = loaded.rule_set(name) if name is not None else None
     if rule_set is None:
         raise RuleSetRequestError(REFUSED_NO_SUCH_RULE_SET)
+    # An unconfirmed set has not passed its checks, so the audit line must not
+    # name it: pass ``rule_set`` only once ``confirmed`` is known to hold.
+    passed_set = rule_set.name if rule_set.confirmed else None
     account = _decimal_text(metadata.get(keys.account_id))
     if account is None or account not in loaded.file.binding.account_ids:
-        raise RuleSetRequestError(REFUSED_ACCOUNT_NOT_BOUND)
+        raise RuleSetRequestError(REFUSED_ACCOUNT_NOT_BOUND, rule_set=passed_set)
     user_id = _user_id(metadata.get(keys.user_id)) if keys.user_id in metadata else None
     if user_id is None:
-        raise RuleSetRequestError(REFUSED_USER_ID_INVALID)
+        raise RuleSetRequestError(
+            REFUSED_USER_ID_INVALID, rule_set=passed_set, account_id=account
+        )
     if not rule_set.confirmed:
-        raise RuleSetRequestError(REFUSED_RULE_SET_NOT_CONFIRMED)
+        raise RuleSetRequestError(
+            REFUSED_RULE_SET_NOT_CONFIRMED, account_id=account, user_id=user_id
+        )
     return RuleSetSelection(name=rule_set.name, account_id=account, user_id=user_id)
 
 
