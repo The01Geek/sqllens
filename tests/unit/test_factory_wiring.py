@@ -677,6 +677,27 @@ def test_rule_sets_drop_both_save_tools_even_when_enabled(tmp_path: Path) -> Non
     assert agent.agent_memory._track_usage is False
 
 
+def test_rls_skips_catalog_views_only_with_a_rule_set_file(tmp_path: Path) -> None:
+    from sqllens.config import RlsRule
+    from sqllens.safety import RlsGuardRunner
+
+    rules = [RlsRule(table="tables", column="tenant_id", operator="=", value=9)]
+
+    def rls_runner(cfg: Config) -> RlsGuardRunner:
+        node = _unwrap(build_agent(cfg).tool_registry._tools["run_sql"]).sql_runner  # type: ignore[attr-defined]
+        while not isinstance(node, RlsGuardRunner):
+            node = node._inner
+        return node
+
+    with_sets = _rule_set_cfg(tmp_path, rls=rules)
+    from sqllens.config import RuleSetsConfig
+
+    without = with_sets.model_copy(update={"rule_sets": RuleSetsConfig()})
+    assert without.rule_sets.loaded is None
+    assert rls_runner(with_sets)._skip_catalog_views is True
+    assert rls_runner(without)._skip_catalog_views is False
+
+
 def test_runner_chain_with_rule_sets(tmp_path: Path) -> None:
     from sqllens.agent.factory import RULE_SET_REMOVED_SQL_MODES
     from sqllens.agent.integrations.mysql import MySQLRunner

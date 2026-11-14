@@ -14,7 +14,6 @@ table, an ``rs_customer_view`` view and an ``rs_shout`` stored function.
 
 from __future__ import annotations
 
-import contextlib
 import os
 import uuid
 from collections.abc import Iterator
@@ -163,10 +162,13 @@ def database() -> Iterator[str]:
         for statement in [*_SETUP, *(_other_setup(other) if other else [])]:
             cursor.execute(statement)
     except Exception:
-        # Best-effort cleanup; the setup error is the one to report.
-        with contextlib.suppress(pymysql.err.MySQLError):
-            for statement in teardown:
+        # Best-effort cleanup, one statement at a time so a failed DROP does
+        # not skip the rest; the setup error is the one to report.
+        for statement in teardown:
+            try:
                 conn.cursor().execute(statement)
+            except pymysql.err.MySQLError as cleanup_error:
+                print(f"fixture cleanup failed: {statement}: {cleanup_error}")
         raise
     finally:
         conn.close()

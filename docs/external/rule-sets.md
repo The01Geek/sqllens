@@ -119,7 +119,7 @@ Common reasons a query is refused:
 
 Columns are handled differently: a column the set does not list is simply not visible to the query, so MySQL reports it as an unknown column.
 
-To look up the schema, the assistant can read `information_schema.TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE`. Under a rule set these show only the selected set's tables, its listed columns and the keys among them, in the connected database. Their names, types and key details are filled in; every other field, such as row counts, sizes, defaults, comments and constraint names, comes back as `NULL`.
+To look up the schema, the assistant can read `information_schema.TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE`. Under a rule set these show only the selected set's tables, its listed columns and the keys among them, in the connected database. Their names, types, nullability and key details are filled in; every other field, such as row counts, sizes, defaults, comments and constraint names, comes back as `NULL`.
 
 ## Troubleshooting
 

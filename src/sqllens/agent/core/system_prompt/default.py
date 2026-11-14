@@ -59,11 +59,11 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                 ``base_prompt`` when one is given. ``None``, empty or
                 whitespace-only text adds nothing, so the prompt is unchanged.
             rule_sets: True while a rule-set file is configured. Adds a Tool
-                Errors rule for ``Refused by the rule set:`` errors, and, when
-                a dialect resolves, a database rule to qualify every column,
-                and limits the schema-lookup rule to SELECTs against
-                ``INFORMATION_SCHEMA.TABLES``, ``COLUMNS`` and
-                ``KEY_COLUMN_USAGE`` with no SHOW statement; a caller-supplied
+                Errors rule for ``Refused by the rule set:`` errors; when a
+                dialect resolves, a database rule to qualify every column;
+                and, whatever the dialect, limits the schema-lookup rule to
+                SELECTs against ``INFORMATION_SCHEMA.TABLES``, ``COLUMNS``
+                and ``KEY_COLUMN_USAGE`` with no SHOW statement. A caller-supplied
                 ``base_prompt`` is returned as given, so none of these changes
                 reaches it. False leaves the prompt unchanged.
 

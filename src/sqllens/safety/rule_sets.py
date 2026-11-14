@@ -44,6 +44,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
@@ -117,7 +118,7 @@ class _CatalogView:
 # Every field of each view in MySQL 8.0+, in the view's own order. A field
 # missing here would disappear from ``SELECT *``; a field added to ``kept``
 # exposes its value under every rule set.
-_CATALOG_VIEWS: dict[str, _CatalogView] = {
+_CATALOG_VIEWS: Mapping[str, _CatalogView] = MappingProxyType({
     "TABLES": _CatalogView(
         fields=(
             "TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE", "ENGINE", "VERSION",
@@ -158,7 +159,7 @@ _CATALOG_VIEWS: dict[str, _CatalogView] = {
         }),
         row_filter="key",
     ),
-}
+})
 
 # Removing this LIMIT lets MySQL merge the derived table into the outer query
 # or push the model's conditions into it, so a model expression could run on
@@ -346,17 +347,46 @@ def _binary(node: exp.Expression) -> exp.Cast:
     return exp.Cast(this=node, to=exp.DataType.build("BINARY", dialect=_DIALECT))
 
 
-def _in_schema(field: str) -> exp.EQ:
-    return exp.EQ(this=_binary(_quoted(field)), expression=_binary(exp.CurrentSchema()))
+def _in_schema(field: str) -> exp.Expression:
+    """``field`` is the connected database, byte for byte.
+
+    The plain comparison lets MySQL look the schema up in its data
+    dictionary; dropping it makes every lookup read every schema, since a
+    column inside ``CAST`` cannot drive that lookup. The binary one is the
+    exact match.
+    """
+    return exp.and_(
+        exp.EQ(this=_quoted(field), expression=exp.CurrentSchema()),
+        exp.EQ(this=_binary(_quoted(field)), expression=_binary(exp.CurrentSchema())),
+    )
 
 
-def _in_pairs(table_field: str, column_field: str, pairs: list[tuple[str, str]]) -> exp.In:
-    return exp.In(
-        this=exp.Tuple(expressions=[_binary(_quoted(table_field)), _binary(_quoted(column_field))]),
-        expressions=[
-            exp.Tuple(expressions=[exp.Literal.string(t), exp.Literal.string(c)])
-            for t, c in pairs
-        ],
+def _in_names(field: str, names: list[str]) -> exp.Expression:
+    """``field`` is one of ``names``, byte for byte (plain list for the lookup, as above)."""
+    literals = [exp.Literal.string(name) for name in names]
+    return exp.and_(
+        exp.In(this=_quoted(field), expressions=literals),
+        exp.In(this=_binary(_quoted(field)), expressions=[lit.copy() for lit in literals]),
+    )
+
+
+def _in_pairs(table_field: str, column_field: str, pairs: list[tuple[str, str]]) -> exp.Expression:
+    """(``table_field``, ``column_field``) is one of ``pairs``, byte for byte."""
+    table_names = list(dict.fromkeys(table for table, _ in pairs))
+    return exp.and_(
+        exp.In(
+            this=_quoted(table_field),
+            expressions=[exp.Literal.string(name) for name in table_names],
+        ),
+        exp.In(
+            this=exp.Tuple(
+                expressions=[_binary(_quoted(table_field)), _binary(_quoted(column_field))]
+            ),
+            expressions=[
+                exp.Tuple(expressions=[exp.Literal.string(t), exp.Literal.string(c)])
+                for t, c in pairs
+            ],
+        ),
     )
 
 
@@ -366,25 +396,21 @@ def _catalog_filter(view: str, tables: Mapping[str, tuple[str, ...]]) -> exp.Exp
     Every filter requires the connected database and a listed table. One
     literal list per comparison keeps the filter compact at the scale of a
     real rule-set file. Raises ``ValueError`` for a view not in
-    :data:`_CATALOG_VIEWS`.
+    :data:`_CATALOG_VIEWS`, and for an empty ``tables`` or a table with no
+    columns, which would generate ``IN ()``.
     """
     spec = _CATALOG_VIEWS.get(view)
     if spec is None:
         raise ValueError(f"no catalog filter for view {view!r}")
+    if not tables or not all(tables.values()):
+        raise ValueError("catalog filter needs at least one table, each with a column")
     if spec.row_filter == "table":
-        return exp.and_(
-            _in_schema("TABLE_SCHEMA"),
-            exp.In(
-                this=_binary(_quoted("TABLE_NAME")),
-                expressions=[exp.Literal.string(name) for name in tables],
-            ),
-        )
+        return exp.and_(_in_schema("TABLE_SCHEMA"), _in_names("TABLE_NAME", list(tables)))
     pairs = [(name, column) for name, columns in tables.items() for column in columns]
     own = exp.and_(_in_schema("TABLE_SCHEMA"), _in_pairs("TABLE_NAME", "COLUMN_NAME", pairs))
     if spec.row_filter == "column":
         return own
-    if spec.row_filter != "key":
-        raise ValueError(f"unknown catalog row filter {spec.row_filter!r}")
+    # row_filter == "key"; _CatalogView refuses any other value.
     no_reference = exp.and_(
         *(
             exp.Is(this=_quoted(field), expression=exp.Null())
@@ -490,7 +516,7 @@ def _is_catalog_derived(
     alias = wrapper.args.get("alias")
     if alias is not None and alias.args.get("columns"):
         return False
-    return _generate(body) == expected.text(view, tables)
+    return _generate(body) == expected.text(view)
 
 
 class _BodyTextCache:
@@ -504,11 +530,12 @@ class _BodyTextCache:
         self._tables = tables
         self._text: dict[str, str] = {}
 
-    def text(self, view: str, tables: Mapping[str, tuple[str, ...]]) -> str:
-        if tables is not self._tables:
-            raise ValueError("catalog body cache used with another rule set's tables")
+    def built_for(self, tables: Mapping[str, tuple[str, ...]]) -> bool:
+        return tables is self._tables
+
+    def text(self, view: str) -> str:
         if view not in self._text:
-            self._text[view] = _generate(_catalog_body(view, tables))
+            self._text[view] = _generate(_catalog_body(view, self._tables))
         return self._text[view]
 
 
@@ -522,7 +549,10 @@ def _rewalk(
     ``expected`` caches each catalog view's body text for ``tables`` across
     the two re-walks of one statement.
     """
-    expected = _BodyTextCache(tables) if expected is None else expected
+    if expected is None:
+        expected = _BodyTextCache(tables)
+    elif not expected.built_for(tables):
+        raise ValueError("catalog body cache used with another rule set's tables")
     accounted: set[int] = set()
     for scope in traverse_scope(tree):
         sources = [s for s in scope.sources.values() if isinstance(s, exp.Table)]

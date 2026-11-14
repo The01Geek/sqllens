@@ -319,26 +319,33 @@ _TABLES_FIELDS = (
 )
 DERIVED_TABLES = (
     f"(SELECT {_TABLES_FIELDS} FROM `information_schema`.`TABLES`"
-    " WHERE CAST(`TABLE_SCHEMA` AS BINARY) = CAST(SCHEMA() AS BINARY)"
-    " AND CAST(`TABLE_NAME` AS BINARY) IN ('customers', 'orders')"
+    " WHERE (`TABLE_SCHEMA` = SCHEMA()"
+    " AND CAST(`TABLE_SCHEMA` AS BINARY) = CAST(SCHEMA() AS BINARY))"
+    " AND (`TABLE_NAME` IN ('customers', 'orders')"
+    " AND CAST(`TABLE_NAME` AS BINARY) IN ('customers', 'orders'))"
     " LIMIT 18446744073709551615)"
 )
 _PAIRS = (
     "(('customers', 'id'), ('customers', 'name'), ('orders', 'id'),"
     " ('orders', 'customer_id'), ('orders', 'total'))"
 )
-_COLUMNS_FILTER = (
-    "WHERE CAST(`TABLE_SCHEMA` AS BINARY) = CAST(SCHEMA() AS BINARY)"
-    " AND (CAST(`TABLE_NAME` AS BINARY), CAST(`COLUMN_NAME` AS BINARY)) IN " + _PAIRS
+_SCHEMA = (
+    "(`{f}` = SCHEMA() AND CAST(`{f}` AS BINARY) = CAST(SCHEMA() AS BINARY))"
 )
-_KCU_FILTER = (
-    "WHERE (CAST(`TABLE_SCHEMA` AS BINARY) = CAST(SCHEMA() AS BINARY)"
+_OWN = (
+    _SCHEMA.format(f="TABLE_SCHEMA")
+    + " AND (`TABLE_NAME` IN ('customers', 'orders')"
     " AND (CAST(`TABLE_NAME` AS BINARY), CAST(`COLUMN_NAME` AS BINARY)) IN " + _PAIRS + ")"
+)
+_COLUMNS_FILTER = "WHERE " + _OWN
+_KCU_FILTER = (
+    "WHERE (" + _OWN + ")"
     " AND ((`REFERENCED_TABLE_SCHEMA` IS NULL AND `REFERENCED_TABLE_NAME` IS NULL"
     " AND `REFERENCED_COLUMN_NAME` IS NULL)"
-    " OR (CAST(`REFERENCED_TABLE_SCHEMA` AS BINARY) = CAST(SCHEMA() AS BINARY)"
+    " OR (" + _SCHEMA.format(f="REFERENCED_TABLE_SCHEMA")
+    + " AND (`REFERENCED_TABLE_NAME` IN ('customers', 'orders')"
     " AND (CAST(`REFERENCED_TABLE_NAME` AS BINARY), CAST(`REFERENCED_COLUMN_NAME` AS BINARY))"
-    " IN " + _PAIRS + "))"
+    " IN " + _PAIRS + ")))"
 )
 
 
@@ -506,9 +513,23 @@ def test_catalog_view_spec_refuses_kept_fields_outside_the_view() -> None:
 
 def test_body_text_cache_refuses_another_rule_set_s_tables() -> None:
     cache = guard._BodyTextCache(EXAMPLE_TABLES)
-    assert "`information_schema`.`TABLES`" in cache.text("TABLES", EXAMPLE_TABLES)
+    assert "`information_schema`.`TABLES`" in cache.text("TABLES")
+    tree = _rewritten("SELECT 1 AS one FROM information_schema.tables v")
     with pytest.raises(ValueError, match="another rule set"):
-        cache.text("TABLES", {"customers": ("id",)})
+        guard._rewalk(tree, {"customers": ("id",)}, cache)
+
+
+def test_rls_skip_list_is_the_rule_set_guard_s_view_list() -> None:
+    """rls.py cannot import the guard's list (import cycle), so the two copies are pinned."""
+    from sqllens.safety.rls import _RULE_SET_CATALOG_VIEWS
+
+    assert _RULE_SET_CATALOG_VIEWS == {view.lower() for view in guard._CATALOG_VIEWS}
+
+
+@pytest.mark.parametrize("tables", [{}, {"customers": ()}])
+def test_catalog_filter_refuses_tables_that_would_generate_an_empty_list(tables) -> None:
+    with pytest.raises(ValueError, match="at least one table"):
+        guard._catalog_filter("TABLES", tables)
 
 
 def test_catalog_filter_refuses_a_view_it_has_no_filter_for() -> None:

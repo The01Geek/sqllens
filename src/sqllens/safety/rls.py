@@ -214,8 +214,8 @@ def apply_rls(
     """Rewrite ``sql`` so every configured RLS predicate is enforced.
 
     ``skip_catalog_views`` (set only while a rule-set file is configured)
-    keeps rules from matching the MySQL ``information_schema`` views the
-    rule-set guard rewrites, whatever their names.
+    keeps any rule, whatever table it names, from matching the MySQL
+    ``information_schema`` views the rule-set guard rewrites.
 
     Returns the rewritten SQL. Raises :class:`RlsError` if the statement
     cannot be parsed or scope-analyzed, a dynamic value is missing/suspicious,
