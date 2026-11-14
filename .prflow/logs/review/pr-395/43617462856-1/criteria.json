@@ -1,0 +1,86 @@
+[
+  {
+    "criterion": 1,
+    "text": "A valid version-1 rule-set file whose tables hold row rules of every kind loads: `sqllens validate` exits 0 and `sqllens serve` starts, with preflight on, against a database that has every table and column the rules read with types inside the mapping."
+  },
+  {
+    "criterion": 2,
+    "text": "A file whose row rule breaks the version-1 row-rule format, or whose rule raises an error while it is compiled at load, makes `sqllens validate` exit 2 and `sqllens serve` refuse to start, with an error naming the record path and the problem, at minimum for: an unknown field in a node; a missing `kind` or an unknown `kind`; `compare` with both or neither of `value` and `request`, an unknown operator, an unknown `value_type`, a Boolean `value` for `integer`, an integer `value` for `boolean`, an infinite float, `in` with an empty array, `in` with a scalar, `<` with `boolean`, `request = \"account_id\"`, `request` with `value_type = \"string\"` or with `in`; an undeclared column on the current table; `inherit` or `referenced_by` naming an unlisted table; `referenced_by` with both variants or neither; an empty `rules` array; a two-table cycle, a self-edge, and a cycle through a node nested in `any_of`."
+  },
+  {
+    "criterion": 3,
+    "text": "A file whose `owner_via` names an unlisted link table loads, and under that set a model query that reads the link table is refused as reading an unlisted table."
+  },
+  {
+    "criterion": 4,
+    "text": "With preflight on, `sqllens serve` refuses to start and `sqllens validate --check-db` exits 2, each naming the table or column, when a row rule reads a table or column missing from the database (an unlisted `owner_via` link table and its two columns included), a name whose letter case differs from the database's, or a link table that is a view. With `--no-preflight` and a missing `customer_reps.user_id`, a rule-set request is refused with `isError` before the agent runs, with text that names no table or column, exactly as part 1 refuses a request whose existence check fails."
+  },
+  {
+    "criterion": 5,
+    "text": "The existence check accepts a `compare` column only when its `INFORMATION_SCHEMA.COLUMNS.DATA_TYPE` belongs to its rule's `value_type`, and an `owner_via` rule's `link_user_column` only when its `DATA_TYPE` belongs to `integer`, by this mapping, exactly these four rows — complete by construction: `integer` → `tinyint`, `smallint`, `mediumint`, `int`, `bigint`; `float` → `float`, `double`; `string` → `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`, `enum`; `boolean` → `tinyint`, `smallint`, `mediumint`, `int`, `bigint`. A file whose compared columns cover every listed `DATA_TYPE` under its `value_type` passes, and with preflight on `sqllens serve` refuses to start and `sqllens validate --check-db` exits 2, naming the column, for any other pairing, at minimum a `varchar` column under `integer` or the user ID, a `varchar` `link_user_column` (such as `customer_reps.user_id`), an `int` column under `string`, a `decimal` column under `float`, and a `datetime` column under each `value_type`."
+  },
+  {
+    "criterion": 6,
+    "text": "Under the example set as user 7, each table returns exactly its visible rows: `customers` returns the customers whose `sales_rep_id` is 7 or that `customer_reps` links to user 7, and not a customer whose `sales_rep_id` is `NULL` with no link row; `orders` returns the orders of those customers whose `status` is not `void`, and not an order whose `status` is `NULL`; `order_tags` the rows of those orders; `tags` the tags linked to those orders through `order_tags`; `regions` the regions of those customers; `currencies` every row; and `rates` every rate whose `currency_id` matches a `currencies` row, and not a rate whose `currency_id` is `NULL`."
+  },
+  {
+    "criterion": 7,
+    "text": "A user ID sent in `_meta` as `7`, `\"7\"` or `\"007\"` returns the same rows under the example set."
+  },
+  {
+    "criterion": 8,
+    "text": "Under the example set, a scoped table returns only its visible rows wherever the model's SQL reads it, at minimum in: a plain `FROM`, a join, a self-join (`FROM orders a JOIN orders b`), a parenthesized join, a subquery in the select list, `WHERE … IN (SELECT customer_id FROM orders)`, `WHERE EXISTS (…)`, a CTE body, a `LATERAL` derived table, a `UNION` branch, `SELECT COUNT(*)`, and, with `database.refuse_whole_row_selects = false`, `SELECT *`."
+  },
+  {
+    "criterion": 9,
+    "text": "Under the example set as user 7, with an order hidden from user 7 whose `total` is 100 and every visible order's `total` at most 9, `SELECT COUNT(*) FROM orders o WHERE o.total * 1000000000000000000 > 0` returns the number of visible orders without an error; the same statement under a confirmed set that lists `orders` with no row rule fails with MySQL error 1690."
+  },
+  {
+    "criterion": 10,
+    "text": "Under the example set, on a server with MySQL's default `optimizer_switch`, MySQL's `EXPLAIN` of the SQL the guard produces for `SELECT c.name, o.total, cu.code FROM customers c JOIN orders o ON o.customer_id = c.id JOIN currencies cu ON cu.id = 1` shows the derived tables for `customers` and `orders` as materialized (`select_type` `DERIVED`) and no materialized derived table for `currencies`. So each reference to a table with a row rule is built in full, with every row its rule leaves visible, before the model's own conditions apply, and that work counts against the statement timeout; a table without a row rule stays mergeable."
+  },
+  {
+    "criterion": 11,
+    "text": "Under the example set as user 7, a model CTE never stands in for a table a row filter reads, and no CTE name changes whether a statement runs, at minimum: `WITH customers AS (SELECT 1 AS id, 8 AS sales_rep_id) SELECT o.id, o.total FROM orders o` returns exactly the orders visible to user 7; `WITH customer_reps AS (SELECT 5 AS customer_id, 7 AS user_id) SELECT name FROM customers` returns exactly the customers visible to user 7; `WITH customer_reps AS (SELECT 1 AS x) SELECT cu.code FROM currencies cu` and `WITH salaries AS (SELECT 1 AS x) SELECT cu.code FROM currencies cu` both run and return the same rows; a CTE named `orders` defined inside a subquery's own `WITH` does not change the orders the subquery's filter makes visible; and `WITH recent AS (SELECT o.id FROM orders o) SELECT recent.id FROM recent` and a recursive CTE over `orders` return only visible orders."
+  },
+  {
+    "criterion": 12,
+    "text": "Under the example set, a model statement that reads `customers.sales_rep_id` or `orders.status` fails with MySQL's unknown-column error (1054) and returns no value of that column, and one that reads `customer_reps` is refused before execution."
+  },
+  {
+    "criterion": 13,
+    "text": "A `float` rule's value reaches MySQL as a 17-significant-digit exponent-form literal (`0.5` as `5.0000000000000000e-01`, `-1e-05` as `-1.0000000000000001e-05`), and a `float` rule on a `DOUBLE` column compares as a double at every size: with rows whose `amount` is `0`, `1` and `1e70`, a rule `amount >= 1e-100` shows the rows `1` and `1e70` and hides `0`, a rule `amount >= 1e100` hides all three, and a rule `amount >= 0.5` shows `1` and `1e70`."
+  },
+  {
+    "criterion": 14,
+    "text": "A text comparison follows the column's collation: under a `string` rule `status != \"void\"` on a column with MySQL 8's default case-insensitive collation, an order whose `status` is `VOID` is hidden."
+  },
+  {
+    "criterion": 15,
+    "text": "With a column a row rule reads (`customers.sales_rep_id`, or `customer_reps.user_id`) dropped after the existence check passed, a statement over the scoped table fails with MySQL's unknown-column error (1054), even when the model's query has another table with a column of that name in scope, at minimum for `SELECT (SELECT COUNT(*) FROM orders o) AS n FROM (SELECT 7 AS sales_rep_id) AS customers` and for an outer model alias named `orders` or `customer_reps` carrying the dropped column's name; it never returns rows filtered against another table's column. The guard does not redact that database error, so its text, which can name the dropped column, reaches the model and the client."
+  },
+  {
+    "criterion": 16,
+    "text": "Every statement the rule-set guard cannot carry through for a table with a row rule is refused before execution, with no SQL reaching MySQL and client text beginning `Refused by the rule set:` that names no table or column: at minimum an exception raised in each step that builds or proves the filtered derived table, including an exception type the guard does not name; and a rewritten tree in which a scoped table's derived table is missing its row filter, carries a different filter, or is missing the `LIMIT`."
+  },
+  {
+    "criterion": 17,
+    "text": "With a flat `[[rls]]` rule on `orders` and the example set selected, a query over `orders` returns only rows that pass both the row rule and the flat rule; a flat rule on the unlisted `customer_reps` link table also narrows which customers `owner_via` makes visible."
+  },
+  {
+    "criterion": 18,
+    "text": "A synthetic rule-set file with the real-scale file's shape (10 sets, about 1,300 table entries, about 270 row rules using all six kinds, chains 4 deep, rules expanding to 21 nodes) loads with `sqllens validate`, and a query over its most deeply chained table runs and returns that table's visible rows."
+  },
+  {
+    "criterion": 19,
+    "text": "`docs/internal/database-connectors/rule-sets.md` describes the row-rule kinds, the visibility rule, the load-time checks, the type mapping, the filtered `LIMIT`-materialized derived table and why it runs first, the guard aliases, the renaming of model CTEs under a set with row rules and why, and no longer says row rules are not supported. `docs/external/rule-sets.md` describes the six row-rule kinds with each kind's fields, the operators, the four `value_type`s and the exact-TOML-type rule, the `request = \"user_id\"` rule, the declared-column and listed-table rules, the unlisted `owner_via` link-table declarations, the acyclic visibility graph, that a row is visible only when its rule is true, the type mapping, and that queries over a scoped table can be slower because its visible rows are built in full first; it no longer says row rules are not supported or that a file containing one does not load, describes `predicate_columns` as columns only row rules read, and has no troubleshooting entry telling operators to remove a rule set because it holds a `row_rule`."
+  },
+  {
+    "criterion": 20,
+    "text": "The pull request description for this change names part 1a's changelog sentence \"Row rules are not supported yet\" in `changelog.d/389.added.md` and states that, while that fragment is unreleased, it needs a correction through the release guide's `codex/changelog-notes-<reason>` route."
+  },
+  {
+    "criterion": 21,
+    "text": "The change leaves these as they are, each as one unit: flat `[[rls]]` tables with no row rule keep part 1's mergeable derived table, so a model expression can still run on a row only a flat rule hides; the system prompt gains no text about row rules; a file whose tables hold no `row_rule` loads and serves exactly as under part 1; the existence and type checks run once per process, so a column dropped or retyped afterwards is not caught until restart; and the change's own pull request does not edit or delete `changelog.d/389.added.md`, because an ordinary PR cannot modify a fragment already on the base branch."
+  }
+]
