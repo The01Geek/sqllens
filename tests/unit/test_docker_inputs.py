@@ -3,12 +3,9 @@
 """Static image-input checks; never build or run a container."""
 
 import re
-import tomllib
 from pathlib import Path
 
 import yaml
-from packaging.requirements import Requirement
-from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -30,25 +27,10 @@ def test_image_python_is_tested_and_audited() -> None:
         assert version in config["jobs"][job]["strategy"]["matrix"]["python-version"]
 
 
-def test_image_install_uses_core_and_driver_constraints() -> None:
+def test_image_install_uses_only_the_core_lockfile() -> None:
     source = (ROOT / "docker/Dockerfile").read_text()
-    assert 'pip install --user -c requirements.txt -c requirements-drivers.txt ".[all]"' in source
-    assert "COPY docker/requirements-drivers.txt ./" in source
-
-
-def test_optional_database_drivers_have_exact_constraints() -> None:
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
-    extras = project["optional-dependencies"]
-    pins = {}
-    for line in (ROOT / "docker/requirements-drivers.txt").read_text().splitlines():
-        if line and not line.startswith("#"):
-            req = Requirement(line)
-            (version,) = req.specifier
-            assert version.operator == "==" and "*" not in version.version
-            pins[canonicalize_name(req.name)] = version.version
-    required = [Requirement(item) for item in extras["mysql"]]
-    assert set(pins) == {canonicalize_name(req.name) for req in required}
-    assert all(pins[canonicalize_name(req.name)] in req.specifier for req in required)
+    installs = [line for line in source.splitlines() if "pip install" in line]
+    assert installs == ['RUN pip install --user -c requirements.txt ".[all]"']
 
 
 def test_image_digest_has_dependabot_update_coverage() -> None:

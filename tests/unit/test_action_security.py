@@ -61,3 +61,4 @@ def test_ci_token_is_read_only_and_check_names_stay_stable():
         "Lint + unit + transport (py${{ matrix.python-version }})"
     )
     assert workflow["jobs"]["connectors"]["name"] == "Connector tests (MySQL)"
+    assert workflow["jobs"]["connectors-mysql84"]["name"] == "Connector tests (MySQL 8.4)"

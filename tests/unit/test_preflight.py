@@ -124,7 +124,9 @@ def test_probe_database_mysql_missing_driver_raises_clean_preflight_error(
     with pytest.raises(PreflightError) as exc_info:
         probe_database(_cfg(db_url="mysql://user:pw@localhost:3306/db"))
     assert exc_info.value.subsystem == "database"
-    assert "sqllens[mysql]" in exc_info.value.detail
+    assert "PyMySQL" in exc_info.value.detail
+    assert "reinstall sqllens" in exc_info.value.detail
+    assert "sqllens[" not in exc_info.value.detail
     assert isinstance(exc_info.value.__cause__, ImportError)
 
 

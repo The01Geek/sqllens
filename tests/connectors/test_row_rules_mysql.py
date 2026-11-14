@@ -16,7 +16,6 @@ Tables carry an ``rr_`` prefix and hold the issue's example set for user 7:
 
 from __future__ import annotations
 
-import os
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -24,7 +23,9 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 import pandas as pd
+import pymysql
 import pytest
+from _settings import MYSQL_URL, require_setting
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
 from sqllens.agent.core.tool import ToolContext
@@ -54,14 +55,8 @@ from tests.unit._rule_set_fixtures import row_rule_document, scale_document, to_
 
 pytestmark = pytest.mark.asyncio
 
-pymysql = pytest.importorskip("pymysql")
-
-
 def _url() -> str:
-    url = os.environ.get("SQLLENS_TEST_MYSQL_URL")
-    if not url:
-        pytest.skip("SQLLENS_TEST_MYSQL_URL not set; skipping connector test")
-    return url
+    return require_setting(MYSQL_URL)
 
 
 def _connect(url: str) -> Any:
