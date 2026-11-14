@@ -17,6 +17,15 @@ selects exactly that table's listed ``columns``::
 MySQL then resolves every column the model wrote against the derived table,
 so a column the set does not list fails as an unknown column.
 
+A reference to a table with a row rule becomes a derived table that also
+keeps only the rows the rule makes visible to the request's user, and ends in
+``LIMIT 18446744073709551615`` so MySQL builds it before any expression the
+model wrote reads it (see :func:`_scoped_body`). Every table reference inside
+it carries an alias the guard chooses, unique in the statement. While the set
+has any row rule, every CTE the model defines is first renamed to a
+guard-chosen name (:func:`_rename_ctes`), so no CTE can stand in for a table a
+filter reads.
+
 A reference to ``INFORMATION_SCHEMA.TABLES``, ``COLUMNS`` or
 ``KEY_COLUMN_USAGE`` becomes a derived table over that view (see
 :func:`_catalog_body`): it keeps only rows for the connected database and the
@@ -42,10 +51,11 @@ refusal, so no table, column or function name reaches the model or client.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import pandas as pd
 from sqlglot import expressions as exp
@@ -53,7 +63,12 @@ from sqlglot.errors import ErrorLevel
 from sqlglot.optimizer.scope import traverse_scope
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
-from sqllens.rule_sets import LoadedRuleSets, current_rule_set_selection, refusal_log_fields
+from sqllens.rule_sets import (
+    CompiledRule,
+    LoadedRuleSets,
+    current_rule_set_selection,
+    refusal_log_fields,
+)
 from sqllens.safety.readonly import (
     UnsafeSqlError,
     _parse_statements,
@@ -317,6 +332,124 @@ def _derived(table: exp.Table, columns: tuple[str, ...]) -> exp.Subquery:
     return _wrap(table, body)
 
 
+def _identifier(name: str) -> exp.Identifier:
+    return exp.to_identifier(name, quoted=True)
+
+
+@dataclass(frozen=True)
+class _Scoping:
+    """The selected set's row rules for one statement.
+
+    ``prefix`` starts every alias and CTE name the guard writes; no
+    identifier in the model's statement and no table the set or its rules
+    name starts with it, ignoring letter case. The ``k``-th scoped reference
+    reads its tables under the aliases ``<prefix><k>_<slot>``.
+    """
+
+    rules: Mapping[str, CompiledRule]
+    user_id: int
+    prefix: str
+
+    def aliases(self, index: int, rule: CompiledRule) -> list[str]:
+        return [f"{self.prefix}{index}_{slot}" for slot in range(rule.slots)]
+
+    def base_index(self, table: exp.Table) -> int | None:
+        """``k`` when ``table``'s alias is the base alias ``<prefix><k>_0``, else ``None``."""
+        alias = table.args.get("alias")
+        if alias is None or not isinstance(alias.this, exp.Identifier):
+            return None
+        match = re.fullmatch(re.escape(self.prefix) + r"([0-9]+)_0", alias.name)
+        return int(match.group(1)) if match else None
+
+
+def _choose_prefix(
+    tree: exp.Expression,
+    tables: Mapping[str, tuple[str, ...]],
+    rules: Mapping[str, CompiledRule],
+) -> str:
+    names = {identifier.name.lower() for identifier in tree.find_all(exp.Identifier)}
+    names.update(name.lower() for name in tables)
+    names.update(name.lower() for rule in rules.values() for name in rule.tables)
+    index = 0
+    while any(name.startswith(f"sl{index}_") for name in names):
+        index += 1
+    return f"sl{index}_"
+
+
+def _rename_ctes(tree: exp.Expression, prefix: str) -> None:
+    """Rename every CTE the statement defines to ``<prefix>c<n>``, references included.
+
+    A reference without an alias gets the CTE's old name as its alias, so the
+    model's column qualifiers keep resolving to it. MySQL resolves a table
+    name to a CTE before the base table, so without this a model CTE named
+    after a table a row filter reads would stand in for that table inside the
+    filter.
+    """
+    ctes = list(tree.find_all(exp.CTE))
+    names = {id(cte): f"{prefix}c{index}" for index, cte in enumerate(ctes)}
+    for scope in list(traverse_scope(tree)):
+        for table in scope.tables:
+            if not _is_cte_reference(table, scope):
+                continue
+            body = scope.cte_sources[table.name].expression
+            cte = body if isinstance(body, exp.CTE) else body.find_ancestor(exp.CTE)
+            if cte is None or id(cte) not in names:
+                raise RuleSetRefusal(KIND_UNSUPPORTED, f"unresolved CTE reference {table.name}")
+            if table.args.get("alias") is None:
+                table.set("alias", exp.TableAlias(this=table.this.copy()))
+            table.set("this", _identifier(names[id(cte)]))
+    for cte in ctes:
+        cte.args["alias"].set("this", _identifier(names[id(cte)]))
+
+
+def _scoped_body(
+    name: str, columns: tuple[str, ...], rule: CompiledRule, aliases: list[str], user_id: int
+) -> exp.Select:
+    """``SELECT <columns> FROM name AS <alias> WHERE <rule> LIMIT 18446744073709551615``.
+
+    The LIMIT keeps MySQL from merging the derived table into the model's
+    query or pushing the model's conditions into it, so the filter runs
+    before any expression the model wrote.
+    """
+    base = aliases[0]
+    source = exp.Table(this=_identifier(name), alias=exp.TableAlias(this=_identifier(base)))
+    selected = [exp.column(_identifier(column), table=_identifier(base)) for column in columns]
+    return (
+        exp.Select(expressions=selected)
+        .from_(source, copy=False)
+        .where(rule.instantiate(aliases, user_id), copy=False)
+        .limit(exp.Literal.number(_MATERIALIZE_LIMIT), copy=False)
+    )
+
+
+def _shape(node: Any) -> Any:
+    """A case-sensitive structural key of a sqlglot tree, comments ignored.
+
+    Text comparison cannot tell ``(a OR b) AND c`` built without its
+    parentheses from ``a OR (b AND c)``: both generate ``a OR b AND c``.
+    """
+    if isinstance(node, exp.Expression):
+        return (
+            type(node).__name__,
+            tuple(
+                (key, _shape(value))
+                for key, value in sorted(node.args.items())
+                if value not in (None, False, []) and key != "comments"
+            ),
+        )
+    if isinstance(node, list):
+        return tuple(_shape(item) for item in node)
+    return node
+
+
+def prove_compiled_rule(name: str, columns: tuple[str, ...], rule: CompiledRule) -> None:
+    """Raise ``ValueError`` unless ``rule``'s derived table survives generation and re-parse."""
+    body = _scoped_body(name, columns, rule, [f"sl0_0_{slot}" for slot in range(rule.slots)], 1)
+    reparsed = _reparse(_generate(body))
+    if _shape(reparsed) != _shape(body):
+        raise ValueError("the compiled rule changes when generated and parsed again")
+
+
 def _wrap(table: exp.Table, body: exp.Select) -> exp.Subquery:
     """``body`` as a derived table standing where ``table`` stood, under its alias or name."""
     alias = table.args.get("alias")
@@ -452,9 +585,18 @@ def _rewrite(
     base: list[exp.Table],
     catalog: list[tuple[exp.Table, str]],
     tables: Mapping[str, tuple[str, ...]],
+    scoping: _Scoping | None = None,
 ) -> exp.Expression:
+    scoped = 0
     for table in base:
-        table.replace(_derived(table, tables[table.name]))
+        rule = scoping.rules.get(table.name) if scoping is not None else None
+        if scoping is None or rule is None:
+            table.replace(_derived(table, tables[table.name]))
+            continue
+        aliases = scoping.aliases(scoped, rule)
+        scoped += 1
+        body = _scoped_body(table.name, tables[table.name], rule, aliases, scoping.user_id)
+        table.replace(_wrap(table, body))
     for table, view in catalog:
         table.replace(_wrap(table, _catalog_body(view, tables)))
     for hint in list(tree.find_all(exp.Hint)):
@@ -539,25 +681,86 @@ class _BodyTextCache:
         return self._text[view]
 
 
+def _wrapper_body(table: exp.Table) -> exp.Select | None:
+    """The SELECT whose FROM is ``table`` alone, inside a derived table of the guard's shape."""
+    from_ = table.parent
+    body = from_.parent if isinstance(from_, exp.From) else None
+    if not isinstance(body, exp.Select) or body.args.get("from_") is not from_:
+        return None
+    wrapper = body.parent
+    if not isinstance(wrapper, exp.Subquery) or wrapper.this is not body:
+        return None
+    if _set_args(wrapper) - {"this", "alias", "joins"}:
+        return None
+    alias = wrapper.args.get("alias")
+    if alias is not None and alias.args.get("columns"):
+        return None
+    return body
+
+
+def _proven_scoped_tables(
+    tree: exp.Expression, tables: Mapping[str, tuple[str, ...]], scoping: _Scoping
+) -> set[int]:
+    """Prove each scoped derived table against the body rebuilt from the rule; return its tables.
+
+    A table with a row rule under a base alias ``<prefix><k>_0`` must sit in
+    a derived table whose body has exactly the tree :func:`_scoped_body`
+    builds for that table, ``k`` and the user ID. Every table inside a proven
+    body is guard-built. Raises :class:`RuleSetRefusal` for a body that
+    differs or a ``k`` used twice.
+    """
+    built: set[int] = set()
+    seen: set[int] = set()
+    for table in tree.find_all(exp.Table):
+        rule = scoping.rules.get(table.name)
+        index = scoping.base_index(table) if rule is not None else None
+        if rule is None or index is None:
+            continue
+        body = _wrapper_body(table)
+        if body is None:
+            continue
+        if index in seen:
+            raise RuleSetRefusal(KIND_UNCHECKED, f"re-walk: filter alias {index} used twice")
+        expected = _scoped_body(
+            table.name, tables[table.name], rule, scoping.aliases(index, rule), scoping.user_id
+        )
+        if _shape(body) != _shape(expected):
+            raise RuleSetRefusal(
+                KIND_UNCHECKED, f"re-walk: table {table.name} has another filter or shape"
+            )
+        seen.add(index)
+        built.update(id(inner) for inner in body.find_all(exp.Table))
+    return built
+
+
 def _rewalk(
     tree: exp.Expression,
     tables: Mapping[str, tuple[str, ...]],
     expected: _BodyTextCache | None = None,
+    scoping: _Scoping | None = None,
 ) -> None:
     """Refuse ``tree`` unless every base-table and catalog reference is in a guard-built wrapper.
 
     ``expected`` caches each catalog view's body text for ``tables`` across
-    the two re-walks of one statement.
+    the two re-walks of one statement. With ``scoping``, a table with a row
+    rule is accepted only inside its proven filtered derived table.
     """
     if expected is None:
         expected = _BodyTextCache(tables)
     elif not expected.built_for(tables):
         raise ValueError("catalog body cache used with another rule set's tables")
-    accounted: set[int] = set()
+    built = _proven_scoped_tables(tree, tables, scoping) if scoping is not None else set()
+    accounted: set[int] = set(built)
     for scope in traverse_scope(tree):
         sources = [s for s in scope.sources.values() if isinstance(s, exp.Table)]
         source_ids = {id(s) for s in sources}
         for table in sources:
+            if id(table) in built:
+                continue
+            if scoping is not None and table.name in scoping.rules:
+                raise RuleSetRefusal(
+                    KIND_UNCHECKED, f"re-walk: table {table.name} is not filtered by its row rule"
+                )
             if not (
                 _is_guard_derived(table, tables)
                 or _is_catalog_derived(table, tables, expected)
@@ -592,21 +795,33 @@ def _reparse(sql: str) -> exp.Expression:
     return statements[0]
 
 
-def apply_rule_set(sql: str, tables: Mapping[str, tuple[str, ...]]) -> str:
-    """Rewrite ``sql`` so every listed table exposes only its listed columns.
+def apply_rule_set(
+    sql: str,
+    tables: Mapping[str, tuple[str, ...]],
+    rules: Mapping[str, CompiledRule] | None = None,
+    user_id: int | None = None,
+) -> str:
+    """Rewrite ``sql`` so every listed table exposes only its listed columns and visible rows.
 
     ``tables`` maps each listed table name (compared case-sensitively) to its
-    listed ``columns``. A reference to ``INFORMATION_SCHEMA.TABLES``,
-    ``COLUMNS`` or ``KEY_COLUMN_USAGE`` is rewritten to show only those tables
-    and columns. Raises :class:`RuleSetRefusal` for a statement the guard
-    refuses; any other exception from a step is the caller's to turn into a
-    refusal.
+    listed ``columns``; ``rules`` maps each table with a row rule to its
+    compiled rule, evaluated for ``user_id``. A reference to
+    ``INFORMATION_SCHEMA.TABLES``, ``COLUMNS`` or ``KEY_COLUMN_USAGE`` is
+    rewritten to show only those tables and columns. Raises
+    :class:`RuleSetRefusal` for a statement the guard refuses; any other
+    exception from a step is the caller's to turn into a refusal.
     """
     tree = _parse(sql)
+    scoping = None
+    if rules:
+        if user_id is None:
+            raise ValueError("row rules need the request's user ID")
+        scoping = _Scoping(rules=rules, user_id=user_id, prefix=_choose_prefix(tree, tables, rules))
+        _rename_ctes(tree, scoping.prefix)
     base, catalog = _analyze(tree, tables)
-    _rewrite(tree, base, catalog, tables)
+    _rewrite(tree, base, catalog, tables, scoping)
     expected = _BodyTextCache(tables)
-    _rewalk(tree, tables, expected)
+    _rewalk(tree, tables, expected, scoping)
     output = _generate(tree)
     try:
         reparsed = _reparse(output)
@@ -614,7 +829,7 @@ def apply_rule_set(sql: str, tables: Mapping[str, tuple[str, ...]]) -> str:
         if isinstance(exc, RuleSetRefusal):
             raise
         raise RuleSetRefusal(KIND_UNCHECKED, f"re-parse failed: {exc}") from exc
-    _rewalk(reparsed, tables, expected)
+    _rewalk(reparsed, tables, expected, scoping)
     return output
 
 
@@ -646,10 +861,10 @@ class RuleSetGuardRunner(SqlRunner):
         if selection is None:
             raise RuleSetRefusal(KIND_NO_SELECTION)
         try:
-            tables = self._rule_sets.tables_for(selection.name)
+            spec = self._rule_sets.guard_spec(selection.name)
         except KeyError as exc:
             raise RuleSetRefusal(KIND_NO_SELECTION, "selected rule set not in file") from exc
-        rewritten = apply_rule_set(sql, tables)
+        rewritten = apply_rule_set(sql, spec.tables, spec.rules, selection.user_id)
         try:
             assert_no_denied_functions(rewritten, dialect=_DIALECT)
         except UnsafeSqlError as exc:

@@ -251,17 +251,6 @@ def test_invalid_file_names_record_and_problem(tmp_path: Path, case: str) -> Non
     assert problem in message
 
 
-def test_row_rule_names_removing_the_whole_rule_set(tmp_path: Path) -> None:
-    document = example_document()
-    document["rule_sets"][0]["tables"][0]["row_rule"] = {"column": "rep_id"}
-    with pytest.raises(RuleSetFileError) as info:
-        _load(tmp_path, document)
-    message = str(info.value)
-    assert "rule_sets[0].tables[0]:" in message
-    assert "remove the whole rule set" in message
-    assert "never only its row rules" in message
-
-
 def test_invalid_toml_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "rule-sets.toml"
     path.write_text("format_version = \n")
@@ -342,9 +331,14 @@ class _Cursor:
         if "information_schema.TABLES" in sql:
             self._rows = list(self._tables.items())
         else:
-            self._rows = [(t, c) for t, cols in self._columns.items() for c in cols]
+            # A column list means type 'int' for each; a dict maps column to DATA_TYPE.
+            self._rows = [
+                (t, c, cols[c] if isinstance(cols, dict) else "int")
+                for t, cols in self._columns.items()
+                for c in cols
+            ]
 
-    def fetchall(self) -> list[tuple[str, str]]:
+    def fetchall(self) -> list[tuple[str, ...]]:
         return self._rows
 
     def close(self) -> None:

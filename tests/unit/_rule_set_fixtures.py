@@ -78,6 +78,77 @@ def example_document() -> dict[str, Any]:
     )
 
 
+def user_id_compare(column: str) -> dict[str, Any]:
+    return {
+        "kind": "compare", "column": column, "operator": "=",
+        "value_type": "integer", "request": "user_id",
+    }
+
+
+def row_rule_tables(prefix: str = "") -> list[dict[str, Any]]:
+    """The issue's example set's tables, every name prefixed with ``prefix``.
+
+    ``customers`` (visible by ``sales_rep_id`` or an unlisted ``customer_reps``
+    link), ``orders`` (its customer's, ``status`` not ``void``), ``order_tags``,
+    ``tags`` (through ``order_tags``), ``regions`` (direct ``referenced_by``),
+    ``currencies`` (no rule) and ``rates`` (inherits a parent with no rule).
+    """
+    p = prefix
+    return [
+        {
+            "name": f"{p}customers", "columns": ["id", "name", "region_id"],
+            "predicate_columns": ["sales_rep_id"],
+            "row_rule": {"kind": "any_of", "rules": [
+                user_id_compare("sales_rep_id"),
+                {"kind": "owner_via", "id_column": "id", "link_table": f"{p}customer_reps",
+                 "link_row_column": "customer_id", "link_user_column": "user_id"},
+            ]},
+        },
+        {
+            "name": f"{p}orders", "columns": ["id", "customer_id", "total"],
+            "predicate_columns": ["status"],
+            "row_rule": {"kind": "all_of", "rules": [
+                {"kind": "inherit", "column": "customer_id", "parent_table": f"{p}customers",
+                 "parent_column": "id"},
+                {"kind": "compare", "column": "status", "operator": "!=",
+                 "value_type": "string", "value": "void"},
+            ]},
+        },
+        {
+            "name": f"{p}order_tags", "columns": ["order_id", "tag_id"],
+            "row_rule": {"kind": "inherit", "column": "order_id", "parent_table": f"{p}orders",
+                         "parent_column": "id"},
+        },
+        {
+            "name": f"{p}tags", "columns": ["id", "label"],
+            "row_rule": {"kind": "referenced_by", "id_column": "id",
+                         "source_table": f"{p}orders", "source_id_column": "id",
+                         "link": {"table": f"{p}order_tags", "source_column": "order_id",
+                                  "target_column": "tag_id"}},
+        },
+        {
+            "name": f"{p}regions", "columns": ["id", "name"],
+            "row_rule": {"kind": "referenced_by", "id_column": "id",
+                         "source_table": f"{p}customers", "source_column": "region_id"},
+        },
+        {"name": f"{p}currencies", "columns": ["id", "code"]},
+        {
+            "name": f"{p}rates", "columns": ["id", "currency_id", "rate"],
+            "row_rule": {"kind": "inherit", "column": "currency_id",
+                         "parent_table": f"{p}currencies", "parent_column": "id"},
+        },
+    ]
+
+
+def row_rule_document(database: str = "shop", prefix: str = "") -> dict[str, Any]:
+    """A valid document whose confirmed set ``"2"`` is the issue's example row-rule set."""
+    document = example_document()
+    document["binding"]["database"] = database
+    document["rule_sets"] = [document["rule_sets"][0]]
+    document["rule_sets"][0]["tables"] = row_rule_tables(prefix)
+    return document
+
+
 def _toml_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"

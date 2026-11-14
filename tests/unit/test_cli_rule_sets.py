@@ -66,8 +66,11 @@ def test_validate_warns_once_per_unconfirmed_set(tmp_path: Path) -> None:
     [
         (lambda d: d["rule_sets"][0]["tables"][0].update(columns=["id", "name", "id"]),
          "rule_sets[0].tables[0]: duplicate column 'id'"),
-        (lambda d: d["rule_sets"][0]["tables"][0].update(row_rule={"column": "rep_id"}),
-         "remove the whole rule set"),
+        (lambda d: d["rule_sets"][0]["tables"][0].update(row_rule={
+            "kind": "compare", "column": "nosuch", "operator": "=",
+            "value_type": "integer", "value": 1,
+        }),
+         "rule_sets[0]: tables[0].row_rule: column 'nosuch' is not declared on table 'customers'"),
         (lambda d: d["binding"].update(database="primary"),
          "is not the database named in database.url"),
         (lambda d: d["metadata"].update(rule_set="ui_features_available"), "reserved"),
