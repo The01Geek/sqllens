@@ -78,6 +78,137 @@ def example_document() -> dict[str, Any]:
     )
 
 
+def user_id_compare(column: str) -> dict[str, Any]:
+    return {
+        "kind": "compare", "column": column, "operator": "=",
+        "value_type": "integer", "request": "user_id",
+    }
+
+
+def row_rule_tables(prefix: str = "") -> list[dict[str, Any]]:
+    """The issue's example set's tables, every name prefixed with ``prefix``.
+
+    ``customers`` (visible by ``sales_rep_id`` or an unlisted ``customer_reps``
+    link), ``orders`` (its customer's, ``status`` not ``void``), ``order_tags``,
+    ``tags`` (through ``order_tags``), ``regions`` (direct ``referenced_by``),
+    ``currencies`` (no rule) and ``rates`` (inherits a parent with no rule).
+    """
+    p = prefix
+    return [
+        {
+            "name": f"{p}customers", "columns": ["id", "name", "region_id"],
+            "predicate_columns": ["sales_rep_id"],
+            "row_rule": {"kind": "any_of", "rules": [
+                user_id_compare("sales_rep_id"),
+                {"kind": "owner_via", "id_column": "id", "link_table": f"{p}customer_reps",
+                 "link_row_column": "customer_id", "link_user_column": "user_id"},
+            ]},
+        },
+        {
+            "name": f"{p}orders", "columns": ["id", "customer_id", "total"],
+            "predicate_columns": ["status"],
+            "row_rule": {"kind": "all_of", "rules": [
+                {"kind": "inherit", "column": "customer_id", "parent_table": f"{p}customers",
+                 "parent_column": "id"},
+                {"kind": "compare", "column": "status", "operator": "!=",
+                 "value_type": "string", "value": "void"},
+            ]},
+        },
+        {
+            "name": f"{p}order_tags", "columns": ["order_id", "tag_id"],
+            "row_rule": {"kind": "inherit", "column": "order_id", "parent_table": f"{p}orders",
+                         "parent_column": "id"},
+        },
+        {
+            "name": f"{p}tags", "columns": ["id", "label"],
+            "row_rule": {"kind": "referenced_by", "id_column": "id",
+                         "source_table": f"{p}orders", "source_id_column": "id",
+                         "link": {"table": f"{p}order_tags", "source_column": "order_id",
+                                  "target_column": "tag_id"}},
+        },
+        {
+            "name": f"{p}regions", "columns": ["id", "name"],
+            "row_rule": {"kind": "referenced_by", "id_column": "id",
+                         "source_table": f"{p}customers", "source_column": "region_id"},
+        },
+        {"name": f"{p}currencies", "columns": ["id", "code"]},
+        {
+            "name": f"{p}rates", "columns": ["id", "currency_id", "rate"],
+            "row_rule": {"kind": "inherit", "column": "currency_id",
+                         "parent_table": f"{p}currencies", "parent_column": "id"},
+        },
+    ]
+
+
+def row_rule_document(database: str = "shop", prefix: str = "") -> dict[str, Any]:
+    """A valid document whose confirmed set ``"2"`` is the issue's example row-rule set."""
+    document = example_document()
+    document["binding"]["database"] = database
+    document["rule_sets"] = [document["rule_sets"][0]]
+    document["rule_sets"][0]["tables"] = row_rule_tables(prefix)
+    return document
+
+
+SCALE_COLUMNS = ["id", "parent_id", "owner_id", "kind_s"]
+
+
+def _scale_compare(column: str, value: Any, value_type: str) -> dict[str, Any]:
+    return {"kind": "compare", "column": column, "operator": "=", "value_type": value_type,
+            "value": value}
+
+
+def scale_document(database: str = "shop", prefix: str = "") -> dict[str, Any]:
+    """A synthetic file with the real-scale file's shape, never its names.
+
+    10 sets of 130 tables (1,300 entries), 27 row rules per set (270) using
+    all six kinds; ``t004`` ends a chain 4 deep (``t004`` -> ``t003`` ->
+    ``t002`` -> ``t001`` -> ``t000``), and ``t007``'s rule has 21 nodes.
+    Every table has :data:`SCALE_COLUMNS`; ``t005`` and ``t006`` use the
+    unlisted link table ``<prefix>link``.
+    """
+    def t(n: int) -> str:
+        return f"{prefix}t{n:03d}"
+
+    owner = {"kind": "owner_via", "id_column": "id", "link_table": f"{prefix}link",
+             "link_row_column": "row_id", "link_user_column": "user_id"}
+    rules: dict[int, dict[str, Any]] = {
+        0: user_id_compare("owner_id"),
+        **{n: {"kind": "inherit", "column": "parent_id", "parent_table": t(n - 1),
+               "parent_column": "id"} for n in range(1, 5)},
+        5: owner,
+        6: {"kind": "any_of", "rules": [_scale_compare("kind_s", "a", "string"), owner]},
+        7: {"kind": "all_of", "rules": [
+            {"kind": "any_of", "rules": [_scale_compare("owner_id", v, "integer")
+                                         for v in range(9)]},
+            {"kind": "any_of", "rules": [_scale_compare("kind_s", f"k{v}", "string")
+                                         for v in range(9)]},
+        ]},
+        8: {"kind": "referenced_by", "id_column": "id", "source_table": t(0),
+            "source_column": "parent_id"},
+        9: {"kind": "referenced_by", "id_column": "id", "source_table": t(1),
+            "source_id_column": "id",
+            "link": {"table": t(10), "source_column": "parent_id", "target_column": "owner_id"}},
+        **{n: _scale_compare("kind_s", f"s{n}", "string") for n in range(10, 27)},
+    }
+    document = example_document()
+    document["binding"]["database"] = database
+    document["rule_sets"] = []
+    for set_index in range(1, 11):
+        tables = []
+        for n in range(130):
+            table: dict[str, Any] = {"name": t(n), "columns": list(SCALE_COLUMNS)}
+            if n in rules:
+                table["row_rule"] = copy.deepcopy(rules[n])
+            tables.append(table)
+        document["rule_sets"].append({
+            "name": str(set_index),
+            "scope": f"Synthetic scale set {set_index}.",
+            "source": {"confirmed_against_production": True},
+            "tables": tables,
+        })
+    return document
+
+
 def _toml_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"

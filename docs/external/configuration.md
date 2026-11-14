@@ -277,7 +277,7 @@ As environment variables, each setting is a JSON array, for example `SQLLENS_RES
 
 ## Section: `[rule_sets]`
 
-Per-role rule sets limit each question to the tables and columns one application role may read. They are available on MySQL only and are off unless you set `file`.
+Per-role rule sets limit each question to the tables, columns and rows one application role may read. They are available on MySQL only and are off unless you set `file`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|

@@ -216,6 +216,37 @@ def test_probe_database_does_not_swallow_programmer_errors(
         probe_database(_cfg(db_url=db_url))
 
 
+@pytest.mark.parametrize(
+    ("raised", "expected", "unexpected"),
+    [
+        (KeyError("varchar"), "internal error (not a database error)", "privileges"),
+        (None, "could not read information_schema", "internal error"),
+    ],
+)
+def test_rule_set_catalog_check_names_driver_and_internal_failures_apart(
+    monkeypatch: pytest.MonkeyPatch,
+    raised: Exception | None,
+    expected: str,
+    unexpected: str,
+) -> None:
+    pymysql = pytest.importorskip("pymysql")
+    import sqllens.preflight as preflight
+
+    exc = raised if raised is not None else pymysql.OperationalError(1142, "denied")
+
+    def boom(*_args: object) -> None:
+        raise exc
+
+    monkeypatch.setattr(preflight, "check_catalog", boom)
+    loaded = type("Loaded", (), {"catalog": type("Cat", (), {"confirmed": False})()})()
+    with pytest.raises(PreflightError) as info:
+        preflight._check_rule_set_catalog(object(), loaded)
+    assert expected in str(info.value)
+    assert unexpected not in str(info.value)
+    assert info.value.__cause__ is exc
+    assert loaded.catalog.confirmed is False
+
+
 # ---------------------------------------------------------------------------
 # probe_llm
 # ---------------------------------------------------------------------------

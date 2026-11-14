@@ -641,11 +641,11 @@ async def test_failed_rewalk_of_the_reparsed_output_refuses(runner, selected, mo
     real = guard._rewalk
     calls = []
 
-    def second_fails(tree, tables, expected=None):
+    def second_fails(tree, tables, expected=None, scoping=None):
         calls.append(tree)
         if len(calls) == 2:
             raise RuleSetRefusal(guard.KIND_UNCHECKED, "planted")
-        return real(tree, tables, expected)
+        return real(tree, tables, expected, scoping)
 
     monkeypatch.setattr(guard, "_rewalk", second_fails)
     with pytest.raises(RuleSetRefusal):
