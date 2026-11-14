@@ -1,0 +1,24 @@
+{
+  "root_completeness": "established",
+  "phase3_findings": [
+    {"finding_id": "F-1", "agent": "prflow:type-design-analyzer", "severity": "Important", "corroboration": 1, "description": "RuleSetsConfig allows file set while _loaded is None (only Config._load_rule_sets fills it); every gate checks only loaded is not None, so that state serves requests with no rule-set guard, no _meta selection and memory writes on (fail-open).", "defect_signature": {"file": "src/sqllens/config.py", "line_range": [760, 782], "kind": "type_design"}},
+    {"finding_id": "F-2", "agent": "prflow:comment-analyzer", "severity": "Suggestion", "corroboration": 1, "description": "docs/external/rule-sets.md:95 says any query reaching for anything else is refused before it runs; unlisted columns instead fail in MySQL with unknown-column. Line 119 says so correctly.", "defect_signature": {"file": "docs/external/rule-sets.md", "line_range": [95, 95], "kind": "documented_falsehood"}, "inertness_cap": "important"},
+    {"finding_id": "F-3", "agent": "prflow:silent-failure-hunter", "severity": "Suggestion", "corroboration": 1, "description": "docs/internal/database-connectors/rule-sets.md:64 claims guard-internal refusals redact to REDACTED_GUARD_ERROR; RlsError ones get REDACTED_RLS / REDACTED_RELATION because redacted_refusal_text checks RlsError first. Checklist VC-21 agrees.", "defect_signature": {"file": "docs/internal/database-connectors/rule-sets.md", "line_range": [64, 64], "kind": "documented_falsehood"}, "inertness_cap": "suggestion"},
+    {"finding_id": "F-4", "agent": "prflow:pr-test-analyzer", "severity": "Suggestion", "corroboration": 1, "description": "Startup catalog check in preflight opens with connect_timeout only, no read/write timeout like the request-time check; a stalled server hangs serve and validate --check-db.", "defect_signature": {"file": "src/sqllens/preflight.py", "line_range": [143, 153], "kind": "other"}},
+    {"finding_id": "F-5", "agent": "prflow:type-design-analyzer", "severity": "Suggestion", "corroboration": 1, "description": "Frozen rule-set records keep mutable list fields; LoadedRuleSets.rule_set returns the live RuleSet.", "defect_signature": {"file": "src/sqllens/rule_sets.py", "line_range": [77, 78], "kind": "type_design"}},
+    {"finding_id": "F-6", "agent": "prflow:type-design-analyzer", "severity": "Suggestion", "corroboration": 1, "description": "TableRule.row_rule: Any = None declares a field whose only valid state is absent.", "defect_signature": {"file": "src/sqllens/rule_sets.py", "line_range": [174, 179], "kind": "type_design"}},
+    {"finding_id": "F-7", "agent": "prflow:type-design-analyzer", "severity": "Suggestion", "corroboration": 1, "description": "RuleSetSelection does not validate its own fields (positive user_id, bound account).", "defect_signature": {"file": "src/sqllens/rule_sets.py", "line_range": [348, 358], "kind": "type_design"}},
+    {"finding_id": "F-8", "agent": "prflow:type-design-analyzer", "severity": "Suggestion", "corroboration": 1, "description": "CatalogConfirmation.confirmed is a public writable bool beside its lock.", "defect_signature": {"file": "src/sqllens/rule_sets.py", "line_range": [234, 239], "kind": "type_design"}}
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": true, "test_relevant": true, "detect_all_audit": false, "checklist_skipped": null},
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase4_demoted": [],
+  "reject_drivers": ["F-1"],
+  "criterion_exempt": [],
+  "verdict": "REJECT"
+}
