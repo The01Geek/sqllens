@@ -268,3 +268,68 @@ async def test_sdk_rejected_arguments_write_no_audit_line(tmp_path: Path, caplog
             result = await client.call_tool("query_database", {"question": 7})
     assert result.is_error is True
     assert _audit(list(caplog.records)) == []
+
+
+_OWN_LOGGERS = ("sqllens.tools.query_database", "sqllens.rule_sets", "sqllens.safety.rule_sets")
+
+
+def _with_audit(cfg, **audit: Any):
+    from sqllens.config import AuditConfig
+
+    agent_cfg = cfg.agent.model_copy(update={"audit": AuditConfig(**audit)})
+    return cfg.model_copy(update={"agent": agent_cfg})
+
+
+async def _records(cfg, agent, meta, caplog) -> list[tuple[str, int, str]]:
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        try:
+            await _ask(cfg, agent, meta)
+        except RuntimeError:
+            pass
+    return [(r.name, r.levelno, r.getMessage()) for r in caplog.records if r.name in _OWN_LOGGERS]
+
+
+async def test_no_rule_set_file_logs_only_the_lines_written_before(tmp_path: Path, caplog) -> None:
+    """Without a rule-set file a served call logs nothing here, a failed one only its old line."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    agent = _Agent()
+    agent.user_resolver = SimpleResolver()
+    assert await _records(cfg, agent, OWNER | EXTRA, caplog) == []
+
+    async def boom(*_: Any, **__: Any):
+        raise ValueError("driver error")
+        yield  # pragma: no cover
+
+    agent.send_message = boom  # type: ignore[method-assign]
+    assert await _records(cfg, agent, OWNER, caplog) == [
+        ("sqllens.tools.query_database", logging.ERROR, "agent.send_message failed")
+    ]
+
+
+@pytest.mark.parametrize("with_rule_sets", [True, False])
+async def test_agent_audit_settings_change_no_log_line(
+    tmp_path: Path, caplog, with_rule_sets: bool
+) -> None:
+    """``[agent.audit]`` stays unwired: its settings change nothing that is logged."""
+    if with_rule_sets:
+        base = rule_set_config(tmp_path)
+    else:
+        base = build_test_config(persist_dir=tmp_path / "chroma")
+    seen = []
+    for audit in (
+        {"enabled": False},
+        {"enabled": True, "log_level": "debug", "include_response_text": True},
+    ):
+        agent = _Agent()
+        if not with_rule_sets:
+            agent.user_resolver = SimpleResolver()
+        seen.append(await _records(_with_audit(base, **audit), agent, OWNER, caplog))
+    assert seen[0] == seen[1]
+    expected = len(_audit([_Rec(m) for _, _, m in seen[0]]))
+    assert expected == (1 if with_rule_sets else 0)
+
+
+class _Rec(logging.LogRecord):
+    def __init__(self, message: str) -> None:
+        super().__init__("x", logging.INFO, __file__, 0, message, None, None)
