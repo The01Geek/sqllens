@@ -253,13 +253,32 @@ class OwnerViaRule(_Record):
     link_user_column: Identifier
 
 
+class IsNullRule(_Record):
+    """Visible when the row's ``column`` is NULL."""
+
+    kind: Literal["is_null"]
+    column: Identifier
+
+
+class IsNotNullRule(_Record):
+    """Visible when the row's ``column`` is not NULL."""
+
+    kind: Literal["is_not_null"]
+    column: Identifier
+
+
 class InheritRule(_Record):
-    """Visible when a visible ``parent_table`` row has ``parent_column`` equal to ``column``."""
+    """Visible when a visible ``parent_table`` row has ``parent_column`` equal to ``column``.
+
+    With ``parent_rule``, that same parent row must also pass ``parent_rule``,
+    a column-local node over the parent table's declared columns.
+    """
 
     kind: Literal["inherit"]
     column: Identifier
     parent_table: Identifier
     parent_column: Identifier
+    parent_rule: RowRule | None = None
 
 
 class ReferencedByLink(_Record):
@@ -293,16 +312,34 @@ class ReferencedByRule(_Record):
 
 
 RowRule = Annotated[
-    CompareRule | AnyOfRule | AllOfRule | OwnerViaRule | InheritRule | ReferencedByRule,
+    CompareRule
+    | IsNullRule
+    | IsNotNullRule
+    | AnyOfRule
+    | AllOfRule
+    | OwnerViaRule
+    | InheritRule
+    | ReferencedByRule,
     Field(discriminator="kind"),
 ]
 
 AnyOfRule.model_rebuild()
 AllOfRule.model_rebuild()
+InheritRule.model_rebuild()
+
+_COLUMN_LOCAL = (CompareRule, IsNullRule, IsNotNullRule, AnyOfRule, AllOfRule)
+# The ``kind`` of each ``_COLUMN_LOCAL`` record, in the same order, for refusal messages.
+_COLUMN_LOCAL_KINDS = "compare, is_null, is_not_null, any_of, all_of"
 
 
 def _rule_nodes(rule: RowRule, path: str) -> Iterator[tuple[RowRule, str]]:
-    """Every node of ``rule`` with its record path, iteratively (children after parents)."""
+    """Every node of ``rule`` except ``parent_rule`` subtrees, with its record path.
+
+    Walked iteratively, children after parents. An ``inherit`` node's
+    ``parent_rule`` is deliberately not walked: its nodes read the parent
+    table, not the table ``rule`` belongs to, so a caller that needs them
+    walks ``node.parent_rule`` itself.
+    """
     stack = [(rule, path)]
     while stack:
         node, node_path = stack.pop()
@@ -312,15 +349,19 @@ def _rule_nodes(rule: RowRule, path: str) -> Iterator[tuple[RowRule, str]]:
             stack.extend((child, f"{node_path}.rules[{i}]") for i, child in reversed(children))
 
 
-def _rule_edges(rule: RowRule) -> list[str]:
-    """The tables whose own row rule ``rule`` depends on (``owner_via`` adds none)."""
+def _rule_edges(rule: RowRule, listed: set[str]) -> list[str]:
+    """The tables whose own row rule ``rule`` depends on.
+
+    ``owner_via``, ``parent_rule`` and a ``referenced_by`` link table that is
+    not in ``listed`` add none.
+    """
     edges: list[str] = []
     for node, _ in _rule_nodes(rule, ""):
         if isinstance(node, InheritRule):
             edges.append(node.parent_table)
         elif isinstance(node, ReferencedByRule):
             edges.append(node.source_table)
-            if node.link is not None:
+            if node.link is not None and node.link.table in listed:
                 edges.append(node.link.table)
     return edges
 
@@ -377,7 +418,7 @@ class RuleSet(_Record):
             if table.row_rule is None:
                 continue
             for node, path in _rule_nodes(table.row_rule, f"tables[{index}].row_rule"):
-                if isinstance(node, CompareRule):
+                if isinstance(node, CompareRule | IsNullRule | IsNotNullRule):
                     column(table.name, node.column, path)
                 elif isinstance(node, OwnerViaRule):
                     column(table.name, node.id_column, path)
@@ -388,6 +429,17 @@ class RuleSet(_Record):
                     column(table.name, node.column, path)
                     listed(node.parent_table, path)
                     column(node.parent_table, node.parent_column, path)
+                    if node.parent_rule is not None:
+                        for local, local_path in _rule_nodes(
+                            node.parent_rule, f"{path}.parent_rule"
+                        ):
+                            if not isinstance(local, _COLUMN_LOCAL):
+                                raise ValueError(
+                                    f"{local_path}: parent_rule cannot hold a "
+                                    f"{local.kind!r} node, only {_COLUMN_LOCAL_KINDS}"
+                                )
+                            if not isinstance(local, AnyOfRule | AllOfRule):
+                                column(node.parent_table, local.column, local_path)
                 elif isinstance(node, ReferencedByRule):
                     column(table.name, node.id_column, path)
                     listed(node.source_table, path)
@@ -395,14 +447,15 @@ class RuleSet(_Record):
                         column(node.source_table, node.source_column or "", path)
                     else:
                         column(node.source_table, node.source_id_column or "", path)
-                        listed(node.link.table, path)
-                        column(node.link.table, node.link.source_column, path)
-                        column(node.link.table, node.link.target_column, path)
+                        if node.link.table in declared:
+                            column(node.link.table, node.link.source_column, path)
+                            column(node.link.table, node.link.target_column, path)
 
     def _check_acyclic(self) -> None:
         """Refuse a visibility-graph cycle: drop tables with no edge left until none drops."""
+        listed = {table.name for table in self.tables}
         edges = {
-            table.name: set(_rule_edges(table.row_rule))
+            table.name: set(_rule_edges(table.row_rule, listed))
             for table in self.tables
             if table.row_rule is not None
         }
@@ -578,6 +631,16 @@ class _Compiler:
             return _COMPARISONS[node.operator](
                 this=column, expression=_literal(node.value, node.value_type)
             )
+        if isinstance(node, IsNullRule):
+            return exp.Is(this=_slot_column(slot, node.column), expression=exp.Null())
+        if isinstance(node, IsNotNullRule):
+            # Parenthesized: under HIGH_NOT_PRECEDENCE, MySQL reads a bare
+            # ``NOT x IS NULL`` as ``(NOT x) IS NULL``.
+            return exp.Not(
+                this=exp.Paren(
+                    this=exp.Is(this=_slot_column(slot, node.column), expression=exp.Null())
+                )
+            )
         if isinstance(node, AnyOfRule):
             return exp.or_(*(self._node(child, slot) for child in node.rules))
         if isinstance(node, AllOfRule):
@@ -600,9 +663,10 @@ class _Compiler:
                 this=_slot_column(parent, node.parent_column),
                 expression=_slot_column(slot, node.column),
             )
-            return _exists(
-                node.parent_table, parent, self._own_rule(node.parent_table, parent, match)
-            )
+            condition = self._own_rule(node.parent_table, parent, match)
+            if node.parent_rule is not None:
+                condition = exp.and_(condition, self._node(node.parent_rule, parent))
+            return _exists(node.parent_table, parent, condition)
         if isinstance(node, ReferencedByRule):
             if node.link is None:
                 source = self._new_slot(node.source_table)
@@ -995,9 +1059,10 @@ def _catalog_reads(loaded: LoadedRuleSets) -> tuple[
     """The tables and columns to check, in file order, and each typed comparison.
 
     The first value maps every listed table, then every unlisted ``owner_via``
-    link table, to its columns; the second lists (table, column, value_type)
-    for every ``compare`` column and every ``owner_via`` ``link_user_column``
-    (compared with the integer user ID).
+    or ``referenced_by`` link table, to its columns; the second lists (table,
+    column, value_type) for every ``compare`` column, ``parent_rule`` ones
+    included, and every ``owner_via`` ``link_user_column`` (compared with the
+    integer user ID).
     """
     reads: dict[str, list[str]] = {}
     links: dict[str, list[str]] = {}
@@ -1011,12 +1076,26 @@ def _catalog_reads(loaded: LoadedRuleSets) -> tuple[
             for node, _ in _rule_nodes(table.row_rule, ""):
                 if isinstance(node, CompareRule):
                     typed.append((table.name, node.column, node.value_type))
+                elif isinstance(node, InheritRule) and node.parent_rule is not None:
+                    typed.extend(
+                        (node.parent_table, local.column, local.value_type)
+                        for local, _ in _rule_nodes(node.parent_rule, "")
+                        if isinstance(local, CompareRule)
+                    )
                 elif isinstance(node, OwnerViaRule):
                     typed.append((node.link_table, node.link_user_column, "integer"))
                     if node.link_table not in listed:
                         links.setdefault(node.link_table, []).extend(
                             [node.link_row_column, node.link_user_column]
                         )
+                elif (
+                    isinstance(node, ReferencedByRule)
+                    and node.link is not None
+                    and node.link.table not in listed
+                ):
+                    links.setdefault(node.link.table, []).extend(
+                        [node.link.source_column, node.link.target_column]
+                    )
     for table, columns in links.items():
         reads.setdefault(table, []).extend(columns)
     return reads, typed
@@ -1027,11 +1106,12 @@ def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
 
     Reads ``information_schema`` for the connection's current database
     (``DATABASE()``, the database ``database.url`` names). Every table any set
-    lists, and every unlisted ``owner_via`` link table, must exist with exactly
-    that name, byte for byte, as a ``BASE TABLE``; every listed column and
-    predicate column, and each unlisted link table's two named columns, must
-    exist on it with exactly that name. Every ``compare`` column's
-    ``DATA_TYPE`` must be one :data:`VALUE_TYPE_DATA_TYPES` accepts for its
+    lists, and every unlisted ``owner_via`` or ``referenced_by`` link table,
+    must exist with exactly that name, byte for byte, as a ``BASE TABLE``;
+    every listed column and predicate column, and each unlisted link table's
+    two named columns, must exist on it with exactly that name. Every
+    ``compare`` column's ``DATA_TYPE`` (a ``parent_rule``'s ``compare``
+    columns read on its ``parent_table``) must be one :data:`VALUE_TYPE_DATA_TYPES` accepts for its
     ``value_type``, and every ``owner_via`` ``link_user_column``'s one it
     accepts for ``integer``. Raises ``RuleSetCatalogError`` naming each
     mismatch; a catalog read that fails raises the driver's exception.
