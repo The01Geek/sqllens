@@ -55,9 +55,9 @@ async def test_reserved_meta_keys_of_2026_session_are_not_forwarded(
     raw_keys = []
     real_request_metadata = server_module._request_metadata
 
-    def spy(ctx):
+    def spy(ctx, **kwargs):
         raw_keys.append(set(ctx.request_context.meta or {}))
-        return real_request_metadata(ctx)
+        return real_request_metadata(ctx, **kwargs)
 
     async def fake_query(cfg, question, **kwargs):
         seen.append(kwargs["metadata"])

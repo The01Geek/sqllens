@@ -14,7 +14,7 @@ AGENTS.md says: *"Read-only by default, enforced by a `sqlglot` parser guard."* 
 4. **Row cap** — each runner streams via `cursor.fetchmany(max_rows + 1)` and stops at `max_rows`; `RowCapRunner` re-applies the cap on the returned DataFrame as a second-line check. See [Row cap and truncation surface](#row-cap-and-truncation-surface).
 5. **Row-Level Security (opt-in)** — when one or more `[[rls]]` rules are configured, `RlsGuardRunner` rewrites the agent's SQL via a `sqlglot` AST rewrite so every reference to a protected table is filtered by a configured `WHERE` predicate, AND-combined with whatever filter the agent already produced. A query that cannot be safely scoped is blocked (`RlsError`), never run unfiltered. Composed beneath the masking guard and the whole-row select guard — see [Composition with RLS](#composition-with-rls) — so the read-only guard validates the *rewritten* SQL. Full reference in [row-level-security.md](row-level-security.md).
 6. **Secret-column masking** — `ResultMaskingRunner` ([src/sqllens/safety/masking.py](../../../src/sqllens/safety/masking.py)), composed outermost, replaces every value in a result column whose label matches the secret-word rule with `[withheld]` before `RunSqlTool` builds any output from the DataFrame. It decides from the column label alone, so a column renamed by an alias is not masked.
-7. **Whole-row select guard** — `WholeRowSelectGuardRunner`, composed directly beneath the masking guard while `database.refuse_whole_row_selects` is on (the default), refuses a `*` or `alias.*` that expands a table or view before the query runs. See [Whole-row select guard](#whole-row-select-guard).
+7. **Whole-row select guard** — `WholeRowSelectGuardRunner`, composed beneath the masking guard (and, with a rule-set file, the refusal-redacting runner) while `database.refuse_whole_row_selects` is on (the default), refuses a `*` or `alias.*` that expands a table or view before the query runs. See [Whole-row select guard](#whole-row-select-guard).
 
 These are *defence in depth*, not a single line of defence. You should also:
 1. Use a database role with no DML/DDL privileges (the operator's job, not the code's).
@@ -182,13 +182,13 @@ sql_runner = ResultMaskingRunner(
 )
 ```
 
-Resulting call order on every query when RLS is unconfigured: **ResultMaskingRunner → WholeRowSelectGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** (`WholeRowSelectGuardRunner` only when `database.refuse_whole_row_selects = true`, `ReadOnlyGuardRunner` only when `database.read_only = true`). `ResultMaskingRunner` replaces the values of secret-looking result columns with `[withheld]` on the way back out. The parser rejects unsafe SQL (including denylisted functions) before any connection opens; the engine runner enforces driver-level read-only, streams, and applies its native timeout; the decorator clamps the result on the way back out.
+Resulting call order on every query when RLS is unconfigured and no rule-set file is configured: **ResultMaskingRunner → WholeRowSelectGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** (`WholeRowSelectGuardRunner` only when `database.refuse_whole_row_selects = true`, `ReadOnlyGuardRunner` only when `database.read_only = true`). With a rule-set file, `RefusalRedactingRunner` and `RuleSetGuardRunner` join the chain as "Composition with rule sets" below describes. `ResultMaskingRunner` replaces the values of secret-looking result columns with `[withheld]` on the way back out. The parser rejects unsafe SQL (including denylisted functions) before any connection opens; the engine runner enforces driver-level read-only, streams, and applies its native timeout; the decorator clamps the result on the way back out.
 
 The composition pattern is deliberate: none of these wrappers touch the lifted agent code, so re-syncing from upstream won't disturb them. See [agent/factory.md](../agent/factory.md).
 
 ### Composition with RLS
 
-When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty), `RlsGuardRunner` wraps the stack beneath `ResultMaskingRunner` and `WholeRowSelectGuardRunner`, so the call order becomes **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. This is deliberate:
+When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty), `RlsGuardRunner` wraps the stack beneath `ResultMaskingRunner` and `WholeRowSelectGuardRunner`, so the call order becomes **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**, again without a rule-set file. This is deliberate:
 
 - The RLS rewrite runs *before* the read-only guard, so the read-only guard validates the **rewritten** SQL — meaning its full-tree DML/DDL deny-walk and denied-function check apply to the injected predicates too.
 - The decorator is only wrapped when `cfg.rls` is non-empty — the no-RLS path stays a zero-overhead passthrough.
@@ -196,11 +196,15 @@ When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty)
 
 Full reference in [row-level-security.md](row-level-security.md).
 
+### Composition with rule sets
+
+While `[rule_sets] file` is set, `build_agent` also wraps `RuleSetGuardRunner` outside `RlsGuardRunner` and inside `WholeRowSelectGuardRunner`, and `RefusalRedactingRunner` outside every guard and inside `ResultMaskingRunner`. See [rule-sets.md](rule-sets.md#agent-wiring-while-a-file-is-configured). <!-- canonical: database-connectors/rule-sets.md -->
+
 ## Whole-row select guard
 
 [src/sqllens/safety/whole_row.py](../../../src/sqllens/safety/whole_row.py) refuses SQL whose `*` or `alias.*` expands a table or view, before the query runs. A star over a table returns every column, including columns the question never needed; refusing it makes the agent rewrite the query with a column list. It is a separate decision from the read-only guard: it applies whatever `database.read_only` is, and `database.refuse_whole_row_selects = false` (default `true`) turns it off.
 
-`build_agent` composes `WholeRowSelectGuardRunner` directly beneath `ResultMaskingRunner` and outside every runner that rewrites or runs SQL, so it checks the SQL the agent wrote, before any RLS rewrite: **ResultMaskingRunner → WholeRowSelectGuardRunner → (RlsGuardRunner →) (ReadOnlyGuardRunner →) RowCapRunner → engine runner**. It only forwards `require_base_tables`, so `_relation_check_executor` unwraps it like the other SQL Lens wrappers.
+Without a rule-set file, `build_agent` composes `WholeRowSelectGuardRunner` directly beneath `ResultMaskingRunner` and outside every runner that rewrites or runs SQL, so it checks the SQL the agent wrote, before any RLS rewrite: **ResultMaskingRunner → WholeRowSelectGuardRunner → (RlsGuardRunner →) (ReadOnlyGuardRunner →) RowCapRunner → engine runner**. It only forwards `require_base_tables`, so `_relation_check_executor` unwraps it like the other SQL Lens wrappers.
 
 `assert_no_whole_row_select` parses with `_parse_statements` (the read-only guard's parser, MySQL lexical checks included) and checks every statement sqlglot parses into an expression tree, whatever its kind (a statement it keeps as an opaque `exp.Command`, such as MySQL's `PREPARE s FROM '…'`, has no star node to check; the read-only guard refuses it while `database.read_only` is true); an empty statement (`SELECT 1;;`) raises `UnsafeSqlError` (`empty parse tree`), as it does in the read-only guard. Each `exp.Star` node, bare or wrapped in an `exp.Column` as `t.*`, is:
 

@@ -15,9 +15,12 @@ from sqllens.server import _request_metadata
 from sqllens.tools._format import build_agent_trace
 
 
-def metadata(value):
+def metadata(value, count_declared_keys=False):
     # mcp 2.x hands the request ``_meta`` over as a plain dict.
-    return _request_metadata(SimpleNamespace(request_context=SimpleNamespace(meta=value)))
+    return _request_metadata(
+        SimpleNamespace(request_context=SimpleNamespace(meta=value)),
+        count_declared_keys=count_declared_keys,
+    )
 
 
 def trace(value):
@@ -41,6 +44,19 @@ def test_oversized_metadata_is_discarded_and_dynamic_rls_fails_closed(extras):
         apply_rls("SELECT * FROM orders", [RlsRule(
             table="orders", column="tenant_id", value_from_metadata="tenant"
         )], metadata=result, dialect="sqlite")
+
+
+def test_rule_set_key_limit_counts_every_meta_key_not_only_the_forwarded_ones():
+    extras = {str(i): i for i in range(64)}
+    assert metadata(extras, count_declared_keys=True) == extras
+    # 64 caller keys beside ``progressToken`` is 65 keys in ``_meta``.
+    assert metadata(extras | {"progressToken": "p"}, count_declared_keys=True) == {}
+
+
+def test_without_rule_sets_the_key_limit_still_counts_only_the_forwarded_keys():
+    extras = {str(i): i for i in range(64)}
+    assert metadata(extras | {"progressToken": "p"}) == extras
+    assert metadata({str(i): i for i in range(65)}) == {}
 
 
 def test_metadata_ordinary_values_and_exact_byte_boundary():

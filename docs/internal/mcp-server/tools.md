@@ -32,7 +32,9 @@ def build_server(cfg: Config) -> MCPServer:
         question: str, ctx: Context, conversation_id: str | None = None
     ) -> str | CallToolResult:
         """Ask a question; return an ordered list of text/table/chart blocks."""
-        metadata = _request_metadata(ctx)
+        metadata = _request_metadata(
+            ctx, count_declared_keys=cfg.rule_sets.loaded is not None
+        )
         # Mint a stable id when the caller omits one, so the resolved id can be
         # returned for the caller to thread on the next turn.
         conversation_id = conversation_id or str(uuid.uuid4())

@@ -189,7 +189,7 @@ Three properties of this path are deliberate and pinned by tests in [tests/unit/
 
 - **Reserved internal-control keys are stripped at the MCP boundary.** The agent reads `starter_ui_request` and `ui_features_available` off `request_context.metadata` to steer its own control flow (starter-UI rendering, audit logger UI-feature list — see `agent/core/agent/agent.py`, `agent/core/registry.py`, `agent/tools/agent_memory.py`). Untrusted MCP metadata must not be able to forge those keys, so [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) strips them via `_RESERVED_METADATA_KEYS` before constructing the `RequestContext`. Caller-supplied metadata can therefore *only* supply RLS predicate values, never agent-internal control signal.
 - **Caller metadata cannot shadow internal keys downstream either.** When the agent builds `ToolContext.metadata` it spreads `**request_context.metadata` *first* and the internal `ui_features_available` key *last*, so even if a caller's key collided with an internal name and somehow passed the strip, the internal key wins. Defense-in-depth, not the primary line.
-- **Fail-secure on metadata extraction.** `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) returns `{}` on extraction failures or invalid/oversized metadata. Extras are limited to 64 top-level keys, 16 KiB of compact ASCII-escaped JSON, 1,024 nodes including keys, and eight nesting levels below the root. Traversal stops at the limits; oversized trees are never partially forwarded. Dynamic rules then block on missing values. This bounds propagation after MCP parsing, not HTTP request parsing.
+- **Fail-secure on metadata extraction.** `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) returns `{}` on extraction failures or invalid/oversized metadata. Forwarded keys are limited to 64 top-level keys, 16 KiB of compact ASCII-escaped JSON, 1,024 nodes including keys, and eight nesting levels below the root. While a rule-set file is configured a second key limit applies beside it: every key in `_meta`, the progress token and `io.modelcontextprotocol/` keys included, must also be at most 64. Traversal stops at the limits; oversized trees are never partially forwarded. Dynamic rules then block on missing values. This bounds propagation after MCP parsing, not HTTP request parsing.
 
 ## Wiring
 
@@ -208,7 +208,7 @@ if cfg.database.refuse_whole_row_selects:
 sql_runner = ResultMaskingRunner(sql_runner, ...)
 ```
 
-Resulting call order with rules configured, `read_only = true` and `refuse_whole_row_selects = true`: **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. Each conditional guard drops out when its condition is false; masking and the row cap are always present.
+Resulting call order with rules configured, `read_only = true`, `refuse_whole_row_selects = true` and no rule-set file: **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. Each conditional guard drops out when its condition is false; masking and the row cap are always present. With a rule-set file, `RefusalRedactingRunner` and `RuleSetGuardRunner` join the chain, as [rule-sets.md](rule-sets.md) describes.
 
 The order is deliberate:
 

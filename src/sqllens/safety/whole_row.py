@@ -194,8 +194,9 @@ def _source_expands_table(source: exp.Expression | Scope, dialect: str | None) -
 class WholeRowSelectGuardRunner(SqlRunner):
     """Decorator that runs ``assert_no_whole_row_select`` before delegating execution.
 
-    Composed in ``factory.build_agent`` directly beneath ``ResultMaskingRunner``
-    and outside every runner that rewrites or runs SQL (``RlsGuardRunner``,
+    Composed in ``factory.build_agent`` beneath ``ResultMaskingRunner`` (and,
+    with a rule-set file, ``RefusalRedactingRunner``) and outside every runner
+    that rewrites or runs SQL (``RlsGuardRunner``,
     ``ReadOnlyGuardRunner``, ``RowCapRunner`` and the engine runner), so it
     checks the SQL the agent wrote, before any row-level-security rewrite.
     Fails closed like the read-only guard: any unexpected exception refuses

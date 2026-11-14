@@ -257,7 +257,7 @@ _PROGRESS_TOKEN_KEYS = frozenset({"progressToken", "progress_token"})
 _RESERVED_META_PREFIX = "io.modelcontextprotocol/"
 
 
-def _request_metadata(ctx: Context) -> dict[str, Any]:
+def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dict[str, Any]:
     """Extract caller-supplied per-request metadata from the MCP request.
 
     The calling application asserts per-request identity via the MCP request's
@@ -268,7 +268,12 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     key. This is the dynamic-value source the row-level-security guard reads.
 
     Forward at most 64 keys, 16 KiB of compact ASCII-escaped JSON,
-    1024 nodes (including keys), and eight nesting levels below the root.
+    1024 nodes (including keys), and eight nesting levels below the root. With
+    ``count_declared_keys`` the 64-key limit instead counts every key in
+    ``_meta``, the progress token and reserved keys included; a rule-set
+    request passes it, so that a request whose ``_meta`` carries more than 64
+    keys is refused as rule-set key missing. Without it the count is unchanged,
+    so a request made with no rule-set file configured behaves as before.
     Invalid or oversized trees are discarded as a whole. These bounds apply
     after the MCP transport has parsed the request, not to HTTP body parsing.
 
@@ -315,7 +320,7 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
         logger.warning("failed to read request metadata; returning empty metadata")
         return {}
     try:
-        if len(forwarded) > 64:
+        if len(forwarded) > 64 or (count_declared_keys and len(meta) > 64):
             raise JsonBoundsError("request metadata key limit")
         bounded, _ = copy_bounded_json(forwarded)
         return bounded
@@ -449,7 +454,9 @@ def build_server(cfg: Config) -> MCPServer:
         (after the MCP SDK's ``Error executing tool query_database:`` prefix) instead of
         an answer produced without saved memory.
         """
-        metadata = _request_metadata(ctx)
+        metadata = _request_metadata(
+            ctx, count_declared_keys=cfg.rule_sets.loaded is not None
+        )
         # Mint a stable id when the caller did not supply one, so the resolved
         # id can be returned for the caller to thread on the next turn (passing
         # None down would let the agent mint one we never see).

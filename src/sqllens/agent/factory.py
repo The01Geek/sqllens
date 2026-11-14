@@ -36,6 +36,7 @@ from sqllens.agent.tools import (
 )
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
 from sqllens.conversation_store import BoundedConversationStore
+from sqllens.rule_sets import current_rule_set_selection
 from sqllens.safety import (
     ReadOnlyGuardRunner,
     ResultMaskingRunner,
@@ -44,6 +45,7 @@ from sqllens.safety import (
     WholeRowSelectGuardRunner,
     sqlglot_dialect_for_url,
 )
+from sqllens.safety.rule_sets import RefusalRedactingRunner, RuleSetGuardRunner
 
 DEFAULT_USER_ID = "sqllens-user"
 DEFAULT_USER_GROUP = "default"
@@ -60,6 +62,28 @@ class _StaticUserResolver(UserResolver):
         )
 
 
+# sql_mode flags that make MySQL read the guard's regenerated SQL differently
+# from how sqlglot wrote it (NOT precedence, backslash escapes in strings).
+RULE_SET_REMOVED_SQL_MODES = frozenset({"HIGH_NOT_PRECEDENCE", "NO_BACKSLASH_ESCAPES"})
+
+
+class _RuleSetUserResolver(UserResolver):
+    """One user per rule set, account ID and user ID; the built-in user when none is selected.
+
+    Keeps the ``default`` group, which every agent tool is registered under.
+    """
+
+    async def resolve_user(self, request_context: RequestContext) -> User:
+        selection = current_rule_set_selection()
+        if selection is None:
+            return await _StaticUserResolver().resolve_user(request_context)
+        return User(
+            id=selection.user_key,
+            email=f"{DEFAULT_USER_ID}@local",
+            group_memberships=[DEFAULT_USER_GROUP],
+        )
+
+
 def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     """Wire the agent from config. One call per process; the agent is reusable.
 
@@ -68,7 +92,8 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     ``cfg.memory``, and disables retrieval counter and timestamp updates.
     ``sqllens verify-memory`` builds its agent this way.
     Save-tool registration composes with any per-tool config gate
-    as a logical AND.
+    as a logical AND. While a rule-set file is configured
+    (``cfg.rule_sets.loaded``), it behaves as ``allow_memory_writes=False``.
     """
     # Every CLI-launched transport already exits 2 in ``cli.serve`` before reaching
     # here. This guard catches the residual bypass paths — programmatic embedders
@@ -82,11 +107,13 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         model=cfg.llm.model,
         api_key=cfg.llm.api_key.get_secret_value(),
     )
+    rule_sets = cfg.rule_sets.loaded
     sql_runner = build_sql_runner(
         cfg.database.url,
         statement_timeout_ms=cfg.database.statement_timeout_ms,
         max_rows=cfg.database.max_rows,
         read_only=cfg.database.read_only,
+        remove_sql_modes=RULE_SET_REMOVED_SQL_MODES if rule_sets is not None else frozenset(),
     )
     sql_runner = RowCapRunner(sql_runner, max_rows=cfg.database.max_rows)
     dialect = sqlglot_dialect_for_url(cfg.database.url)
@@ -99,11 +126,18 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     # stays a zero-overhead passthrough.
     if cfg.rls:
         sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
+    # The rule-set guard sits outside flat RLS, so RLS adds its predicates
+    # inside each derived table the guard builds, against the base table.
+    if rule_sets is not None:
+        sql_runner = RuleSetGuardRunner(sql_runner, rule_sets)
     # The whole-row select guard wraps every runner that rewrites or runs SQL,
     # so it checks the SQL the agent wrote, before any RLS rewrite, and refuses
     # a SELECT * over a table before a connection opens.
     if cfg.database.refuse_whole_row_selects:
         sql_runner = WholeRowSelectGuardRunner(sql_runner, dialect=dialect)
+    # Outside every guard, so no refusal text names a table, column or function.
+    if rule_sets is not None:
+        sql_runner = RefusalRedactingRunner(sql_runner)
     # Masking wraps every other guard, so each frame a runner beneath returns is
     # masked before RunSqlTool builds any output from it.
     sql_runner = ResultMaskingRunner(
@@ -112,6 +146,11 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         unmasked_columns=cfg.result_masking.unmasked_columns,
         unmasked_words=cfg.result_masking.unmasked_words,
     )
+    # While a rule-set file is configured the agent writes no memory (no save
+    # tools, no retrieval counter or timestamp updates), whatever
+    # memory.save_queries and memory.save_text_memories say: memory is shared
+    # by every rule set.
+    allow_memory_writes = allow_memory_writes and rule_sets is None
     memory = ChromaAgentMemory(
         persist_directory=str(cfg.memory.persist_dir),
         collection_name=cfg.memory.collection,
@@ -191,7 +230,9 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     return Agent(
         llm_service=llm,
         tool_registry=tools,
-        user_resolver=_StaticUserResolver(),
+        user_resolver=(
+            _RuleSetUserResolver() if rule_sets is not None else _StaticUserResolver()
+        ),
         agent_memory=memory,
         llm_context_enhancer=context_enhancer,
         # A fresh builder per agent: Agent's constructor default is one instance
@@ -199,6 +240,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         system_prompt_builder=DefaultSystemPromptBuilder(
             dialect=dialect,
             standing_instructions=cfg.agent.standing_instructions,
+            rule_sets=rule_sets is not None,
         ),
         # Bounded LRU store backing multi-turn conversations. The framework
         # default (MemoryConversationStore) is unbounded; this caps in-process
@@ -225,6 +267,7 @@ def build_sql_runner(
     statement_timeout_ms: int = 30_000,
     max_rows: int = 10_000,
     read_only: bool = True,
+    remove_sql_modes: frozenset[str] = frozenset(),
 ) -> SqlRunner:
     """Pick the right SQL runner from the database URL prefix.
 
@@ -261,5 +304,6 @@ def build_sql_runner(
             statement_timeout_ms=statement_timeout_ms,
             max_rows=max_rows,
             read_only=read_only,
+            remove_sql_modes=remove_sql_modes,
         )
     raise ValueError(f"unsupported database scheme: {scheme!r} (expected sqlite/mysql)")

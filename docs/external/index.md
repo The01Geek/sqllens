@@ -11,7 +11,7 @@ SQL Lens exposes two tools to the assistant:
 | `query_database(question)` | Translates a natural-language question into SQL, executes it, and returns the result as an ordered sequence of blocks — tables, charts, and prose paragraphs — in the order the agent produced them. A single answer can include any combination, including more than one table or more than one chart, with deliberate captions in between. |
 | `list_data_sources()` | Reports the configured database name, dialect, and read-only state. |
 
-One database is configured per running instance. Generated SQL is parsed and rejected if it is anything other than a read-only `SELECT` (plus, on MySQL, a small set of read-only `SHOW` schema-discovery commands such as `SHOW TABLES`), so the default deployment is safe against accidental writes. You can also opt into [Row-Level Security](row-level-security.md) to narrow every answer to the rows a particular request is allowed to see.
+One database is configured per running instance. Generated SQL is parsed and rejected if it is anything other than a read-only `SELECT` (plus, on MySQL, a small set of read-only `SHOW` schema-discovery commands such as `SHOW TABLES`), so the default deployment is safe against accidental writes. You can also opt into [Row-Level Security](row-level-security.md) to narrow every answer to the rows a particular request is allowed to see, and, on MySQL, into [per-role rule sets](rule-sets.md) to limit each request to the tables and columns one application role may read.
 
 ## Interactive results
 
@@ -32,6 +32,7 @@ The widget reports its own size so the assistant can fit it to the result. On ho
 - **[Getting started](getting-started.md)** — Install SQL Lens, point it at the bundled demo database, and run your first question.
 - **[Configuration](configuration.md)** — All configurable fields in `sqllens.toml`, environment variables, and database URL formats.
 - **[Row-Level Security](row-level-security.md)** — Narrow every answer to the rows a particular request is allowed to see using static or per-request dynamic rules.
+- **[Per-role rule sets](rule-sets.md)** — Mirror your application's roles in SQL Lens, so each question is limited to the tables and columns its role may read (MySQL only).
 - **[Managing memory](managing-memory.md)** — Bulk-load curated question-and-answer pairs and notes, export what SQL Lens has learned, or verify the assistant still produces expected SQL for a curated golden set.
 - **[Install on Claude Desktop (Windows)](install-claude-desktop-windows.md)** — One-command installer and full manual fallback for connecting SQL Lens to Claude Desktop on a fresh Windows machine.
 - **[Release notes](release-notes.md)** — User-visible changes in each released version.

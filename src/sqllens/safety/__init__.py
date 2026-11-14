@@ -3,7 +3,7 @@
 
 """SQL safety guards.
 
-Six orthogonal protections, composed at the factory:
+Seven orthogonal protections, composed at the factory:
 
 * ``assert_select_only`` / ``ReadOnlyGuardRunner`` — sqlglot parse rejects
   anything that isn't a single ``SELECT``/``WITH``.
@@ -18,6 +18,13 @@ Six orthogonal protections, composed at the factory:
   failure (parse error, scope-analysis error, missing/suspicious dynamic
   value, unprovable protected-table reference), any other view or
   unverifiable relation, and any failed catalog lookup blocks the query.
+* ``RuleSetGuardRunner`` (``safety/rule_sets.py``) — while a rule-set file
+  is configured, limits every statement to the request's selected rule set:
+  each listed table becomes a derived table of its listed columns, and any
+  other table, catalog read or shape the guard cannot check is refused. It
+  also applies the function denylist and the relation check whatever
+  ``[[rls]]`` and ``database.read_only`` are, and ``RefusalRedactingRunner``
+  keeps table, column and function names out of every guard's refusal text.
 * Per-runner statement timeouts (``SET SESSION MAX_EXECUTION_TIME`` on MySQL,
   ``set_progress_handler`` deadline on SQLite) — server- or driver-side time bound.
 * ``RowCapRunner`` — per-runner streaming via ``fetchmany`` stops at
@@ -25,8 +32,9 @@ Six orthogonal protections, composed at the factory:
   on the returned DataFrame.
 * ``assert_no_whole_row_select`` / ``WholeRowSelectGuardRunner`` — refuses a
   ``*`` or ``alias.*`` that expands a table or view before the query runs;
-  composed directly beneath ``ResultMaskingRunner`` and outside every other
-  runner, unless ``database.refuse_whole_row_selects`` is off.
+  composed beneath ``ResultMaskingRunner`` (and, with a rule-set file,
+  ``RefusalRedactingRunner``) and outside every other runner, unless
+  ``database.refuse_whole_row_selects`` is off.
 * ``ResultMaskingRunner`` — outermost; replaces every value in a result
   column whose label matches the secret-word rule with ``[withheld]``.
 """
@@ -247,9 +255,13 @@ def _relation_check_executor(runner: object) -> object:
     honor it is the first one beneath them. Exact types only: a subclass may
     override ``run_sql`` without forwarding, so it is checked itself.
     """
+    from sqllens.safety.rule_sets import RefusalRedactingRunner, RuleSetGuardRunner
+
     while type(runner) in (
         ResultMaskingRunner,
+        RefusalRedactingRunner,
         WholeRowSelectGuardRunner,
+        RuleSetGuardRunner,
         RlsGuardRunner,
         ReadOnlyGuardRunner,
         RowCapRunner,

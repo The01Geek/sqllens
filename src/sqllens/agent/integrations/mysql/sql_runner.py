@@ -31,6 +31,7 @@ class MySQLRunner(SqlRunner):
         statement_timeout_ms: int = 0,
         max_rows: int = _DEFAULT_MAX_ROWS,
         read_only: bool = True,
+        remove_sql_modes: frozenset[str] = frozenset(),
         **kwargs,
     ):
         """Initialize with MySQL connection parameters.
@@ -45,6 +46,10 @@ class MySQLRunner(SqlRunner):
             max_rows: Hard ceiling on rows returned per SELECT
             read_only: Force the session read-only regardless of the DB role
                 (defence-in-depth backstop for the parser guard).
+            remove_sql_modes: ``sql_mode`` flags removed from every query
+                connection's session mode before the query runs, whatever
+                ``read_only`` and ``statement_timeout_ms`` are; a failure to
+                read or set the mode fails the query.
             **kwargs: Additional PyMySQL connection parameters
         """
         try:
@@ -70,6 +75,7 @@ class MySQLRunner(SqlRunner):
         self._statement_timeout_ms = statement_timeout_ms
         self._max_rows = max_rows
         self._read_only = read_only
+        self._remove_sql_modes = frozenset(mode.upper() for mode in remove_sql_modes)
 
     async def run_sql(
         self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
@@ -117,9 +123,20 @@ class MySQLRunner(SqlRunner):
         try:
             conn.ping(reconnect=True)
 
-            if self._read_only or self._statement_timeout_ms > 0:
+            if self._read_only or self._statement_timeout_ms > 0 or self._remove_sql_modes:
                 setup = conn.cursor()
                 try:
+                    if self._remove_sql_modes:
+                        setup.execute("SELECT @@SESSION.sql_mode")
+                        row = setup.fetchone()
+                        if row is None:
+                            raise RuntimeError("could not read the session sql_mode")
+                        kept = [
+                            mode
+                            for mode in str(row[0] or "").split(",")
+                            if mode and mode.upper() not in self._remove_sql_modes
+                        ]
+                        setup.execute("SET SESSION sql_mode = %s", (",".join(kept),))
                     if self._read_only:
                         # Force the session read-only regardless of the DB
                         # role — a guard miss still cannot mutate.

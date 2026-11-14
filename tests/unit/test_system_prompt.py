@@ -695,3 +695,54 @@ async def test_tool_errors_rule_quotes_the_whole_row_refusal_phrase() -> None:
 
     assert '"selects every column"' in _TOOL_ERRORS_BULLETS[1]
     assert "selects every column" in WHOLE_ROW_REFUSAL
+
+
+# --- #374: per-role rule sets ---------------------------------------------------
+
+_QUALIFY_RULE = (
+    "- Qualify every column with its table name or alias, in subqueries and joins too"
+    " (write c.name, never name)."
+)
+_RULE_SET_ERROR_RULE = (
+    '- If a run_sql error says "Refused by the rule set:", correct the query (for example,'
+    " drop a table the rule set does not allow) and run it again. This counts toward the"
+    " two corrected attempts."
+)
+
+
+async def _rule_set_prompt(rule_sets: bool, tools: list) -> str:
+    prompt = await DefaultSystemPromptBuilder(
+        dialect="mysql", rule_sets=rule_sets
+    ).build_system_prompt(User(id="test-user"), tools=tools)
+    assert prompt is not None
+    return prompt
+
+
+@pytest.mark.parametrize("with_search_tool", [False, True])
+async def test_rule_sets_add_exactly_two_lines(with_search_tool: bool) -> None:
+    import difflib
+
+    tools = [_ToolSchemaStub("search_saved_correct_tool_uses")] if with_search_tool else []
+    off = (await _rule_set_prompt(False, tools)).splitlines()
+    on = (await _rule_set_prompt(True, tools)).splitlines()
+    added = [line[2:] for line in difflib.ndiff(off, on) if line.startswith("+ ")]
+    removed = [line for line in difflib.ndiff(off, on) if line.startswith("- ")]
+    assert added == [_QUALIFY_RULE, _RULE_SET_ERROR_RULE]
+    assert removed == []
+    assert _QUALIFY_RULE in _section("\n".join(on), "Database:")
+    tool_errors = _section("\n".join(on), "Tool Errors:")
+    assert tool_errors[:5] == [*_TOOL_ERRORS_BULLETS[:2], _RULE_SET_ERROR_RULE,
+                               *_TOOL_ERRORS_BULLETS[2:]]
+
+
+async def test_rule_set_refusal_prefix_is_the_guards() -> None:
+    from sqllens.safety.rule_sets import REFUSAL_PREFIX
+
+    assert f'"{REFUSAL_PREFIX.strip()}"' in _RULE_SET_ERROR_RULE
+
+
+async def test_rule_sets_off_is_byte_identical_to_default() -> None:
+    default = await DefaultSystemPromptBuilder(dialect="mysql").build_system_prompt(
+        User(id="test-user"), tools=[]
+    )
+    assert await _rule_set_prompt(False, []) == default

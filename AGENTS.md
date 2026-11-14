@@ -40,6 +40,7 @@ src/sqllens/
 ├── preflight.py             # eager infrastructure checks run by `sqllens serve`
 ├── profiles.py, runtime.py  # named per-request config profiles; request-local effective settings
 ├── conversation_store.py    # bounded, in-process multi-turn conversation store
+├── rule_sets.py             # per-role rule-set file: model, loading, catalog check, selection
 ├── tools/                   # MCP tool implementations (thin wrappers over agent/)
 ├── agent/                   # NL-to-SQL agent — lifted code (vendored, see below)
 │   ├── factory.py           # build_agent / build_sql_runner — the only public seam
@@ -55,8 +56,10 @@ src/sqllens/
 └── safety/                  # readonly.py SQL parser; rls.py row scoping; relations.py RLS
                              #   relation verification; limits.py row cap; masking.py
                              #   secret-column masking; whole_row.py whole-row select guard;
+                             #   rule_sets.py per-role table/column guard and refusal redaction;
                              #   ReadOnlyGuardRunner / RlsGuardRunner / RowCapRunner /
-                             #   ResultMaskingRunner / WholeRowSelectGuardRunner decorators
+                             #   ResultMaskingRunner / WholeRowSelectGuardRunner /
+                             #   RuleSetGuardRunner / RefusalRedactingRunner decorators
 ```
 
 Underscore-prefixed top-level modules (`_atomic.py`, `_bounded_json.py`, `_errors.py`, `_memory_consistency.py`) are private shared helpers.

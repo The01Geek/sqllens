@@ -124,7 +124,14 @@ async def run_verification(
     replacement accepts expected and actual SQL, returning a ``Status`` or
     raising a diagnostic on failure. It can capture a database connection in a
     closure for row comparison without changing the runner.
+
+    Raises ``ValueError`` before any case runs while a rule-set file is
+    configured: verification does not support rule sets yet.
     """
+    if cfg.rule_sets.loaded is not None:
+        from sqllens.rule_sets import VERIFY_MEMORY_UNSUPPORTED_MESSAGE
+
+        raise ValueError(VERIFY_MEMORY_UNSUPPORTED_MESSAGE)
     forced_cfg = verification_config(cfg)
     if driver is None:
         from sqllens.agent.factory import build_agent
