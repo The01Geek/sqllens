@@ -181,6 +181,22 @@ def _predicate(rule: RlsRule, qualifier: str, value: _Scalar | list[_Scalar]) ->
     return op_cls(this=col, expression=exp.convert(value))
 
 
+def _is_mysql_metadata_relation(table: exp.Table, dialect: str | None) -> bool:
+    """True for a MySQL ``information_schema.<view>`` reference.
+
+    ``information_schema`` holds no application rows, so an ``[[rls]]`` rule
+    naming an application table (say ``tables``) must not match it; matching
+    would inject the rule's column into a catalog view MySQL then rejects.
+    """
+    db = table.args.get("db")
+    return (
+        dialect == "mysql"
+        and isinstance(db, exp.Identifier)
+        and table.args.get("catalog") is None
+        and db.name.lower() == "information_schema"
+    )
+
+
 def apply_rls(
     sql: str,
     rules: list[RlsRule],
@@ -270,7 +286,7 @@ def apply_rls(
         base_source_ids: set[int] = {id(t) for t in base_table_sources}
         for table in base_table_sources:
             name = table.name.lower()
-            if name not in rules_by_table:
+            if name not in rules_by_table or _is_mysql_metadata_relation(table, dialect):
                 continue
             qualifier = table.alias_or_name
             for rule in rules_by_table[name]:
@@ -295,6 +311,8 @@ def apply_rls(
         # the alias of a keyword-as-identifier table (before sqlglot 30.30,
         # ``(TABLE orders) sub`` parsed that way; it is now refused up front,
         # and the alias check stays as a backstop for similar misparses).
+        if _is_mysql_metadata_relation(table, dialect):
+            continue
         name = table.name.lower()
         alias = (table.alias or "").lower()
         match = (

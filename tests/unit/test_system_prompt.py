@@ -718,17 +718,59 @@ async def _rule_set_prompt(rule_sets: bool, tools: list) -> str:
     return prompt
 
 
+# Today's MySQL schema-lookup line, pinned so a prompt without rule sets stays
+# byte-identical to the one #374 shipped.
+_INTROSPECTION_PREFIX = (
+    "- Schema-introspection queries ARE allowed when you need them to write a correct"
+    " query — for example, to confirm a column name before retrying after an 'Unknown"
+    " column' error, or when memory contains no relevant schema for the table you are"
+    " querying. "
+)
+_INTROSPECTION_SUFFIX = (
+    " Run them internally to inform your own SQL; their results must NOT be summarized,"
+    " listed, output as DDL, or otherwise echoed back to the user."
+)
+_MYSQL_INTROSPECTION = (
+    _INTROSPECTION_PREFIX
+    + "Express introspection as a SELECT against the catalog (e.g."
+    " information_schema.columns); on MySQL the structural SHOW variants (SHOW TABLES,"
+    " SHOW COLUMNS, SHOW DATABASES, SHOW INDEX, SHOW CREATE TABLE/VIEW) are also"
+    " permitted. DESCRIBE and the information-disclosing SHOW variants (SHOW GRANTS,"
+    " SHOW PROCESSLIST, SHOW VARIABLES, SHOW STATUS, replication-status) are not"
+    " permitted."
+    + _INTROSPECTION_SUFFIX
+)
+_RULE_SET_INTROSPECTION = (
+    _INTROSPECTION_PREFIX
+    + "Look up tables, columns and keys only with a SELECT against"
+    " INFORMATION_SCHEMA.TABLES, INFORMATION_SCHEMA.COLUMNS or"
+    " INFORMATION_SCHEMA.KEY_COLUMN_USAGE. Their fields other than names, types and keys"
+    " are withheld and read as NULL, so a NULL there says nothing about the database."
+    " No SHOW statement, DESCRIBE or other catalog lookup is permitted."
+    + _INTROSPECTION_SUFFIX
+)
+
+
 @pytest.mark.parametrize("with_search_tool", [False, True])
-async def test_rule_sets_add_exactly_two_lines(with_search_tool: bool) -> None:
+async def test_rule_sets_add_two_lines_and_switch_the_schema_lookup_line(
+    with_search_tool: bool,
+) -> None:
     import difflib
 
     tools = [_ToolSchemaStub("search_saved_correct_tool_uses")] if with_search_tool else []
     off = (await _rule_set_prompt(False, tools)).splitlines()
     on = (await _rule_set_prompt(True, tools)).splitlines()
     added = [line[2:] for line in difflib.ndiff(off, on) if line.startswith("+ ")]
-    removed = [line for line in difflib.ndiff(off, on) if line.startswith("- ")]
-    assert added == [_QUALIFY_RULE, _RULE_SET_ERROR_RULE]
-    assert removed == []
+    removed = [line[2:] for line in difflib.ndiff(off, on) if line.startswith("- ")]
+    assert added == [_QUALIFY_RULE, _RULE_SET_ERROR_RULE, _RULE_SET_INTROSPECTION]
+    assert removed == [_MYSQL_INTROSPECTION]
+    # #374's rule-set prompt kept today's schema-lookup line; swapping it back
+    # leaves exactly that prompt, so the switch is the only other difference.
+    as_374 = [_MYSQL_INTROSPECTION if line == _RULE_SET_INTROSPECTION else line for line in on]
+    added_374 = [line[2:] for line in difflib.ndiff(off, as_374) if line.startswith("+ ")]
+    assert added_374 == [_QUALIFY_RULE, _RULE_SET_ERROR_RULE]
+    assert _RULE_SET_INTROSPECTION in _section("\n".join(on), "Data Confidentiality:")
+    assert "SHOW TABLES" not in "\n".join(on)
     assert _QUALIFY_RULE in _section("\n".join(on), "Database:")
     tool_errors = _section("\n".join(on), "Tool Errors:")
     assert tool_errors[:5] == [*_TOOL_ERRORS_BULLETS[:2], _RULE_SET_ERROR_RULE,
@@ -746,3 +788,4 @@ async def test_rule_sets_off_is_byte_identical_to_default() -> None:
         User(id="test-user"), tools=[]
     )
     assert await _rule_set_prompt(False, []) == default
+    assert _MYSQL_INTROSPECTION in default.splitlines()

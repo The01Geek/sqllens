@@ -112,11 +112,14 @@ Common reasons a query is refused:
 
 - It reads a table the selected rule set does not list.
 - It is not a single `SELECT` statement.
-- It names a database or schema explicitly, or reads a catalog schema.
+- It names a database or schema explicitly, or reads a catalog schema. The one exception is the three schema-lookup views described below.
+- It runs a `SHOW` statement.
 - It uses a table function, `JSON_TABLE` or `DUAL`, a partition list, or an index hint.
 - It calls a function SQL Lens does not allow.
 
 Columns are handled differently: a column the set does not list is simply not visible to the query, so MySQL reports it as an unknown column.
+
+To look up the schema, the assistant can read `information_schema.TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE`. Under a rule set these show only the selected set's tables, its listed columns and the keys among them, in the connected database. Their names, types and key details are filled in; every other field, such as row counts, sizes, defaults, comments and constraint names, comes back as `NULL`.
 
 ## Troubleshooting
 
