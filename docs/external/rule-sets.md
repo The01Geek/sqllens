@@ -2,7 +2,7 @@
 
 Rule sets let you mirror your application's own roles inside SQL Lens. You write one rule-set file that lists, for each role, the tables and columns that role may read and, through row rules, which rows of a table it may see. Each question then names the role it is asked under, and SQL Lens limits the answer to that role's tables, columns and rows. This page explains how to turn rule sets on, how to write the file, and what the assistant sees when a request is refused.
 
-Rule sets are for MySQL only, and they are for operators who run SQL Lens on behalf of an application whose users already have roles. If you only need to narrow answers to certain rows for every request alike, read [Row-Level Security](row-level-security.md) instead. Without `[rule_sets] file` in your configuration, nothing on this page applies and SQL Lens behaves exactly as before.
+Rule sets are for MySQL only, and they are for operators who run SQL Lens on behalf of an application whose users already have roles. If you only need to narrow answers to certain rows, with a fixed value or a per-request value your application supplies, and do not need per-role table and column limits, read [Row-Level Security](row-level-security.md) instead. Without `[rule_sets] file` in your configuration, nothing on this page applies and SQL Lens behaves exactly as before.
 
 ## Turning Rule Sets On
 
@@ -261,7 +261,7 @@ The audit line is written whatever `[agent.audit] enabled` says; that setting do
 
 ## Limits
 
-Rule sets limit which tables and columns a query can read. They do not separate everything else, so plan around these limits:
+Rule sets limit which tables and columns a query can read and, through row rules, which rows. They do not separate everything else, so plan around these limits:
 
 - **Memory is shared by every rule set.** Nothing is saved to memory while rule sets are on, but memory you load yourself (with `sqllens import-memory` or the memory administration tools) is searched for every request. Table and column names, SQL literal values, notes and chart data in curated memory can reach any role. Load only what every role may see.
 - **The administration tools act for every rule set.** The memory and profile administration tools are not limited by rule sets. Register them only where end users' assistants cannot call them.
