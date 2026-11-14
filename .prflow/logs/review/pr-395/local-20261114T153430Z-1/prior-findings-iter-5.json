@@ -1,0 +1,187 @@
+[
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "suggestion",
+  "description": "docs/internal/database-connectors/rule-sets.md:99 says '_rewrite does not catch it', but two functions have that name: the module-level _rewrite (safety/rule_sets.py:583), which never calls guard_spec, and RuleSetGuardRunner._rewrite (:859), which does. The sentence also leaves out that run_sql's except Exception turns the error into a fail-closed refusal.",
+  "defect_signature": {
+   "file": "docs/internal/database-connectors/rule-sets.md",
+   "line_range": [
+    99,
+    99
+   ],
+   "kind": "comment_drift"
+  },
+  "iter": 1
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "ReferencedByRule stores its two variants as three independent optional fields, and only the _variant validator enforces the exclusive-or, so callers coerce with 'or \"\"'.",
+  "defect_signature": {
+   "file": "src/sqllens/rule_sets.py",
+   "line_range": [
+    271,
+    292
+   ],
+   "kind": "type_design"
+  },
+  "iter": 1
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "CompareRule.value is typed Any; the scalar-or-list constraint is enforced only in _operand.",
+  "defect_signature": {
+   "file": "src/sqllens/rule_sets.py",
+   "line_range": [
+    204,
+    204
+   ],
+   "kind": "type_design"
+  },
+  "iter": 1
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "LoadedRuleSets.compiled is a public, mutable dict that defaults to empty, and the rule that every row rule has a compiled rule is checked only in guard_spec (which fails closed). GuardSpec.tables is a plain dict next to the MappingProxyType-wrapped rules.",
+  "defect_signature": {
+   "file": "src/sqllens/rule_sets.py",
+   "line_range": [
+    670,
+    699
+   ],
+   "kind": "type_design"
+  },
+  "iter": 1
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "ReferencedByRule stores its two variants as independent optional fields (source_column, source_id_column, link); only the _variant validator enforces mutual exclusion, so downstream code coerces with 'or \"\"'.",
+  "defect_signature": {
+   "file": "src/sqllens/rule_sets.py",
+   "line_range": [
+    271,
+    292
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "deferred",
+  "iter": 2
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "CompareRule.value is typed Any; the scalar-or-non-empty-list rule and the exactly-one-of value/request rule live only in the _operand validator.",
+  "defect_signature": {
+   "file": "src/sqllens/rule_sets.py",
+   "line_range": [
+    204,
+    229
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "deferred",
+  "iter": 2
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "LoadedRuleSets.compiled is a public mutable dict defaulting to {}; the every-row-rule-has-a-compiled-rule invariant is checked only in guard_spec (fails closed), and GuardSpec.tables is a plain dict beside the MappingProxyType-wrapped rules.",
+  "defect_signature": {
+   "file": "src/sqllens/rule_sets.py",
+   "line_range": [
+    664,
+    699
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "deferred",
+  "iter": 2
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "CompiledRule is frozen but holds a mutable sqlglot condition tree shared by every request; instantiate copies it, but nothing in the type prevents another caller mutating the shared tree in place.",
+  "defect_signature": {
+   "file": "src/sqllens/rule_sets.py",
+   "line_range": [
+    512,
+    538
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "deferred",
+  "iter": 2
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "check_catalog now runs first-party logic (VALUE_TYPE_DATA_TYPES lookup, _text decode) after its information_schema reads; any exception from it reaches preflight's blanket except, which tells the operator the check could not read information_schema and to check privileges. Startup is still refused; the diagnosis is misleading.",
+  "defect_signature": {
+   "file": "src/sqllens/preflight.py",
+   "line_range": [
+    168,
+    174
+   ],
+   "kind": "other"
+  },
+  "fix_decision": "deferred",
+  "iter": 2
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "suggestion",
+  "description": "docs/external/rule-sets.md:264 (Limits) still says 'Rule sets limit which tables and columns a query can read'; with row rules they also limit rows. The line is not in this diff.",
+  "defect_signature": {
+   "file": "docs/external/rule-sets.md",
+   "line_range": [
+    264,
+    264
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "deferred",
+  "iter": 2
+ },
+ {
+  "severity": "important",
+  "description": "rule-sets.md line 5 implies RLS is only one fixed filter for every request; RLS also supports dynamic per-request values.",
+  "defect_signature": {
+   "file": "docs/external/rule-sets.md",
+   "line_range": [
+    5,
+    5
+   ],
+   "kind": "documented_falsehood"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "severity": "suggestion",
+  "description": "row-level-security.md line 172 omits row rules when describing rule sets.",
+  "defect_signature": {
+   "file": "docs/external/row-level-security.md",
+   "line_range": [
+    172,
+    172
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "severity": "suggestion",
+  "description": "Class-sweep sibling (also iter-2 F-6): Limits line said rule sets limit only tables and columns.",
+  "defect_signature": {
+   "file": "docs/external/rule-sets.md",
+   "line_range": [
+    264,
+    264
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "applied"
+ }
+]

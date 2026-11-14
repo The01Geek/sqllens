@@ -1,0 +1,795 @@
+[
+  {
+    "id": "VC-1",
+    "category": "api_contract",
+    "claim": "RuleSetGuardRunner passes selection.user_id to apply_rule_set as the request's normalized integer user ID (so '7' and '007' become 7), and it is None only when no row rules apply",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_against": "src/sqllens/rule_sets.py select_rule_set and the selection dataclass",
+    "verify_hint": "Check the type and normalization of the user_id field on the object current_rule_set_selection returns, in src/sqllens/rule_sets.py",
+    "claim_signature": "api_contract:rule_sets.py:selection-user-id-int",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "api_contract",
+    "claim": "A RuntimeError raised by LoadedRuleSets.guard_spec (row rule not compiled), and any non-RuleSetRefusal exception from apply_rule_set, is turned into a refusal by the caller of RuleSetGuardRunner's rewrite so no SQL reaches MySQL",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_against": "RuleSetGuardRunner.run_sql and its exception handling in src/sqllens/safety/rule_sets.py",
+    "verify_hint": "Trace where the method calling guard_spec/apply_rule_set is invoked in RuleSetGuardRunner and what except clauses wrap it",
+    "claim_signature": "api_contract:rule_sets.py:guard-spec-error-refused",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "absolute_claim",
+    "claim": "guard_spec's RuntimeError means the statement never runs unfiltered",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`guard_spec` raises `RuntimeError` when a table of the set has a `row_rule` but no compiled rule; `_rewrite` does not catch it, so the statement never runs unfiltered.",
+    "source_file": "docs/internal/database-connectors/rule-sets.md",
+    "verify_against": "RuleSetGuardRunner in src/sqllens/safety/rule_sets.py",
+    "verify_hint": "Trace a LoadedRuleSets whose compiled dict lacks a table with row_rule through RuleSetGuardRunner; note guard_spec is called by the runner, not _rewrite",
+    "claim_signature": "absolute_claim:rule-sets.md:never-runs-unfiltered",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "dependency_interaction",
+    "claim": "sqlglot Scope.cte_sources is keyed by the referenced table name and its value's .expression is the CTE or a node with a CTE ancestor, for nested-WITH and recursive CTEs alike",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_against": "sqlglot/optimizer/scope.py in the installed sqlglot",
+    "verify_hint": "Check Scope.cte_sources and how _is_cte_reference in safety/rule_sets.py decides a table is a CTE reference",
+    "claim_signature": "dependency_interaction:rule_sets.py:scope-cte-sources",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "absolute_claim",
+    "claim": "Renaming CTEs means no CTE name changes whether a statement runs and no model CTE can stand in for a table a filter reads",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Renaming rather than refusing colliding names keeps a caller from learning which unlisted names a filter reads, and no CTE name changes whether a statement runs.",
+    "source_file": "docs/internal/database-connectors/rule-sets.md",
+    "verify_against": "_rename_ctes and _choose_prefix in src/sqllens/safety/rule_sets.py",
+    "verify_hint": "Trace WITH customer_reps AS (SELECT 1 AS x) SELECT cu.code FROM currencies cu, a CTE defined but never referenced, and a CTE whose name starts with sl0_",
+    "claim_signature": "absolute_claim:rule-sets.md:cte-name-no-effect",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "exp.Placeholder(this='user_id') is replaced in instantiate before generation, and exp.Boolean generates MySQL TRUE/FALSE that re-parses to the same tree",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/rule_sets.py",
+    "verify_against": "sqlglot MySQL generator and parser",
+    "verify_hint": "Check CompiledRule.instantiate and sqlglot's Boolean/Placeholder handling in generator.py and the mysql dialect",
+    "claim_signature": "dependency_interaction:rule_sets.py:placeholder-boolean-roundtrip",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "dependency_interaction",
+    "claim": "sqlglot's MySQL parser reads a negative numeric literal as exp.Neg over a positive Literal, matching _number's built shape so _shape comparison holds",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The parser reads a leading minus as Neg over a positive literal; the\n    # re-walk compares trees, so the builder must produce that shape too.",
+    "source_file": "src/sqllens/rule_sets.py",
+    "verify_against": "sqlglot parser _parse_unary",
+    "verify_hint": "Check sqlglot parser.py unary minus handling for the mysql dialect at the locked version in requirements.txt",
+    "claim_signature": "dependency_interaction:rule_sets.py:neg-literal-shape",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "data_format_assumption",
+    "claim": "float_literal_text formats 0.5 as 5.0000000000000000e-01 and -1e-05 as -1.0000000000000001e-05, and MySQL reads that exponent-form literal as a double",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "MySQL reads a literal in exponent form as a double, and 17 significant\n    digits read back as the same double.",
+    "source_file": "src/sqllens/rule_sets.py",
+    "verify_against": "Python format spec .16e and MySQL numeric literal rules",
+    "verify_hint": "Check float_literal_text in src/sqllens/rule_sets.py against criterion 13 examples",
+    "claim_signature": "data_format_assumption:rule_sets.py:float-exponent-literal",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "data_format_assumption",
+    "claim": "check_catalog reads TABLE_NAME, COLUMN_NAME and DATA_TYPE as str or bytes (decoded) and compares lowercased DATA_TYPE against VALUE_TYPE_DATA_TYPES",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/rule_sets.py",
+    "verify_against": "MySQL driver (pymysql) return types for information_schema columns",
+    "verify_hint": "Check _text and the COLUMNS query in check_catalog in src/sqllens/rule_sets.py",
+    "claim_signature": "data_format_assumption:rule_sets.py:catalog-data-type",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "api_contract",
+    "claim": "The troubleshooting heading's quoted text matches the RuleSetCatalogError message check_catalog emits for a type mismatch",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "**Startup fails because a column \"has type …, which a row rule's value_type … does not accept\"**",
+    "source_file": "docs/external/rule-sets.md",
+    "verify_against": "check_catalog in src/sqllens/rule_sets.py",
+    "verify_hint": "Compare with the problems.append f-string for data_type mismatch in check_catalog",
+    "claim_signature": "api_contract:rule-sets.md:type-mismatch-message",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "absolute_claim",
+    "claim": "Queries over a row-rule table never run any model expression on a hidden row",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "MySQL builds that table's visible rows in full before applying the query's own conditions, so no expression in the query ever runs on a hidden row.",
+    "source_file": "docs/external/rule-sets.md",
+    "verify_against": "_scoped_body and _rewrite in src/sqllens/safety/rule_sets.py",
+    "verify_hint": "Trace a model expression in a JOIN ON or select-list scalar subquery over orders, and a flat [[rls]] table without row rule, against the LIMIT-materialized derived table",
+    "claim_signature": "absolute_claim:rule-sets.md:no-hidden-row-expression",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "absolute_claim",
+    "claim": "A comparison reading NULL never makes a row visible",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A row is visible only when its rule is true, and a comparison that reads `NULL` is never true, so it never makes a row visible.",
+    "source_file": "docs/external/rule-sets.md",
+    "verify_against": "_Compiler._node in src/sqllens/rule_sets.py",
+    "verify_hint": "Trace a compare with operator != on a NULL status, and an any_of/all_of combination over NULL, through the compiled condition",
+    "claim_signature": "absolute_claim:rule-sets.md:null-never-true",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "absolute_claim",
+    "claim": "Every table reference inside a filtered derived table carries a guard-chosen alias unique in the statement",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Every table reference inside\nit carries an alias the guard chooses, unique in the statement.",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_against": "_Scoping.aliases, _choose_prefix and CompiledRule.instantiate",
+    "verify_hint": "Trace a statement whose model identifiers include SL0_1_0 or where _rename_ctes's <prefix>c<n> names coexist; check instantiate maps every TableAlias slot",
+    "claim_signature": "absolute_claim:rule_sets.py:unique-guard-aliases",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "dependency_interaction",
+    "claim": "_shape treating None, False and [] args as absent still distinguishes every semantically different filter body (e.g. NOT, DISTINCT, parenthesization)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_against": "sqlglot Expression.args conventions",
+    "verify_hint": "Check _shape and _proven_scoped_tables in src/sqllens/safety/rule_sets.py; consider exp.Paren and Boolean(this=False) args",
+    "claim_signature": "dependency_interaction:rule_sets.py:shape-drops-false",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "api_contract",
+    "claim": "A row-rule table referenced outside a guard-shaped wrapper (where _wrapper_body returns None) is refused by _rewalk rather than accepted",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_against": "_rewalk and _proven_scoped_tables in src/sqllens/safety/rule_sets.py",
+    "verify_hint": "Trace a table with a row rule inside an EXISTS subquery of another table's filter (rule.tables) to see it is in built, and one in a tampered wrapper",
+    "claim_signature": "api_contract:rule_sets.py:unwrapped-scoped-refused",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "dependency_interaction",
+    "claim": "Flat [[rls]] runs on the guard's output and adds predicates inside filtered derived tables and the rule's EXISTS subqueries, matching names case-insensitively",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Flat `[[rls]]` keeps applying alongside row rules: it runs on the guard's output and matches table names case-insensitively, so it adds its predicates inside the filtered derived tables and inside the rule's `EXISTS` subqueries over link, parent and source tables too",
+    "source_file": "docs/internal/database-connectors/rule-sets.md",
+    "verify_against": "apply_rls in src/sqllens/safety/rls.py and runner ordering in agent/factory.py",
+    "verify_hint": "Check build_agent runner order and apply_rls table matching for tables inside EXISTS subqueries",
+    "claim_signature": "dependency_interaction:rule-sets.md:flat-rls-inside-exists",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "api_contract",
+    "claim": "check_catalog checks the integer type of a listed owner_via link table's link_user_column, and of an unlisted one after existence, skipping type checks for missing tables or columns already reported",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/rule_sets.py",
+    "verify_against": "_catalog_reads and check_catalog",
+    "verify_hint": "Check the typed loop in check_catalog and _catalog_reads in src/sqllens/rule_sets.py",
+    "claim_signature": "api_contract:rule_sets.py:link-user-column-type",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "data_format_assumption",
+    "claim": "A TOML inline-table row_rule parses into the pydantic discriminated union and errors name record paths like rule_sets[i].tables[j].row_rule...",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/rule_sets.py",
+    "verify_against": "load_rule_sets error formatting of pydantic ValidationError and RuleSet._check_row_rules messages",
+    "verify_hint": "Check how load_rule_sets formats ValidationError locations versus the tables[index].row_rule prefix _check_row_rules raises",
+    "claim_signature": "data_format_assumption:rule_sets.py:row-rule-error-path",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "test_mock_alignment",
+    "claim": "The unit _Cursor in test_row_rules.py returns 2-tuples (TABLE_NAME, TABLE_TYPE) for any SQL containing 'information_schema.TABLES' and 3-tuples (TABLE_NAME, COLUMN_NAME, DATA_TYPE) otherwise, matching the queries and row shapes check_catalog issues and unpacks.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_row_rules.py",
+    "verify_against": "src/sqllens/rule_sets.py",
+    "verify_hint": "Check check_catalog in src/sqllens/rule_sets.py: the exact SQL text it executes (case of 'information_schema.TABLES'), the column order selected, and how fetched rows are unpacked.",
+    "claim_signature": "test_mock_alignment:test_row_rules.py:catalog-cursor-row-shape",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "test_mock_alignment",
+    "claim": "The updated _Cursor in test_rule_set_file.py yields (table, column, DATA_TYPE) 3-tuples, defaulting DATA_TYPE to 'int', matching what the catalog check now reads from INFORMATION_SCHEMA.COLUMNS, and 'int' is accepted for every pre-existing test whose file has no row rule.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rule_set_file.py",
+    "verify_against": "src/sqllens/rule_sets.py",
+    "verify_hint": "Check check_catalog and the type-mapping lookup in src/sqllens/rule_sets.py for the COLUMNS query column order and whether type checks apply only to row-rule columns.",
+    "claim_signature": "test_mock_alignment:test_rule_set_file.py:cursor-data-type-default",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "test_mock_alignment",
+    "claim": "The patched second_fails stub mirrors guard._rewalk's signature (tree, tables, expected=None, scoping=None) and forwards the scoping argument, so callers passing scoping positionally or by keyword hit it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "verify_against": "src/sqllens/safety/rule_sets.py",
+    "verify_hint": "Check the _rewalk definition and every call site of _rewalk in src/sqllens/safety/rule_sets.py (positional vs keyword scoping).",
+    "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:rewalk-signature",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "test_mock_alignment",
+    "claim": "The monkeypatched targets guard._choose_prefix, _rename_ctes, _scoped_body, _proven_scoped_tables, _shape and CompiledRule.instantiate exist and are each called on the path RuleSetGuardRunner.run_sql takes for 'WITH r AS (SELECT 1 AS x) SELECT name FROM customers', inside the try that converts any exception to a RuleSetRefusal before the inner runner is called.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_row_rules.py",
+    "verify_against": "src/sqllens/safety/rule_sets.py",
+    "verify_hint": "Check RuleSetGuardRunner.run_sql and apply_rule_set in src/sqllens/safety/rule_sets.py, and whether each name is looked up via module/class attribute at call time (so monkeypatch takes effect).",
+    "claim_signature": "test_mock_alignment:test_row_rules.py:patched-guard-steps",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "test_mock_alignment",
+    "claim": "test_a_compile_error_fails_the_load_naming_the_rule patches rule_sets._Compiler._node, which the loader calls while compiling, and the loader wraps any exception into RuleSetFileError with 'the row rule could not be compiled' and '<Type>: <message>'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_row_rules.py",
+    "verify_against": "src/sqllens/rule_sets.py",
+    "verify_hint": "Check the _Compiler class and the load_rule_sets compile step in src/sqllens/rule_sets.py.",
+    "claim_signature": "test_mock_alignment:test_row_rules.py:compiler-node-patch",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "dependency_interaction",
+    "claim": "test_the_scale_document_has_the_real_file_shape calls the private rule_sets._rule_nodes(rule, '') and expects it to yield (node, path) pairs covering every nested node, including the root.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_rule_sets.py",
+    "verify_against": "src/sqllens/rule_sets.py",
+    "verify_hint": "Check _rule_nodes in src/sqllens/rule_sets.py for its signature and yielded shape.",
+    "claim_signature": "dependency_interaction:test_cli_rule_sets.py:rule-nodes-shape",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "absolute_claim",
+    "claim": "The scale_document docstring asserts 10 sets of 130 tables, 27 row rules per set using all six kinds, a chain 4 deep ending at t004, and t007's rule having 21 nodes.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "10 sets of 130 tables (1,300 entries), 27 row rules per set (270) using\n    all six kinds; ``t004`` ends a chain 4 deep (``t004`` -> ``t003`` ->\n    ``t002`` -> ``t001`` -> ``t000``), and ``t007``'s rule has 21 nodes.",
+    "source_file": "tests/unit/_rule_set_fixtures.py",
+    "verify_against": "tests/unit/_rule_set_fixtures.py scale_document body",
+    "verify_hint": "Count rules dict entries in scale_document (0..26) and t007's nodes: all_of + 2 any_of + 9 + 9 compares = 21; check the 'all six kinds' assertion against rules 5/6/8/9.",
+    "claim_signature": "absolute_claim:_rule_set_fixtures.py:scale-shape-docstring",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "data_format_assumption",
+    "claim": "In scale_document, rule 9 is a referenced_by link variant whose link table t(10) is listed with columns parent_id and owner_id, and t(10) itself has a compare rule, so the loader accepts it without a cycle; the unlisted link table '<prefix>link' with row_id/user_id is accepted at load, but the connector test never creates rr_link, so the scale connector test must not run preflight against it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/_rule_set_fixtures.py",
+    "verify_against": "src/sqllens/rule_sets.py and tests/connectors/test_row_rules_mysql.py",
+    "verify_hint": "Check referenced_by link-variant validation in src/sqllens/rule_sets.py and test_the_deepest_chain_of_a_real_scale_file_runs plus _loaded (load_rule_sets with database_url) for whether loading triggers a catalog check.",
+    "claim_signature": "data_format_assumption:_rule_set_fixtures.py:scale-link-tables",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "dependency_interaction",
+    "claim": "The connector _chain composes runners in the same order build_agent uses when a rule-set file is configured (ReadOnlyGuard over RowCap over engine, then RlsGuard, RuleSetGuard, WholeRowSelectGuard, RefusalRedacting).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"The runner chain ``build_agent`` composes while a rule-set file is configured.\"\"\"",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_against": "src/sqllens/agent/factory.py",
+    "verify_hint": "Check build_agent / build_sql_runner in src/sqllens/agent/factory.py for runner wrapping order and constructor arguments (skip_catalog_views, remove_sql_modes).",
+    "claim_signature": "dependency_interaction:test_row_rules_mysql.py:runner-chain-order",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "dependency_interaction",
+    "claim": "MySQLRunner accepts keyword arguments host, port, database, user, password, read_only and remove_sql_modes, and factory exports RULE_SET_REMOVED_SQL_MODES.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_against": "src/sqllens/agent/integrations/mysql",
+    "verify_hint": "Check MySQLRunner.__init__ in src/sqllens/agent/integrations/mysql and RULE_SET_REMOVED_SQL_MODES in src/sqllens/agent/factory.py.",
+    "claim_signature": "dependency_interaction:test_row_rules_mysql.py:mysqlrunner-kwargs",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "test_explain_shows_scoped_tables_materialized_and_unscoped_mergeable expects MySQL EXPLAIN rows' 'table' column to show the guard's inner aliases sl0_0_0 and sl0_1_0 for DERIVED rows and 'rr_currencies' with a non-DERIVED select_type; MySQL's EXPLAIN reports the table alias (and <derivedN> for the outer reference), so the test's alias expectations must match what EXPLAIN prints.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_against": "MySQL 8.0 EXPLAIN output format; src/sqllens/safety/rule_sets.py alias naming",
+    "verify_hint": "Check the alias assignment in apply_rule_set / _scoped_body in src/sqllens/safety/rule_sets.py, and whether the unscoped currencies wrapper uses the bare table name (no alias) so EXPLAIN's table column reads 'rr_currencies' rather than 'cu'.",
+    "claim_signature": "dependency_interaction:test_row_rules_mysql.py:explain-table-aliases",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "data_format_assumption",
+    "claim": "The module docstring's fixture description (visible customers 1,2; orders 10,15; order_tags (10,100),(15,102); tags 100,102; regions 1,2; currencies all; rates 1,2) matches the _SETUP inserts under the example set for user 7.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- ``rr_order_tags`` visible (10, 100), (15, 102); ``rr_tags`` visible 100, 102;\n  ``rr_regions`` visible 1, 2; ``rr_currencies`` all; ``rr_rates`` visible 1, 2.",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_against": "tests/connectors/test_row_rules_mysql.py _SETUP and tests/unit/_rule_set_fixtures.py row_rule_tables",
+    "verify_hint": "Trace each insert in _SETUP against row_rule_tables rules for user 7 (regions referenced_by customers.region_id: customers 1,2 have regions 1,2).",
+    "claim_signature": "data_format_assumption:test_row_rules_mysql.py:fixture-visible-rows",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "data_format_assumption",
+    "claim": "test_a_dropped_rule_column restore path re-adds the dropped column as BIGINT NULL and, for rr_customer_reps, deletes and reinserts saved (customer_id, user_id) rows; after re-adding, rr_customers.sales_rep_id becomes BIGINT instead of INT, which the module-scoped fixture's later tests (preflight type checks) must still accept.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_against": "tests/connectors/test_row_rules_mysql.py _SETUP and the integer type mapping in src/sqllens/rule_sets.py",
+    "verify_hint": "Check the restore block in test_a_dropped_rule_column_fails_as_unknown_never_binding_elsewhere and the column order assumption in INSERT INTO rr_customer_reps VALUES (%s, %s) after DROP/ADD moves user_id to the end.",
+    "claim_signature": "data_format_assumption:test_row_rules_mysql.py:drop-column-restore",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "api_contract",
+    "claim": "select_rule_set(loaded, {'role':'2','account':'5','user':user}) accepts metadata keys role, account and user and normalizes 7, '7' and '007' to the integer user ID 7; RuleSetSelection positional args are (rule_set name, account, user_id).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_against": "src/sqllens/rule_sets.py",
+    "verify_hint": "Check select_rule_set, RuleSetSelection and the example_document metadata key names in src/sqllens/rule_sets.py and tests/unit/_rule_set_fixtures.py.",
+    "claim_signature": "api_contract:test_row_rules_mysql.py:select-rule-set-metadata",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "api_contract",
+    "claim": "probe_database(Config(...)) runs the rule-set existence and type check and raises PreflightError whose text contains the catalog check's message (e.g. 'differs in letter case', 'is a view, not a base table', 'column X.Y has type').",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_against": "src/sqllens/preflight.py",
+    "verify_hint": "Check probe_database in src/sqllens/preflight.py and how it wraps RuleSetCatalogError, and whether Config requires further fields (e.g. LLMConfig api_key) to construct.",
+    "claim_signature": "api_contract:test_row_rules_mysql.py:probe-database-error-text",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "api_contract",
+    "claim": "ensure_catalog_confirmed(url, loaded) is awaitable and raises RuleSetRequestError whose str equals REFUSED_CATALOG_UNCONFIRMED when a rule's link column is missing, leaving loaded.catalog.confirmed false.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_against": "src/sqllens/rule_sets.py",
+    "verify_hint": "Check ensure_catalog_confirmed, REFUSED_CATALOG_UNCONFIRMED and the catalog state object in src/sqllens/rule_sets.py.",
+    "claim_signature": "api_contract:test_row_rules_mysql.py:ensure-catalog-confirmed",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "api_contract",
+    "claim": "The CLI test expects a load error message 'rule_sets[0]: tables[0].row_rule: column 'nosuch' is not declared on table 'customers'' for an undeclared compare column, matching the loader's error path format.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_rule_sets.py",
+    "verify_against": "src/sqllens/rule_sets.py",
+    "verify_hint": "Check the declared-column validation message and the record-path prefix construction in src/sqllens/rule_sets.py.",
+    "claim_signature": "api_contract:test_cli_rule_sets.py:undeclared-column-message",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "absolute_claim",
+    "claim": "The comment asserts the case-insensitive collation hiding of status 'VOID' is covered by the visible-row test expecting {10, 15}; order 12 belongs to customer 2 (visible), so only the collation hides it.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# rr_orders 12 has status 'VOID': the case-insensitive default collation hides it\n# under status != \"void\" (covered by the visible-row test above, which expects {10, 15}).",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_against": "tests/connectors/test_row_rules_mysql.py _SETUP",
+    "verify_hint": "Trace order 12 (c2, 'VOID'): falsified if the test database's default collation is case-sensitive (e.g. a _bin or _cs default), in which case 12 would appear.",
+    "claim_signature": "absolute_claim:test_row_rules_mysql.py:void-collation-coverage",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A valid version-1 rule-set file whose tables hold row rules of every kind loads: `sqllens validate` exits 0 and `sqllens serve` starts, with preflight on, against a database that has every table and column the rules read with types inside the mapping.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A valid version-1 rule-set file whose tables hold row rules of every kind loads: `sqllens validate` exits 0 and `sqllens serve` starts, with preflight on, against a database that has every table and column the rules read with types inside the mapping.",
+    "id": "VC-37",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A file whose row rule breaks the version-1 row-rule format, or whose rule raises an error while it is compiled at load, makes `sqllens validate` exit 2 and `sqllens serve` refuse to start, with an error naming the record path and the problem, at minimum for: an unknown field in a node; a missing `kind` or an unknown `kind`; `compare` with both or neither of `value` and `request`, an unknown operator, an unknown `value_type`, a Boolean `value` for `integer`, an integer `value` for `boolean`, an infinite float, `in` with an empty array, `in` with a scalar, `<` with `boolean`, `request = \"account_id\"`, `request` with `value_type = \"string\"` or with `in`; an undeclared column on the current table; `inherit` or `referenced_by` naming an unlisted table; `referenced_by` with both variants or neither; an empty `rules` array; a two-table cycle, a self-edge, and a cycle through a node nested in `any_of`.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/rule_sets.py",
+    "verify_hint": "Check each listed case in criterion 2 against these validators",
+    "id": "VC-38",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A file whose `owner_via` names an unlisted link table loads, and under that set a model query that reads the link table is refused as reading an unlisted table.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A file whose `owner_via` names an unlisted link table loads, and under that set a model query that reads the link table is refused as reading an unlisted table.",
+    "id": "VC-39",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With preflight on, `sqllens serve` refuses to start and `sqllens validate --check-db` exits 2, each naming the table or column, when a row rule reads a table or column missing from the database (an unlisted `owner_via` link table and its two columns included), a name whose letter case differs from the database's, or a link table that is a view. With `--no-preflight` and a missing `customer_reps.user_id`, a rule-set request is refused with `isError` before the agent runs, with text that names no table or column, exactly as part 1 refuses a request whose existence check fails.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: With preflight on, `sqllens serve` refuses to start and `sqllens validate --check-db` exits 2, each naming the table or column, when a row rule reads a table or column missing from the database (an unlisted `owner_via` link table and its two columns included), a name whose letter case differs from the database's, or a link table that is a view. With `--no-preflight` and a missing `customer_reps.user_id`, a rule-set request is refused with `isError` before the agent runs, with text that names no table or column, exactly as part 1 refuses a request whose existence check fails.",
+    "id": "VC-40",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The existence check accepts a `compare` column only when its `INFORMATION_SCHEMA.COLUMNS.DATA_TYPE` belongs to its rule's `value_type`, and an `owner_via` rule's `link_user_column` only when its `DATA_TYPE` belongs to `integer`, by this mapping, exactly these four rows — complete by construction: `integer` → `tinyint`, `smallint`, `mediumint`, `int`, `bigint`; `float` → `float`, `double`; `string` → `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`, `enum`; `boolean` → `tinyint`, `smallint`, `mediumint`, `int`, `bigint`. A file whose compared columns cover every listed `DATA_TYPE` under its `value_type` passes, and with preflight on `sqllens serve` refuses to start and `sqllens validate --check-db` exits 2, naming the column, for any other pairing, at minimum a `varchar` column under `integer` or the user ID, a `varchar` `link_user_column` (such as `customer_reps.user_id`), an `int` column under `string`, a `decimal` column under `float`, and a `datetime` column under each `value_type`.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/rule_sets.py",
+    "verify_hint": "Check VALUE_TYPE_DATA_TYPES and the typed loop in check_catalog",
+    "id": "VC-41",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set as user 7, each table returns exactly its visible rows: `customers` returns the customers whose `sales_rep_id` is 7 or that `customer_reps` links to user 7, and not a customer whose `sales_rep_id` is `NULL` with no link row; `orders` returns the orders of those customers whose `status` is not `void`, and not an order whose `status` is `NULL`; `order_tags` the rows of those orders; `tags` the tags linked to those orders through `order_tags`; `regions` the regions of those customers; `currencies` every row; and `rates` every rate whose `currency_id` matches a `currencies` row, and not a rate whose `currency_id` is `NULL`.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Under the example set as user 7, each table returns exactly its visible rows: `customers` returns the customers whose `sales_rep_id` is 7 or that `customer_reps` links to user 7, and not a customer whose `sales_rep_id` is `NULL` with no link row; `orders` returns the orders of those customers whose `status` is not `void`, and not an order whose `status` is `NULL`; `order_tags` the rows of those orders; `tags` the tags linked to those orders through `order_tags`; `regions` the regions of those customers; `currencies` every row; and `rates` every rate whose `currency_id` matches a `currencies` row, and not a rate whose `currency_id` is `NULL`.",
+    "id": "VC-42",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A user ID sent in `_meta` as `7`, `\"7\"` or `\"007\"` returns the same rows under the example set.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A user ID sent in `_meta` as `7`, `\"7\"` or `\"007\"` returns the same rows under the example set.",
+    "id": "VC-43",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set, a scoped table returns only its visible rows wherever the model's SQL reads it, at minimum in: a plain `FROM`, a join, a self-join (`FROM orders a JOIN orders b`), a parenthesized join, a subquery in the select list, `WHERE … IN (SELECT customer_id FROM orders)`, `WHERE EXISTS (…)`, a CTE body, a `LATERAL` derived table, a `UNION` branch, `SELECT COUNT(*)`, and, with `database.refuse_whole_row_selects = false`, `SELECT *`.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Under the example set, a scoped table returns only its visible rows wherever the model's SQL reads it, at minimum in: a plain `FROM`, a join, a self-join (`FROM orders a JOIN orders b`), a parenthesized join, a subquery in the select list, `WHERE … IN (SELECT customer_id FROM orders)`, `WHERE EXISTS (…)`, a CTE body, a `LATERAL` derived table, a `UNION` branch, `SELECT COUNT(*)`, and, with `database.refuse_whole_row_selects = false`, `SELECT *`.",
+    "id": "VC-44",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set as user 7, with an order hidden from user 7 whose `total` is 100 and every visible order's `total` at most 9, `SELECT COUNT(*) FROM orders o WHERE o.total * 1000000000000000000 > 0` returns the number of visible orders without an error; the same statement under a confirmed set that lists `orders` with no row rule fails with MySQL error 1690.",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Under the example set as user 7, with an order hidden from user 7 whose `total` is 100 and every visible order's `total` at most 9, `SELECT COUNT(*) FROM orders o WHERE o.total * 1000000000000000000 > 0` returns the number of visible orders without an error; the same statement under a confirmed set that lists `orders` with no row rule fails with MySQL error 1690.",
+    "id": "VC-45",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set, on a server with MySQL's default `optimizer_switch`, MySQL's `EXPLAIN` of the SQL the guard produces for `SELECT c.name, o.total, cu.code FROM customers c JOIN orders o ON o.customer_id = c.id JOIN currencies cu ON cu.id = 1` shows the derived tables for `customers` and `orders` as materialized (`select_type` `DERIVED`) and no materialized derived table for `currencies`. So each reference to a table with a row rule is built in full, with every row its rule leaves visible, before the model's own conditions apply, and that work counts against the statement timeout; a table without a row rule stays mergeable.",
+    "claim_signature": "issue-acceptance-10",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_hint": "Check test_explain_shows_scoped_tables_materialized_and_unscoped_mergeable.",
+    "id": "VC-46",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set as user 7, a model CTE never stands in for a table a row filter reads, and no CTE name changes whether a statement runs, at minimum: `WITH customers AS (SELECT 1 AS id, 8 AS sales_rep_id) SELECT o.id, o.total FROM orders o` returns exactly the orders visible to user 7; `WITH customer_reps AS (SELECT 5 AS customer_id, 7 AS user_id) SELECT name FROM customers` returns exactly the customers visible to user 7; `WITH customer_reps AS (SELECT 1 AS x) SELECT cu.code FROM currencies cu` and `WITH salaries AS (SELECT 1 AS x) SELECT cu.code FROM currencies cu` both run and return the same rows; a CTE named `orders` defined inside a subquery's own `WITH` does not change the orders the subquery's filter makes visible; and `WITH recent AS (SELECT o.id FROM orders o) SELECT recent.id FROM recent` and a recursive CTE over `orders` return only visible orders.",
+    "claim_signature": "issue-acceptance-11",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_hint": "Check _rename_ctes in src/sqllens/safety/rule_sets.py",
+    "id": "VC-47",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set, a model statement that reads `customers.sales_rep_id` or `orders.status` fails with MySQL's unknown-column error (1054) and returns no value of that column, and one that reads `customer_reps` is refused before execution.",
+    "claim_signature": "issue-acceptance-12",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Under the example set, a model statement that reads `customers.sales_rep_id` or `orders.status` fails with MySQL's unknown-column error (1054) and returns no value of that column, and one that reads `customer_reps` is refused before execution.",
+    "id": "VC-48",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A `float` rule's value reaches MySQL as a 17-significant-digit exponent-form literal (`0.5` as `5.0000000000000000e-01`, `-1e-05` as `-1.0000000000000001e-05`), and a `float` rule on a `DOUBLE` column compares as a double at every size: with rows whose `amount` is `0`, `1` and `1e70`, a rule `amount >= 1e-100` shows the rows `1` and `1e70` and hides `0`, a rule `amount >= 1e100` hides all three, and a rule `amount >= 0.5` shows `1` and `1e70`.",
+    "claim_signature": "issue-acceptance-13",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A `float` rule's value reaches MySQL as a 17-significant-digit exponent-form literal (`0.5` as `5.0000000000000000e-01`, `-1e-05` as `-1.0000000000000001e-05`), and a `float` rule on a `DOUBLE` column compares as a double at every size: with rows whose `amount` is `0`, `1` and `1e70`, a rule `amount >= 1e-100` shows the rows `1` and `1e70` and hides `0`, a rule `amount >= 1e100` hides all three, and a rule `amount >= 0.5` shows `1` and `1e70`.",
+    "id": "VC-49",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A text comparison follows the column's collation: under a `string` rule `status != \"void\"` on a column with MySQL 8's default case-insensitive collation, an order whose `status` is `VOID` is hidden.",
+    "claim_signature": "issue-acceptance-14",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A text comparison follows the column's collation: under a `string` rule `status != \"void\"` on a column with MySQL 8's default case-insensitive collation, an order whose `status` is `VOID` is hidden.",
+    "id": "VC-50",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With a column a row rule reads (`customers.sales_rep_id`, or `customer_reps.user_id`) dropped after the existence check passed, a statement over the scoped table fails with MySQL's unknown-column error (1054), even when the model's query has another table with a column of that name in scope, at minimum for `SELECT (SELECT COUNT(*) FROM orders o) AS n FROM (SELECT 7 AS sales_rep_id) AS customers` and for an outer model alias named `orders` or `customer_reps` carrying the dropped column's name; it never returns rows filtered against another table's column. The guard does not redact that database error, so its text, which can name the dropped column, reaches the model and the client.",
+    "claim_signature": "issue-acceptance-15",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "verify_hint": "Check test_a_dropped_rule_column_fails_as_unknown_never_binding_elsewhere parametrization: the orders-alias case drops customers.sales_rep_id; no case drops customer_reps.user_id with an alias named orders.",
+    "id": "VC-51",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Every statement the rule-set guard cannot carry through for a table with a row rule is refused before execution, with no SQL reaching MySQL and client text beginning `Refused by the rule set:` that names no table or column: at minimum an exception raised in each step that builds or proves the filtered derived table, including an exception type the guard does not name; and a rewritten tree in which a scoped table's derived table is missing its row filter, carries a different filter, or is missing the `LIMIT`.",
+    "claim_signature": "issue-acceptance-16",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_hint": "Check RuleSetGuardRunner exception handling and _proven_scoped_tables",
+    "id": "VC-52",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With a flat `[[rls]]` rule on `orders` and the example set selected, a query over `orders` returns only rows that pass both the row rule and the flat rule; a flat rule on the unlisted `customer_reps` link table also narrows which customers `owner_via` makes visible.",
+    "claim_signature": "issue-acceptance-17",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: With a flat `[[rls]]` rule on `orders` and the example set selected, a query over `orders` returns only rows that pass both the row rule and the flat rule; a flat rule on the unlisted `customer_reps` link table also narrows which customers `owner_via` makes visible.",
+    "id": "VC-53",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A synthetic rule-set file with the real-scale file's shape (10 sets, about 1,300 table entries, about 270 row rules using all six kinds, chains 4 deep, rules expanding to 21 nodes) loads with `sqllens validate`, and a query over its most deeply chained table runs and returns that table's visible rows.",
+    "claim_signature": "issue-acceptance-18",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "source_file": "tests/unit/_rule_set_fixtures.py",
+    "verify_hint": "Check scale_document, test_validate_and_serve_accept_row_rules and test_the_deepest_chain_of_a_real_scale_file_runs.",
+    "id": "VC-54",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/internal/database-connectors/rule-sets.md` describes the row-rule kinds, the visibility rule, the load-time checks, the type mapping, the filtered `LIMIT`-materialized derived table and why it runs first, the guard aliases, the renaming of model CTEs under a set with row rules and why, and no longer says row rules are not supported. `docs/external/rule-sets.md` describes the six row-rule kinds with each kind's fields, the operators, the four `value_type`s and the exact-TOML-type rule, the `request = \"user_id\"` rule, the declared-column and listed-table rules, the unlisted `owner_via` link-table declarations, the acyclic visibility graph, that a row is visible only when its rule is true, the type mapping, and that queries over a scoped table can be slower because its visible rows are built in full first; it no longer says row rules are not supported or that a file containing one does not load, describes `predicate_columns` as columns only row rules read, and has no troubleshooting entry telling operators to remove a rule set because it holds a `row_rule`.",
+    "claim_signature": "issue-acceptance-19",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "source_file": "docs/external/rule-sets.md",
+    "verify_hint": "Check the Row rules sections of both docs",
+    "id": "VC-55",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The pull request description for this change names part 1a's changelog sentence \"Row rules are not supported yet\" in `changelog.d/389.added.md` and states that, while that fragment is unreleased, it needs a correction through the release guide's `codex/changelog-notes-<reason>` route.",
+    "claim_signature": "issue-acceptance-20",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The pull request description for this change names part 1a's changelog sentence \"Row rules are not supported yet\" in `changelog.d/389.added.md` and states that, while that fragment is unreleased, it needs a correction through the release guide's `codex/changelog-notes-<reason>` route.",
+    "id": "VC-56",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The change leaves these as they are, each as one unit: flat `[[rls]]` tables with no row rule keep part 1's mergeable derived table, so a model expression can still run on a row only a flat rule hides; the system prompt gains no text about row rules; a file whose tables hold no `row_rule` loads and serves exactly as under part 1; the existence and type checks run once per process, so a column dropped or retyped afterwards is not caught until restart; and the change's own pull request does not edit or delete `changelog.d/389.added.md`, because an ordinary PR cannot modify a fragment already on the base branch.",
+    "claim_signature": "issue-acceptance-21",
+    "criteria_file": ".prflow/tmp/review/pr-395/local-20261114T153430Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_hint": "Check _rewrite's no-rule branch and apply_rule_set's `if rules:` guard",
+    "id": "VC-57",
+    "reused_from_iter_prev": false
+  }
+]
