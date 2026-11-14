@@ -1,0 +1,434 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "verdict": "APPROVE with notes",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "Only the JsonBoundsError arm of _bounded_request_metadata returns discarded=True; the meta-read-error, non-dict meta, key-iteration-error and unexpected-exception arms also drop the whole _meta but return ({}, False), so the refusal line reads kept _meta keys=[] as if the caller sent nothing.",
+   "defect_signature": {
+    "file": "src/sqllens/server.py",
+    "line_range": [
+     315,
+     341
+    ],
+    "kind": "logic_error"
+   }
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "RuleSetRequestError.refusal_class strips the 'Request refused: ' prefix by convention; a message lacking it becomes the whole class, and the passed-checks rule for identity fields lives only at raise sites. _refusal_kind in safety/rule_sets.py repeats the prefix parsing.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": [
+     347,
+     368
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "audit_line outcome is a free-form str and identity travels as dict[str, Any] splatted into audit_line(**identity); a misspelled key would raise TypeError inside the finally block and replace the call's result or exception.",
+   "defect_signature": {
+    "file": "src/sqllens/tools/query_database.py",
+    "line_range": [
+     658,
+     689
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-4",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "metadata_discarded is a separate bool next to metadata, so a non-empty metadata with metadata_discarded=True is representable and refusal_log_fields would name no keys; the only producer keeps them consistent today.",
+   "defect_signature": {
+    "file": "src/sqllens/server.py",
+    "line_range": null,
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-5",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "RefusalRedactingRunner's branch for an UnsafeSqlError or RlsError no guard logged first now logs class and kept-key fields, but no test asserts them.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/rule_sets.py",
+    "line_range": [
+     791,
+     799
+    ],
+    "kind": "test_gap"
+   }
+  },
+  {
+   "finding_id": "F-6",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "test_no_rule_set_file_writes_no_audit_or_refusal_line only checks no message contains 'rule-set', so a differently worded new refusal line on the no-rule-set path would pass.",
+   "defect_signature": {
+    "file": "tests/unit/test_rule_set_request_logging.py",
+    "line_range": [
+     255,
+     263
+    ],
+    "kind": "test_gap"
+   }
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "report": "## Verdict: APPROVE with notes (six Suggestions and one inconclusive checklist item, nothing at or above the Important threshold)\nThe PR is ready to merge: every checklist claim that could be checked passed, all six acceptance criteria are covered, and no reviewer raised a finding at or above the Important threshold.\nRule applied: rule 6 — findings below the threshold and an INCONCLUSIVE checklist item → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (6)\n\n<details><summary>6 items</summary>\n\n1. `src/sqllens/server.py` lines 315–341: only the `JsonBoundsError` arm of `_bounded_request_metadata` returns `discarded=True`. The arms for a `request_context.meta` read error, a non-dict `meta`, a key-iteration error and an unexpected bounding exception also drop the whole `_meta` but return `({}, False)`. The later refusal line then shows `kept _meta keys=[]`, which reads as if the caller sent nothing. The earlier server warning still records the drop. (raised by 1/6 agents)\n2. `src/sqllens/rule_sets.py` lines 347–368: `RuleSetRequestError.refusal_class` is computed by stripping the `Request refused: ` prefix from the message, so a message without that prefix silently becomes the whole class. The rule that `rule_set`, `account_id` and `user_id` hold only values that passed their checks is enforced only at each raise site in `select_rule_set`. `_refusal_kind` in `src/sqllens/safety/rule_sets.py` lines 717–725 recovers a guard refusal's kind with the same prefix-stripping approach. (raised by 1/6 agents)\n3. `src/sqllens/tools/query_database.py` lines 658–689: `audit_line(outcome: str, ...)` accepts any text, while only `served`, `refused: <class>` and `failed` are valid. The identity values travel in an untyped `dict[str, Any]` splatted into `audit_line(**identity)`, so a misspelled key would raise a `TypeError` inside the `finally` block and replace the call's own result or exception. (raised by 1/6 agents)\n4. `src/sqllens/server.py` (`_bounded_request_metadata`) and `query_database_impl_with_widgets`: `metadata_discarded` is a separate bool next to `metadata`, so the signature accepts a non-empty `metadata` together with `metadata_discarded=True`, in which case `refusal_log_fields` names no keys. The only producer keeps the two consistent today. (raised by 1/6 agents)\n5. `src/sqllens/safety/rule_sets.py` lines 791–799: the `RefusalRedactingRunner` branch for an `UnsafeSqlError` or `RlsError` that no guard logged first now writes `guard refused a statement: %s; <fields>`, but no test asserts its class and kept-key fields. (raised by 1/6 agents)\n6. `tests/unit/test_rule_set_request_logging.py` lines 255–263: `test_no_rule_set_file_writes_no_audit_or_refusal_line` only checks that no log message contains the substring `rule-set`, so a new refusal line worded differently on the no-rule-set path would pass it. (raised by 1/6 agents)\n\n</details>\n\n### ℹ️ Informational — Deferred\n- VC-15: INCONCLUSIVE (suggestion) — Rule-set queries run with HIGH_NOT_PRECEDENCE and NO_BACKSLASH_ESCAPES removed from session sql_mode; CAST(x AS REAL) is sent as CAST(x AS FLOAT); PARTITION lists and index hints refused. [docs/external/rule-sets.md]\n\n  <details><summary>Evidence</summary>\n\n  Verified: sql_mode removal. factory.py:67 defines RULE_SET_REMOVED_SQL_MODES={HIGH_NOT_PRECEDENCE,NO_BACKSLASH_ESCAPES}, passed as remove_sql_modes when rule_sets is not None (factory.py:116); mysql/sql_runner.py:129-139 reads @@SESSION.sql_mode, filters those flags and runs SET SESSION sql_mode. PARTITION/index-hint refusal: safety/rule_sets.py:84,225 raise RuleSetRefusal(KIND_TABLE_OPTIONS) for table option args. Not verified: the CAST(x AS REAL) -> CAST(x AS FLOAT) claim. It depends on sqlglot's MySQL generator type mapping; no dependency_sources were supplied, no sqlglot source exists in the views (Glob for sqlglot/dialects/mysql.py found none), and the repo has no test or code asserting the REAL to FLOAT output (grep 'AS REAL' only hits the doc line). rule_sets.py:580 regenerates SQL with dialect mysql, so the mapping would apply, but I could not read it. Missing evidence: sqlglot dialects/mysql.py and generator.py TYPE_MAPPING, or running sqlglot.transpile('SELECT CAST(x AS REAL)', read='mysql', write='mysql').\n\n  </details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: not small_diff, not config_only, has_new_types, test_relevant; 17 changed files.\n- Working tree: Phase 0.1 skipped (head-override PR mode).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass (`requesting-code-review`) extension: content-present.\n- CI evidence: none held for this head; test results for 9027c4e83d32c8f30a6effd8277d81f566f73a3d are missing.\n- Normalized (wording-only): 1\n- Re-verification: none (no checklist FAIL).\n- Verdict severity threshold: important.\n- Dispatch note: 16 of 35 checklist verifiers were first refused by the concurrent subagent limit; all 16 were re-dispatched after the first wave and returned.\n- No reviewer modified the working tree (dirty-tree check ran clean).\n- Finding rejected lines not counted (no Finding rejected line) — exempt.\n- Checklist: 34 passed, 0 failed, 1 inconclusive\n- <details><summary>✅ Passed items (34 of 35)</summary>\n\n  - VC-1: Callers (tools impl query_database_impl_with_widgets, RuleSetGuardRunner, RefusalRedactingRunner) call refusal_log_fields with the class string and either rely on the contextvar-published keys or pass metadata_discarded=True when server._bounded_request_metadata discarded _meta. [src/sqllens/rule_sets.py:389]\n  - VC-2: The docstring asserts that JSON encoding with ASCII escapes means a caller-chosen key name cannot break the log line, and that with metadata_discarded no key is named. [src/sqllens/rule_sets.py:397]\n  - VC-3: audit_line emits 'rule-set audit: ' plus a JSON object with outcome and only non-None rule_set, account_id (string) and user_id (integer), matching the doc example {\"outcome\": \"served\", \"rule_set\": \"2\", \"account_id\": \"5\", \"user_id\": 7}. [src/sqllens/rule_sets.py:409]\n  - VC-4: select_rule_set attaches identity to RuleSetRequestError as the doc describes: none for key missing / no such set; rule set (only when confirmed) for account not bound; set and account for user ID invalid; account and user (no set) for rule set not confirmed. [src/sqllens/rule_sets.py:492]\n  - VC-5: RuleSetRequestError.refusal_class strips the 'Request refused: ' prefix, so every REFUSED_* constant yields the class text the docs list (including the conversation-owner and catalog-unconfirmed classes). [src/sqllens/rule_sets.py:364]\n  - VC-6: The impl writes the audit line from a finally block once per call only when cfg has a rule-set file, with outcome served / refused: <class> / failed, including on cancellation (CancelledError). [docs/internal/database-connectors/rule-sets.md]\n  - VC-7: server.py's query_database calls _bounded_request_metadata returning (metadata, metadata_discarded) and passes metadata_discarded= to query_database_impl_with_widgets, as the internal tools doc snippet shows. [docs/internal/mcp-server/tools.md]\n  - VC-8: The external doc states _meta is dropped when it has more than 64 keys (counting protocol-added keys like progress token), more than 16 KiB, more than 1,024 values and keys, or nesting deeper than eight levels. [docs/external/rule-sets.md]\n  - VC-9: The external doc's matching rules hold: rule set and account accept a string or non-Boolean int compared by text; empty rule-set string counts as missing; user accepts positive int or ASCII-digit string with positive value. [docs/external/rule-sets.md]\n  - VC-10: The format reference table matches the pydantic models in rule_sets.py: each field's type, required/optional, identifier and ID patterns, strict typing, reserved metadata names, fingerprint/commit/date formats, row_rule rejected. [docs/external/rule-sets.md]\n  - VC-11: The doc asserts names are compared exactly, letter case included, everywhere: in the file, against the database, and against request fields. [docs/external/rule-sets.md]\n  - VC-12: The catalog rewrite keeps values for exactly the 25 fields listed (4 TABLES, 12 COLUMNS, 9 KEY_COLUMN_USAGE) and NULLs others; KEY_COLUMN_USAGE references appear only when the referenced table and column are in the set. [docs/external/rule-sets.md]\n  - VC-13: The guard rewrites each listed-table reference into a subquery selecting only listed columns under the table's name or alias; predicate columns are not readable; MySQL receives regenerated SQL without comments or optimizer hints. [docs/external/rule-sets.md]\n  - VC-14: Guard refusal lines (RuleSetGuardRunner refusal and fail-closed lines, RefusalRedactingRunner lines) include class and kept key names; an internal-error guard refusal's traceback is on a separate preceding line. [docs/external/rule-sets.md]\n  - VC-16: Doc limit: show_details returns the model's SQL before the guard rewrite; memory admin and profile admin tools are not limited by rule sets; nothing is saved to memory under rule sets. [docs/external/rule-sets.md]\n  - VC-17: The relative link [rule-sets.md](rule-sets.md) from docs/internal/database-connectors/read-only-safety.md resolves to docs/internal/database-connectors/rule-sets.md, which documents the table/column limits; criterion text expects pointing to rule sets. [docs/internal/database-connectors/read-only-safety.md]\n  - VC-18: Anchor rule-sets.md#logging-and-auditing used in configuration.md matches the heading '## Logging and Auditing'. [docs/external/configuration.md]\n  - VC-19: Changelog asserts every query_database request (while rule-set file configured) writes one audit line and refusals log the class and kept key names, never values. [changelog.d/394.added.md]\n  - VC-20: The doc asserts neither log line carries the value of any _meta field other than rule set, account and user identifiers. [docs/external/rule-sets.md]\n  - VC-21: NORMALIZED (wording-only) — refusal_log_fields in sqllens.rule_sets accepts (refusal_class, kept=None, *, metadata_discarded=False) and, when kept is omitted, reads the kept _meta key names set by set_kept_metadata_keys for the current request [src/sqllens/safety/rule_sets.py:665]\n  - VC-22: The kept-key contextvar set in query_database_impl_with_widgets is visible inside the guard runners' run_sql calls (agent tool execution runs in the same or a copied context, not one without it) [src/sqllens/tools/query_database.py:660]\n  - VC-23: Every text redacted_refusal_text returns for an UnsafeSqlError or RlsError starts with 'refusing to execute query: ' or 'refusing to execute SQL: ', so _refusal_kind yields the class without a prefix [src/sqllens/safety/rule_sets.py:717]\n  - VC-24: RuleSetRequestError exposes refusal_class, rule_set, account_id and user_id attributes, populated with the values whose checks passed (user ID invalid carries rule_set and account_id, no user_id) [src/sqllens/tools/query_database.py:665]\n  - VC-25: audit_line(outcome, rule_set=..., account_id=..., user_id=...) returns 'rule-set audit: ' followed by JSON that omits identity fields whose value is None, and accepts being called with no identity kwargs [src/sqllens/tools/query_database.py:694]\n  - VC-26: A RuleSetRequestError raised inside _query_database_turn (conversation owner, existence check) is logged as a refusal with the full selection identity assigned before the turn [src/sqllens/tools/query_database.py:670]\n  - VC-27: The _Ctx stub in test_over_limit_meta_logs_the_discard_and_names_no_keys matches how _bounded_request_metadata reads ctx.request_context.meta from the real MCP Context [tests/unit/test_rule_set_request_logging.py]\n  - VC-28: The fake_impl stubs in tests/unit/test_server.py accept metadata_discarded matching the real query_database_impl_with_widgets signature as build_server calls it [tests/unit/test_server.py]\n  - VC-29: The docstring asserts discarded is True only for a tree failing the bounds and every other {} return reports False [src/sqllens/server.py]\n  - VC-30: A request whose `_meta` has more than 64 keys is refused as rule-set key missing, and its WARNING log line says SQL Lens discarded the request metadata for exceeding its limits and names no keys. [src/sqllens/rule_sets.py:402]\n  - VC-31: Every refusal under a rule-set file is logged at WARNING once, with its refusal class and the names, never the values, of the `_meta` keys SQL Lens kept from the request; a guard refusal's class and key names are on the line #374 writes for it. [src/sqllens/rule_sets.py:389]\n  - VC-32: Every rule-set request that `query_database` receives, whatever its ending, writes exactly one INFO audit line, counted over the log records captured for that one `query_database` call. The line names the outcome (served, the pre-agent refusal class, or failed for any other ending, a turn that ends on a guard refusal and a cancelled call included) and those of the rule set, account ID and user ID that passed their checks: a served request's line names all three, and a request refused as user ID invalid names the rule set and account ID but no user ID value. [src/sqllens/rule_sets.py:409]\n  - VC-33: With no rule-set file configured, `query_database` writes no audit line and no refusal log line that it does not write today, and `[agent.audit]` stays unwired. A `query_database` call that the MCP SDK rejects for malformed arguments before `query_database` runs writes no audit line. [src/sqllens/tools/query_database.py:649-690]\n  - VC-34: A new external doc, `docs/external/rule-sets.md`, is the canonical definition of the version-1 rule-set format as SQL Lens loads it: every record, field, type, ID and identifier rule #374 states. It also states: - the config key, MySQL only, and restart to reload; - the five request classes and the `_meta` matching rules; - what the guard refuses, how it rewrites listed tables, and that a column outside the set fails as an unknown column; - the catalog rewrite and its 25 kept fields; - these limits: memory is shared by every rule set, so table and column names, SQL literal values, notes and chart data in curated memory can reach any role; the admin tools act for every rule set and belong only where end users' assistants cannot call them; `show_details` returns the SQL the model wrote, before the guard's rewrite; conversations are bound to identity; `verify-memory` is unsupported; SQL Lens trusts `_meta`, so any caller that can reach `query_database` chooses its rule set; `agent.standing_instructions` is shared by every rule set; a calling application that drops its own `_meta` keys looks like one that sent none; rule-set queries run with `HIGH_NOT_PRECEDENCE` and `NO_BACKSLASH_ESCAPES` off, and `||`, double-quoted text and backslashes in the model's SQL are read as MySQL's default `sql_mode` reads them (`OR`, strings and escapes), whatever the server's mode; `PARTITION` lists and index hints are refused and optimizer hints are dropped; `CAST(x AS REAL)` loses precision; a query without `ORDER BY` can return rows in the order of an index on a hidden column; an unqualified name the set hides can resolve to a same-named column of another table in the query; and syntax sqlglot writes back in a form MySQL rejects fails, or is refused when sqlglot cannot write it for MySQL. - It uses synthetic names only. [docs/external/rule-sets.md]\n  - VC-35: `docs/external/row-level-security.md`'s \"Rules filter rows, not columns\" limit and `docs/internal/database-connectors/read-only-safety.md`'s \"there is no table allow/deny-list\" sentence point to rule sets for table and column limits on MySQL. `docs/external/configuration.md` documents the new config key and says in its `[agent.audit]` section that the rule-set audit line is written whatever `enabled` says, `docs/external/index.md` links the new doc, and `docs/internal/setup/preflight.md` states that the database probe runs the existence check when a rule-set file is configured. [docs/internal/setup/preflight.md]\n\n  </details>\n- Reviewed against issue #380 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] A request whose `_meta` has more than 64 keys is refused as rule-set key missing, and its WARNING log line says SQL Lens discarded the request metadata for exceeding its limits and names no keys.\n- [ ] Every refusal under a rule-set file is logged at WARNING once, with its refusal class and the names, never the values, of the `_meta` keys SQL Lens kept from the request; a guard refusal's class and key names are on the line #374 writes for it.\n- [ ] Every rule-set request that `query_database` receives, whatever its ending, writes exactly one INFO audit line, counted over the log records captured for that one `query_database` call. The line names the outcome (served, the pre-agent refusal class, or failed for any other ending, a turn that ends on a guard refusal and a cancelled call included) and those of the rule set, account ID and user ID that passed their checks: a served request's line names all three, and a request refused as user ID invalid names the rule set and account ID but no user ID value.\n- [ ] With no rule-set file configured, `query_database` writes no audit line and no refusal log line that it does not write today, and `[agent.audit]` stays unwired. A `query_database` call that the MCP SDK rejects for malformed arguments before `query_database` runs writes no audit line.\n- [ ] A new external doc, `docs/external/rule-sets.md`, is the canonical definition of the version-1 rule-set format as SQL Lens loads it: every record, field, type, ID and identifier rule #374 states. It also states: - the config key, MySQL only, and restart to reload; - the five request classes and the `_meta` matching rules; - what the guard refuses, how it rewrites listed tables, and that a column outside the set fails as an unknown column; - the catalog rewrite and its 25 kept fields; - these limits: memory is shared by every rule set, so table and column names, SQL literal values, notes and chart data in curated memory can reach any role; the admin tools act for every rule set and belong only where end users' assistants cannot call them; `show_details` returns the SQL the model wrote, before the guard's rewrite; conversations are bound to identity; `verify-memory` is unsupported; SQL Lens trusts `_meta`, so any caller that can reach `query_database` chooses its rule set; `agent.standing_instructions` is shared by every rule set; a calling application that drops its own `_meta` keys looks like one that sent none; rule-set queries run with `HIGH_NOT_PRECEDENCE` and `NO_BACKSLASH_ESCAPES` off, and `||`, double-quoted text and backslashes in the model's SQL are read as MySQL's default `sql_mode` reads them (`OR`, strings and escapes), whatever the server's mode; `PARTITION` lists and index hints are refused and optimizer hints are dropped; `CAST(x AS REAL)` loses precision; a query without `ORDER BY` can return rows in the order of an index on a hidden column; an unqualified name the set hides can resolve to a same-named column of another table in the query; and syntax sqlglot writes back in a form MySQL rejects fails, or is refused when sqlglot cannot write it for MySQL. - It uses synthetic names only.\n- [ ] `docs/external/row-level-security.md`'s \"Rules filter rows, not columns\" limit and `docs/internal/database-connectors/read-only-safety.md`'s \"there is no table allow/deny-list\" sentence point to rule sets for table and column limits on MySQL. `docs/external/configuration.md` documents the new config key and says in its `[agent.audit]` section that the rule-set audit line is written whatever `enabled` says, `docs/external/index.md` links the new doc, and `docs/internal/setup/preflight.md` states that the database probe runs the existence check when a rule-set file is configured.",
+ "diff_produced_at_head": "9027c4e83d32c8f30a6effd8277d81f566f73a3d",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "api_contract:rule_sets.py:refusal-log-fields-callers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "absolute_claim:rule_sets.py:key-name-cannot-break-line:397",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "data_format_assumption:rule_sets.py:audit-line-format",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "api_contract:rule_sets.py:refusal-identity-attachment",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:rule_sets.py:refusal-class-prefix",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:rule-sets.md:audit-finally-once",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:tools.md:bounded-metadata-signature",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "data_format_assumption:rule-sets.md:meta-size-bounds",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "data_format_assumption:rule-sets.md:meta-matching-rules",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "data_format_assumption:rule-sets.md:format-reference-table",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "absolute_claim:rule-sets.md:names-compared-exactly",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "data_format_assumption:rule-sets.md:catalog-kept-fields",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "api_contract:rule-sets.md:table-subquery-rewrite",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "api_contract:rule-sets.md:guard-line-fields",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "category": "api_contract",
+   "claim": "Rule-set queries run with HIGH_NOT_PRECEDENCE and NO_BACKSLASH_ESCAPES removed from session sql_mode; CAST(x AS REAL) is sent as CAST(x AS FLOAT); PARTITION lists and index hints refused.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "docs/external/rule-sets.md",
+   "verify_against": "MySQL runner session setup and sqlglot MySQL generator",
+   "verify_hint": "Find sql_mode adjustment in the MySQL runner/integration and the guard's partition/index-hint refusal; check sqlglot MySQL type mapping for REAL",
+   "claim_signature": "api_contract:rule-sets.md:sql-mode-and-syntax-limits",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-15"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Verified: sql_mode removal. factory.py:67 defines RULE_SET_REMOVED_SQL_MODES={HIGH_NOT_PRECEDENCE,NO_BACKSLASH_ESCAPES}, passed as remove_sql_modes when rule_sets is not None (factory.py:116); mysql/sql_runner.py:129-139 reads @@SESSION.sql_mode, filters those flags and runs SET SESSION sql_mode. PARTITION/index-hint refusal: safety/rule_sets.py:84,225 raise RuleSetRefusal(KIND_TABLE_OPTIONS) for table option args. Not verified: the CAST(x AS REAL) -> CAST(x AS FLOAT) claim. It depends on sqlglot's MySQL generator type mapping; no dependency_sources were supplied, no sqlglot source exists in the views (Glob for sqlglot/dialects/mysql.py found none), and the repo has no test or code asserting the REAL to FLOAT output (grep 'AS REAL' only hits the doc line). rule_sets.py:580 regenerates SQL with dialect mysql, so the mapping would apply, but I could not read it. Missing evidence: sqlglot dialects/mysql.py and generator.py TYPE_MAPPING, or running sqlglot.transpile('SELECT CAST(x AS REAL)', read='mysql', write='mysql').",
+   "file_checked": "src/sqllens/agent/integrations/mysql/sql_runner.py:126-139",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:rule-sets.md:show-details-model-sql",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:read-only-safety.md:rule-sets-link",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:configuration.md:logging-anchor",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "absolute_claim:394.added.md:every-request-audit",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "absolute_claim:rule-sets.md:no-meta-values-logged",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "dependency_interaction:rule_sets.py:refusal-log-fields-signature",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "api_contract:query_database.py:kept-keys-contextvar-propagation",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "data_format_assumption:rule_sets.py:redacted-prefix-strip",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "api_contract:query_database.py:request-error-identity-attrs",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "dependency_interaction:query_database.py:audit-line-format",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "api_contract:query_database.py:turn-refusal-identity",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "test_mock_alignment:test_rule_set_request_logging.py:ctx-stub-meta",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "test_mock_alignment:test_server.py:fake-impl-signature",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "absolute_claim:server.py:discarded-flag-only-bounds",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-30",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-31",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-32",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-33",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-34",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-35",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}

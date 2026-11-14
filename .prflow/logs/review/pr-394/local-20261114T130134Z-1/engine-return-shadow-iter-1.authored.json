@@ -1,0 +1,22 @@
+{
+  "root_completeness": "established",
+  "verdict": "APPROVE with notes",
+  "phase3_findings": [
+    {"finding_id": "F-1", "agent": "prflow:silent-failure-hunter", "severity": "suggestion", "corroboration": 1, "description": "Only the JsonBoundsError arm of _bounded_request_metadata returns discarded=True; the meta-read-error, non-dict meta, key-iteration-error and unexpected-exception arms also drop the whole _meta but return ({}, False), so the refusal line reads kept _meta keys=[] as if the caller sent nothing.", "defect_signature": {"file": "src/sqllens/server.py", "line_range": [315, 341], "kind": "logic_error"}},
+    {"finding_id": "F-2", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "corroboration": 1, "description": "RuleSetRequestError.refusal_class strips the 'Request refused: ' prefix by convention; a message lacking it becomes the whole class, and the passed-checks rule for identity fields lives only at raise sites. _refusal_kind in safety/rule_sets.py repeats the prefix parsing.", "defect_signature": {"file": "src/sqllens/rule_sets.py", "line_range": [347, 368], "kind": "type_design"}},
+    {"finding_id": "F-3", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "corroboration": 1, "description": "audit_line outcome is a free-form str and identity travels as dict[str, Any] splatted into audit_line(**identity); a misspelled key would raise TypeError inside the finally block and replace the call's result or exception.", "defect_signature": {"file": "src/sqllens/tools/query_database.py", "line_range": [658, 689], "kind": "type_design"}},
+    {"finding_id": "F-4", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "corroboration": 1, "description": "metadata_discarded is a separate bool next to metadata, so a non-empty metadata with metadata_discarded=True is representable and refusal_log_fields would name no keys; the only producer keeps them consistent today.", "defect_signature": {"file": "src/sqllens/server.py", "line_range": null, "kind": "type_design"}},
+    {"finding_id": "F-5", "agent": "prflow:pr-test-analyzer", "severity": "suggestion", "corroboration": 1, "description": "RefusalRedactingRunner's branch for an UnsafeSqlError or RlsError no guard logged first now logs class and kept-key fields, but no test asserts them.", "defect_signature": {"file": "src/sqllens/safety/rule_sets.py", "line_range": [791, 799], "kind": "test_gap"}},
+    {"finding_id": "F-6", "agent": "prflow:pr-test-analyzer", "severity": "suggestion", "corroboration": 1, "description": "test_no_rule_set_file_writes_no_audit_or_refusal_line only checks no message contains 'rule-set', so a differently worded new refusal line on the no-rule-set path would pass.", "defect_signature": {"file": "tests/unit/test_rule_set_request_logging.py", "line_range": [255, 263], "kind": "test_gap"}}
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": true, "test_relevant": true, "detect_all_audit": false, "checklist_skipped": null},
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": []
+}
