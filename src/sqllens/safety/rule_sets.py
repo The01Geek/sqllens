@@ -606,6 +606,10 @@ REDACTED_PARSE = "refusing to execute SQL: could not parse SQL"
 REDACTED_GUARD_ERROR = "refusing to execute query: " + KIND_UNCHECKED
 REDACTED_FUNCTION = "refusing to execute SQL: the query calls a function the guard does not allow"
 REDACTED_READ_ONLY = "refusing to execute SQL: only a single SELECT query is allowed"
+REDACTED_LOCKING_READ = (
+    "refusing to execute SQL: locking reads (FOR UPDATE, FOR SHARE, LOCK IN SHARE MODE)"
+    " are not allowed"
+)
 REDACTED_VIEW = "refusing to execute query: the query reads a database view"
 REDACTED_ROUTINE = "refusing to execute query: the query calls a function the database defines"
 REDACTED_RELATION = "refusing to execute query: the query's relations could not be verified"
@@ -651,6 +655,8 @@ def redacted_refusal_text(exc: Exception) -> str:
         return REDACTED_WHOLE_ROW
     if "side-effecting / DoS / RCE" in message:
         return REDACTED_FUNCTION
+    if "locking reads are not allowed" in message:
+        return REDACTED_LOCKING_READ
     return REDACTED_READ_ONLY
 
 
