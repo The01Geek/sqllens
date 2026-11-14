@@ -10,10 +10,10 @@ This guide walks you through installing SQL Lens, pointing it at the bundled Chi
 
 ## 1. Install the CLI
 
-Install SQL Lens together with all optional database drivers:
+Install SQL Lens. The MySQL driver is included:
 
 ```bash
-pip install "sqllens[all]"
+pip install sqllens
 ```
 
 Confirm the install:

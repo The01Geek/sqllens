@@ -1204,8 +1204,8 @@ def test_format_config_error_passes_through_settingserror() -> None:
 
 
 def test_format_config_error_passes_through_importerror() -> None:
-    # ImportError messages are a module name only (missing optional DB driver
-    # extra) — allowlisted and actionable, no config value.
+    # ImportError messages are a module name only (a broken install missing a
+    # dependency) — allowlisted and actionable, no config value.
     from sqllens.cli import _format_config_error
 
     rendered = _format_config_error(ImportError("No module named 'pymysql'"))

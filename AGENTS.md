@@ -85,15 +85,16 @@ The agent code originated as a fork of an MIT-licensed upstream project. The leg
 ## Commands
 
 ```bash
-# Install (editable, with dev + all DB drivers), constrained to the same
+# Install (editable, with dev tools), constrained to the same
 # locked versions CI uses. Use this exact command in any agent/cloud setup script.
-pip install -c requirements.txt -c docker/requirements-drivers.txt -e ".[dev,all]"
+pip install -c requirements.txt -e ".[dev,all]"
 
 # Lint + tests (default run does not collect tests/connectors/, which needs real DBs)
 ruff check .
 pytest -q
 
-# Connector tests (need SQLLENS_TEST_MYSQL_URL, a live MySQL 8.0+ database).
+# Connector tests (live MySQL 8.0+). They fail without SQLLENS_TEST_MYSQL_URL and
+# SQLLENS_TEST_MYSQL_OTHER_DATABASE, a second database the test user can write.
 pytest -q tests/connectors
 
 # Run the server (after `sqllens init` writes a sqllens.toml)

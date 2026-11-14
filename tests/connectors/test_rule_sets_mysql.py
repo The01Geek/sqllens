@@ -4,9 +4,10 @@
 """Per-role rule sets against a real MySQL 8.0+ database (issue #374).
 
 Needs ``SQLLENS_TEST_MYSQL_URL`` (a user that can create tables, views and
-stored functions). Tables carry an ``rs_`` prefix; the example set lists
-``rs_customers`` (``id``, ``name``; individual tests add the predicate column
-``rep_id``) and
+stored functions) and ``SQLLENS_TEST_MYSQL_OTHER_DATABASE`` (a second database
+that user can write); a test fails when either is missing. Tables carry an
+``rs_`` prefix; the example set lists ``rs_customers`` (``id``, ``name``;
+individual tests add the predicate column ``rep_id``) and
 ``rs_orders`` (``id``, ``customer_id``, ``total``), on tables that also have
 ``email``, ``discount`` and ``account_id`` columns, plus an ``rs_salaries``
 table, an ``rs_customer_view`` view and an ``rs_shout`` stored function.
@@ -14,7 +15,6 @@ table, an ``rs_customer_view`` view and an ``rs_shout`` stored function.
 
 from __future__ import annotations
 
-import os
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -22,7 +22,9 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 import pandas as pd
+import pymysql
 import pytest
+from _settings import MYSQL_OTHER_DATABASE, MYSQL_URL, require_setting
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
 from sqllens.agent.core.tool import ToolContext
@@ -47,14 +49,9 @@ from sqllens.safety.rule_sets import RefusalRedactingRunner, RuleSetGuardRunner,
 
 pytestmark = pytest.mark.asyncio
 
-pymysql = pytest.importorskip("pymysql")
-
 
 def _url() -> str:
-    url = os.environ.get("SQLLENS_TEST_MYSQL_URL")
-    if not url:
-        pytest.skip("SQLLENS_TEST_MYSQL_URL not set; skipping connector test")
-    return url
+    return require_setting(MYSQL_URL)
 
 
 def _connect(url: str) -> Any:
@@ -131,9 +128,9 @@ def _rule_set_toml(database: str, tables: dict[str, tuple[str, ...]],
     return "\n".join(lines) + "\n"
 
 
-def _other_database() -> str | None:
+def _other_database() -> str:
     """A second database the test user can write, named by ``SQLLENS_TEST_MYSQL_OTHER_DATABASE``."""
-    return os.environ.get("SQLLENS_TEST_MYSQL_OTHER_DATABASE") or None
+    return require_setting(MYSQL_OTHER_DATABASE)
 
 
 def _other_setup(other: str) -> list[str]:
@@ -153,13 +150,14 @@ def _other_setup(other: str) -> list[str]:
 def database() -> Iterator[str]:
     url = _url()
     other = _other_database()
-    teardown = [*_TEARDOWN]
-    if other:
-        teardown.append(f"DROP TABLE IF EXISTS `{other}`.rs_orders, `{other}`.rs_customers")
+    teardown = [
+        *_TEARDOWN,
+        f"DROP TABLE IF EXISTS `{other}`.rs_orders, `{other}`.rs_customers",
+    ]
     conn = _connect(url)
     try:
         cursor = conn.cursor()
-        for statement in [*_SETUP, *(_other_setup(other) if other else [])]:
+        for statement in [*_SETUP, *_other_setup(other)]:
             cursor.execute(statement)
     except Exception:
         # Best-effort cleanup, one statement at a time so a failed DROP does
@@ -607,8 +605,6 @@ async def test_key_column_usage_lists_only_keys_inside_the_set(
 async def test_other_database_keys_exist_but_are_hidden(database, tmp_path, selected) -> None:
     """The same-named tables and cross-database key the main KCU test must hide are present."""
     other = _other_database()
-    if other is None:
-        pytest.skip("SQLLENS_TEST_MYSQL_OTHER_DATABASE not set; other-database rows not checked")
     schema = urlparse(database).path.lstrip("/")
     unguarded = _unguarded(
         database,
