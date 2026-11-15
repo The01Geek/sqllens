@@ -276,6 +276,13 @@ function renderHeader() {
   }
 }
 
+// Flat RLS stays listed; a rule set is listed when its label, scope or a table matches.
+function entryVisible(e) {
+  if (e.key === FLAT || matches(e.label) || matches(e.scope)) return true;
+  const rs = ruleSets().find((x) => x.name === e.key);
+  return Boolean(rs && rs.tables.some((t) => matches(t.name)));
+}
+
 function renderEntries() {
   const ul = document.getElementById("entries");
   ul.textContent = "";
@@ -284,10 +291,7 @@ function renderEntries() {
     entries.push({ key: rs.name, label: "Rule set " + rs.name, unconfirmed: rs.refused_unconfirmed, scope: rs.scope });
   }
   for (const e of entries) {
-    if (e.key !== FLAT && !matches(e.label) && !matches(e.scope)) {
-      const rs = ruleSets().find((x) => x.name === e.key);
-      if (!rs || !rs.tables.some((t) => matches(t.name))) continue;
-    }
+    if (!entryVisible(e)) continue;
     const li = node_("li");
     if (state.selected === e.key) li.classList.add("selected");
     li.append(node_("span", null, e.label));
@@ -373,7 +377,9 @@ function renderDetail() {
   }
   if (state.selected === FLAT) { renderFlat(body); return; }
   const rs = ruleSets().find((x) => x.name === state.selected);
-  if (rs) renderRuleSet(body, rs);
+  if (rs && entryVisible({ key: rs.name, label: "Rule set " + rs.name, scope: rs.scope })) {
+    renderRuleSet(body, rs);
+  } else if (rs) body.append(node_("div", "placeholder", "The selected rule set does not match the search."));
   else body.append(node_("div", "placeholder", "Select an entry."));
 }
 
