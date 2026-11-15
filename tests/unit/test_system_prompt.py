@@ -458,7 +458,7 @@ async def test_no_engine_keeps_todays_catalog_example_and_no_database_section() 
     ) in prompt
 
 
-@pytest.mark.parametrize("dialect", ["mysql", "sqlite", None])
+@pytest.mark.parametrize("dialect", ["mysql", None])
 @pytest.mark.parametrize("with_memory_tools", [False, True])
 async def test_tool_errors_bullets(dialect: str | None, with_memory_tools: bool) -> None:
     tools = (
@@ -678,7 +678,7 @@ def test_builder_and_config_share_delimiters() -> None:
 # refusal is routed to a corrected retry rather than quote-and-ask.
 
 
-@pytest.mark.parametrize("dialect", ["mysql", "sqlite", None])
+@pytest.mark.parametrize("dialect", ["mysql", None])
 async def test_data_confidentiality_declines_whole_table_exports(dialect: str | None) -> None:
     section = _section(await _prompt(dialect), "Data Confidentiality:")
     assert section[0] == (

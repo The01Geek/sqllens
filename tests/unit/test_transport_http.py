@@ -55,15 +55,14 @@ from sqllens.transport.http import (
 
 from ._agent_stubs import StubAgent
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CHINOOK_DB = REPO_ROOT / "examples" / "sqlite-demo" / "chinook.db"
+_MYSQL_URL = "mysql+pymysql://u@db.invalid/shop"
 
 
 def _cfg(tmp_path: Path) -> Config:
     return Config.model_construct(
         database=DatabaseConfig(
-            url=f"sqlite:///{CHINOOK_DB}",
-            name="chinook-unit",
+            url=_MYSQL_URL,
+            name="shop-unit",
             read_only=True,
         ),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test-not-used")),
@@ -200,7 +199,7 @@ def _stub_eager_build_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     to ``prime_agent`` → ``get_agent`` → ``build_agent``. The agent singleton
     lives in ``sqllens.tools._agent`` (used by ``query_database``), so the
     build seam and the process-wide
-    ``_AGENT_STATE`` are patched there. Building a real agent (sqlite connect +
+    ``_AGENT_STATE`` are patched there. Building a real agent (the
     object graph) on a clean-startup path would be irrelevant work for tests
     that exercise the ASGI lifespan state machine. The integration suite (a
     different module, unaffected by this fixture) pins the real warmup
@@ -875,7 +874,7 @@ def test_is_loopback_host_non_string_fails_closed() -> None:
 def _cfg_with(tmp_path: Path, *, auth: AuthConfig, host: str) -> Config:
     return Config.model_construct(
         database=DatabaseConfig(
-            url=f"sqlite:///{CHINOOK_DB}", name="chinook-unit", read_only=True
+            url=_MYSQL_URL, name="shop-unit", read_only=True
         ),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test-not-used")),
         memory=MemoryConfig(persist_dir=tmp_path / "chroma", collection="test"),

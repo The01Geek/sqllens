@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import types
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
+
+from ._fake_pymysql import install_fake_pymysql
 
 
 class _PrimaryError(Exception):
@@ -37,22 +37,6 @@ class _SecondaryCloseError(Exception):
 # ---------------------------------------------------------------------------
 # MySQL
 # ---------------------------------------------------------------------------
-
-
-def _install_fake_pymysql(
-    monkeypatch: pytest.MonkeyPatch, connect_factory: Any
-) -> None:
-    pymysql = types.ModuleType("pymysql")
-    cursors_mod = types.ModuleType("pymysql.cursors")
-    cursors_mod.DictCursor = type("DictCursor", (), {})
-    # The SELECT path streams via a server-side cursor (PR #58 / #80); the fake
-    # must expose the same attribute the runner now references.
-    cursors_mod.SSDictCursor = type("SSDictCursor", (), {})
-    pymysql.cursors = cursors_mod
-    pymysql.connect = connect_factory
-    pymysql.Error = Exception
-    monkeypatch.setitem(sys.modules, "pymysql", pymysql)
-    monkeypatch.setitem(sys.modules, "pymysql.cursors", cursors_mod)
 
 
 async def test_mysql_runner_preserves_primary_when_close_raises(
@@ -74,7 +58,7 @@ async def test_mysql_runner_preserves_primary_when_close_raises(
     conn.cursor.return_value = cursor
     conn.close.side_effect = _SecondaryCloseError("broken pipe on close")
 
-    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+    install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
@@ -105,7 +89,7 @@ async def test_mysql_runner_close_failure_alone_does_not_raise(
     conn.cursor.return_value = cursor
     conn.close.side_effect = _SecondaryCloseError("broken pipe on close")
 
-    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+    install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
@@ -123,7 +107,7 @@ async def test_mysql_runner_closes_conn_when_cursor_allocation_raises(
     conn = MagicMock()
     conn.cursor.side_effect = _PrimaryError("connection died before cursor allocation")
 
-    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+    install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
@@ -144,7 +128,7 @@ async def test_mysql_runner_closes_conn_when_read_only_session_setup_raises(
     conn = MagicMock()
     conn.cursor.return_value = setup
 
-    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+    install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
@@ -176,7 +160,7 @@ async def test_mysql_runner_propagates_cancellation(
     conn = MagicMock()
     conn.cursor.return_value = cursor
 
-    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+    install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
@@ -197,7 +181,7 @@ async def test_mysql_runner_propagates_keyboard_interrupt(
     conn = MagicMock()
     conn.cursor.return_value = cursor
 
-    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+    install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
@@ -222,7 +206,7 @@ async def test_mysql_runner_streams_comment_led_read(
     cursor.fetchmany.return_value = [{"x": 1}]
     conn = MagicMock()
     conn.cursor.return_value = cursor
-    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+    install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 

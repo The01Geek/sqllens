@@ -53,7 +53,7 @@ def test_loads_minimal_toml(tmp_path: Path) -> None:
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"
@@ -61,7 +61,7 @@ def test_loads_minimal_toml(tmp_path: Path) -> None:
         )
     )
     cfg = Config.load(cfg_path)
-    assert cfg.database.url == "sqlite:///./demo.db"
+    assert cfg.database.url == "mysql+pymysql://u@db.invalid/demo"
     assert cfg.database.read_only is True
     assert cfg.llm.provider == "anthropic"
     assert cfg.auth.mode == "none"
@@ -74,7 +74,7 @@ def test_env_var_override(tmp_path: Path, monkeypatch) -> None:
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-from-toml"
@@ -94,7 +94,7 @@ def test_agent_max_tool_iterations_env_override(tmp_path: Path, monkeypatch) -> 
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"
@@ -113,7 +113,7 @@ def test_agent_defaults_when_section_omitted(tmp_path: Path) -> None:
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"
@@ -128,7 +128,7 @@ def test_bom_prefixed_toml_raises_actionable_error(tmp_path: Path) -> None:
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_bytes(
         b"\xef\xbb\xbf"
-        + b'[database]\nurl = "sqlite:///./demo.db"\n[llm]\napi_key = "sk-ant-test"\n'
+        + b'[database]\nurl = "mysql+pymysql://u@db.invalid/demo"\n[llm]\napi_key = "sk-ant-test"\n'
     )
     with pytest.raises(ValueError) as exc:
         Config.load(cfg_path)
@@ -155,8 +155,8 @@ def test_bom_free_malformed_toml_preserves_original_error(tmp_path: Path) -> Non
 @pytest.mark.parametrize(
     "toml_body",
     [
-        '[database]\nurl = "sqlite:///./demo.db"\n[llm]\n',
-        '[database]\nurl = "sqlite:///./demo.db"\n',
+        '[database]\nurl = "mysql+pymysql://u@db.invalid/demo"\n[llm]\n',
+        '[database]\nurl = "mysql+pymysql://u@db.invalid/demo"\n',
     ],
     ids=["empty-llm-table", "no-llm-table"],
 )
@@ -178,7 +178,7 @@ def test_cli_validate_exits_one_without_api_key(tmp_path: Path) -> None:
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             """
@@ -200,7 +200,7 @@ def test_cli_serve_fails_without_api_key(tmp_path: Path) -> None:
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             """
@@ -227,7 +227,7 @@ def test_env_api_key_satisfies_missing_toml_key(tmp_path: Path, monkeypatch) -> 
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             """
@@ -250,7 +250,7 @@ def test_failed_load_does_not_leak_sqllens_config(tmp_path: Path, monkeypatch) -
     # up the bad path.
     monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
     bad = tmp_path / "bad.toml"
-    bad.write_bytes(b"\xef\xbb\xbf[database]\nurl = \"sqlite:///./demo.db\"\n")
+    bad.write_bytes(b"\xef\xbb\xbf[database]\nurl = \"mysql+pymysql://u@db.invalid/demo\"\n")
     with pytest.raises(ValueError):
         Config.load(bad)
     import os
@@ -289,7 +289,7 @@ def test_cli_validate_rejects_bearer_token_without_bearer_mode(tmp_path: Path) -
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"
@@ -320,7 +320,7 @@ def test_cli_validate_rejects_env_bearer_token_without_bearer_mode(
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"
@@ -342,7 +342,7 @@ def _bearer_no_token_toml() -> str:
     return textwrap.dedent(
         """\
         [database]
-        url = "sqlite:///./demo.db"
+        url = "mysql+pymysql://u@db.invalid/demo"
 
         [llm]
         api_key = "sk-ant-test"
@@ -398,7 +398,7 @@ def test_env_bearer_mode_without_token_rejected_at_load(
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"
@@ -425,7 +425,7 @@ def test_env_bearer_mode_with_blank_token_rejected_at_load(
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"
@@ -450,7 +450,7 @@ def test_build_agent_raises_when_api_key_missing(tmp_path: Path) -> None:
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             """

@@ -27,7 +27,7 @@ import pytest
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
 
-from .test_sql_runner_cleanup import _install_fake_pymysql
+from ._fake_pymysql import install_fake_pymysql
 
 SLOW_S = 0.4
 TICK_S = 0.02
@@ -87,7 +87,7 @@ async def test_mysql_runner_does_not_block_event_loop(
 ) -> None:
     conn = MagicMock()
     conn.cursor.return_value = _slow_cursor()
-    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+    install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 

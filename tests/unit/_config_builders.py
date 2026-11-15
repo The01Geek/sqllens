@@ -43,7 +43,7 @@ def build_test_config(
     that fail ``Literal`` validation in some test environments).
     """
     return Config(
-        database=DatabaseConfig(url="sqlite:///:memory:"),
+        database=DatabaseConfig(url="mysql+pymysql://u@db.invalid/shop"),
         llm=llm or LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(
             persist_dir=persist_dir,

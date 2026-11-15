@@ -47,9 +47,9 @@ def _wide_df(n_rows: int, *, capped_at: int | None = None) -> pd.DataFrame:
     return df
 
 
-async def _run(df: pd.DataFrame, sql: str = "SELECT c FROM t") -> Any:
+async def _run(df: pd.DataFrame, sql: str = "SELECT c FROM t", dialect: str = "mysql") -> Any:
     tool = RunSqlTool(
-        sql_runner=_StaticRunner(df), file_system=_NoopFileSystem(), dialect="sqlite"
+        sql_runner=_StaticRunner(df), file_system=_NoopFileSystem(), dialect=dialect
     )
     return await tool.execute(_Ctx(), RunSqlToolArgs(sql=sql))
 
@@ -92,8 +92,15 @@ async def test_uncut_result_gets_no_display_line() -> None:
 
 
 @pytest.mark.asyncio
-async def test_schema_lookup_gets_no_display_line() -> None:
-    out = await _run(_wide_df(300), "SELECT name FROM sqlite_master")
+@pytest.mark.parametrize(
+    ("dialect", "sql"),
+    [
+        ("sqlite", "SELECT name FROM sqlite_master"),
+        ("mysql", "SELECT table_name FROM information_schema.tables"),
+    ],
+)
+async def test_schema_lookup_gets_no_display_line(dialect: str, sql: str) -> None:
+    out = await _run(_wide_df(300), sql, dialect)
     assert "user's table" not in out.result_for_llm
 
 

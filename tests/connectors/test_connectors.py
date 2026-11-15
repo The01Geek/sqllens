@@ -116,6 +116,69 @@ async def test_select_star_masks_driver_labelled_secret_column(mysql_url) -> Non
         await execute(f"DROP TABLE IF EXISTS {table}")
 
 
+async def test_alias_and_expression_masking_follow_driver_labels(mysql_url) -> None:
+    # Masking reads the label the driver gives each column: a non-secret alias
+    # hides the secret column, while an unaliased expression keeps its name.
+    table = f"mask_{uuid.uuid4().hex}"
+    writer = build_sql_runner(mysql_url, read_only=False)
+
+    async def execute(sql: str) -> None:
+        await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+    await execute(f"CREATE TABLE {table} (id INTEGER, password_hash TEXT)")
+    try:
+        await execute(f"INSERT INTO {table} VALUES (1, 'sentinel-hash')")
+        guard = ResultMaskingRunner(RowCapRunner(build_sql_runner(mysql_url), max_rows=10))
+        aliased = await guard.run_sql(
+            RunSqlToolArgs(sql=f"SELECT password_hash AS h FROM {table}"), _ctx()
+        )
+        assert aliased.to_dict(orient="records") == [{"h": "sentinel-hash"}]
+        expression = await guard.run_sql(
+            RunSqlToolArgs(sql=f"SELECT upper(password_hash) FROM {table}"), _ctx()
+        )
+        assert expression.to_dict(orient="records") == [{"upper(password_hash)": "[withheld]"}]
+    finally:
+        await execute(f"DROP TABLE IF EXISTS {table}")
+
+
+@pytest.mark.parametrize(
+    ("shape", "expected"),
+    [
+        ("SELECT id FROM {orders} ORDER BY id", [1]),
+        ("SELECT id FROM {public} ORDER BY id", [1, 2]),
+        ("WITH {orders} AS (SELECT 3 AS id) SELECT id FROM {orders}", [3]),
+        ("SELECT id FROM {public} WHERE id IN (SELECT id FROM {orders}) ORDER BY id", [1]),
+        ("SELECT (SELECT max(id) FROM {orders}) AS id FROM {public} ORDER BY id", [1, 1]),
+    ],
+)
+async def test_rls_query_shapes_return_scoped_rows(mysql_url, shape, expected) -> None:
+    suffix = uuid.uuid4().hex
+    orders, public = f"rls_orders_{suffix}", f"rls_public_{suffix}"
+    writer = build_sql_runner(mysql_url, read_only=False)
+
+    async def execute(sql: str) -> None:
+        await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+    try:
+        await execute(f"CREATE TABLE {orders} (id INTEGER, tenant_id TEXT)")
+        await execute(f"CREATE TABLE {public} (id INTEGER)")
+        await execute(f"INSERT INTO {orders} VALUES (1, 'alpha'), (2, 'beta')")
+        await execute(f"INSERT INTO {public} VALUES (1), (2)")
+        guard = RlsGuardRunner(
+            ReadOnlyGuardRunner(
+                RowCapRunner(build_sql_runner(mysql_url), max_rows=10), dialect="mysql"
+            ),
+            [RlsRule(table=orders, column="tenant_id", value="alpha")],
+            dialect="mysql",
+        )
+        sql = shape.format(orders=orders, public=public)
+        result = await guard.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+        assert result["id"].tolist() == expected
+    finally:
+        await execute(f"DROP TABLE IF EXISTS {orders}")
+        await execute(f"DROP TABLE IF EXISTS {public}")
+
+
 def _rls_guard(url: str, dialect: str) -> RlsGuardRunner:
     return RlsGuardRunner(
         ReadOnlyGuardRunner(RowCapRunner(build_sql_runner(url), max_rows=10), dialect=dialect),

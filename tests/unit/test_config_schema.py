@@ -55,7 +55,7 @@ def _minimal_toml(tmp_path: Path, extra: str = "") -> Path:
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"
@@ -295,12 +295,12 @@ def test_audit_log_level_rejects_trace() -> None:
 
 
 def test_config_version_defaults_to_one() -> None:
-    cfg = Config(database=DatabaseConfig(url="sqlite:///demo.db"))
+    cfg = Config(database=DatabaseConfig(url="mysql+pymysql://u@db.invalid/demo"))
     assert cfg.config_version == 1
 
 
 def test_config_version_accepted_explicitly() -> None:
-    cfg = Config(database=DatabaseConfig(url="sqlite:///demo.db"), config_version=7)
+    cfg = Config(database=DatabaseConfig(url="mysql+pymysql://u@db.invalid/demo"), config_version=7)
     assert cfg.config_version == 7
 
 
@@ -314,7 +314,7 @@ def test_config_version_toml_override(tmp_path: Path) -> None:
             config_version = 2
 
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"
@@ -338,7 +338,7 @@ def test_bom_error_path_resolves_toml_path_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bom_toml = tmp_path / "sqllens.toml"
-    bom_toml.write_bytes(b"\xef\xbb\xbf[database]\nurl = 'sqlite:///x.db'\n")
+    bom_toml.write_bytes(b"\xef\xbb\xbf[database]\nurl = 'mysql+pymysql://u@db.invalid/x'\n")
 
     real = config_mod._resolved_toml_path
     calls = 0
@@ -387,11 +387,11 @@ def test_load_does_not_leak_toml_path_into_direct_construction(
     # subsequent direct Config(...) construction resolves independently and
     # does not parse against the prior load's TOML.
     other = tmp_path / "other.toml"
-    other.write_text('[database]\nurl = "sqlite:///from-toml.db"\n')
+    other.write_text('[database]\nurl = "mysql+pymysql://u@db.invalid/from_toml"\n')
     Config.load(other)
 
-    cfg = Config(database=DatabaseConfig(url="sqlite:///direct.db"))
-    assert cfg.database.url == "sqlite:///direct.db"
+    cfg = Config(database=DatabaseConfig(url="mysql+pymysql://u@db.invalid/direct"))
+    assert cfg.database.url == "mysql+pymysql://u@db.invalid/direct"
 
 
 def test_failed_non_bom_load_resets_toml_path(tmp_path: Path) -> None:
@@ -409,8 +409,8 @@ def test_failed_non_bom_load_resets_toml_path(tmp_path: Path) -> None:
     with pytest.raises(LookupError):
         config_mod._LOAD_TOML_PATH.get()
 
-    cfg = Config(database=DatabaseConfig(url="sqlite:///direct.db"))
-    assert cfg.database.url == "sqlite:///direct.db"
+    cfg = Config(database=DatabaseConfig(url="mysql+pymysql://u@db.invalid/direct"))
+    assert cfg.database.url == "mysql+pymysql://u@db.invalid/direct"
 
 
 def test_bom_error_path_resets_toml_path(tmp_path: Path) -> None:
@@ -418,7 +418,7 @@ def test_bom_error_path_resets_toml_path(tmp_path: Path) -> None:
     # ValueError -> message swap -> ContextVar reset -> env restore. Assert
     # the var is cleared so a later direct construction resolves fresh.
     bom_toml = tmp_path / "sqllens.toml"
-    bom_toml.write_bytes(b"\xef\xbb\xbf[database]\nurl = 'sqlite:///x.db'\n")
+    bom_toml.write_bytes(b"\xef\xbb\xbf[database]\nurl = 'mysql+pymysql://u@db.invalid/x'\n")
     with pytest.raises(ValueError, match="UTF-8 BOM"):
         Config.load(bom_toml)
 
@@ -426,8 +426,8 @@ def test_bom_error_path_resets_toml_path(tmp_path: Path) -> None:
     with pytest.raises(LookupError):
         config_mod._LOAD_TOML_PATH.get()
 
-    cfg = Config(database=DatabaseConfig(url="sqlite:///direct.db"))
-    assert cfg.database.url == "sqlite:///direct.db"
+    cfg = Config(database=DatabaseConfig(url="mysql+pymysql://u@db.invalid/direct"))
+    assert cfg.database.url == "mysql+pymysql://u@db.invalid/direct"
 
 
 def test_load_toml_path_is_context_isolated(tmp_path: Path) -> None:
@@ -435,7 +435,9 @@ def test_load_toml_path_is_context_isolated(tmp_path: Path) -> None:
     # running in one context must not leak its resolved path into another.
     # Pin that property so a regression to a plain global is caught.
     cfg_path = tmp_path / "sqllens.toml"
-    cfg_path.write_text('[database]\nurl = "sqlite:///ctx.db"\n[llm]\napi_key = "sk-ant-test"\n')
+    cfg_path.write_text(
+        '[database]\nurl = "mysql+pymysql://u@db.invalid/ctx"\n[llm]\napi_key = "sk-ant-test"\n'
+    )
     ctx = contextvars.copy_context()
     ctx.run(Config.load, cfg_path)
     # The load mutated _LOAD_TOML_PATH only inside `ctx`; the parent context
@@ -451,13 +453,13 @@ def test_load_restores_prior_sqllens_config(
     # set and calls Config.load(explicit_path) must get SQLLENS_CONFIG restored
     # to its prior value, not popped.
     toml_a = tmp_path / "a.toml"
-    toml_a.write_text('[database]\nurl = "sqlite:///a.db"\n')
+    toml_a.write_text('[database]\nurl = "mysql+pymysql://u@db.invalid/a"\n')
     toml_b = tmp_path / "b.toml"
-    toml_b.write_text('[database]\nurl = "sqlite:///b.db"\n')
+    toml_b.write_text('[database]\nurl = "mysql+pymysql://u@db.invalid/b"\n')
 
     monkeypatch.setenv("SQLLENS_CONFIG", str(toml_a))
     cfg = Config.load(toml_b)
-    assert cfg.database.url == "sqlite:///b.db"
+    assert cfg.database.url == "mysql+pymysql://u@db.invalid/b"
     assert os.environ["SQLLENS_CONFIG"] == str(toml_a)
 
 
@@ -469,11 +471,12 @@ def test_direct_config_honors_sqllens_config_env_via_fallback(
     # SQLLENS_CONFIG (the fallback's non-None path branch).
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
-        '[database]\nurl = "sqlite:///from-env-toml.db"\n[llm]\napi_key = "sk-ant-test"\n'
+        '[database]\nurl = "mysql+pymysql://u@db.invalid/from_env_toml"\n'
+        '[llm]\napi_key = "sk-ant-test"\n'
     )
     monkeypatch.setenv("SQLLENS_CONFIG", str(cfg_path))
     cfg = Config()
-    assert cfg.database.url == "sqlite:///from-env-toml.db"
+    assert cfg.database.url == "mysql+pymysql://u@db.invalid/from_env_toml"
 
 
 # --- extra="forbid" backward-compatibility contract ------------------------
@@ -491,7 +494,7 @@ def test_unknown_top_level_key_rejected(tmp_path: Path) -> None:
             bogus_top_level = 1
 
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"

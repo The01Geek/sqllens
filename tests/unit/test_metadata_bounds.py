@@ -43,7 +43,7 @@ def test_oversized_metadata_is_discarded_and_dynamic_rls_fails_closed(extras):
     with pytest.raises(RlsError, match="not supplied"):
         apply_rls("SELECT * FROM orders", [RlsRule(
             table="orders", column="tenant_id", value_from_metadata="tenant"
-        )], metadata=result, dialect="sqlite")
+        )], metadata=result, dialect="mysql")
 
 
 def test_rule_set_key_limit_counts_every_meta_key_not_only_the_forwarded_ones():

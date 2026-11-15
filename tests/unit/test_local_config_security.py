@@ -107,7 +107,7 @@ def test_validation_never_assigns_supplied_api_key_to_environment(
     tmp_path, monkeypatch, invalid
 ) -> None:
     path = tmp_path / "config.toml"
-    path.write_text("invalid = [" if invalid else '[database]\nurl="sqlite:///:memory:"\n')
+    path.write_text("invalid = [" if invalid else '[database]\nurl="mysql+pymysql://u@db.invalid/shop"\n')
     monkeypatch.setenv("SQLLENS_LLM__API_KEY", "existing-synthetic-key")
     written = []
     original_set = os._Environ.__setitem__
@@ -129,14 +129,14 @@ def test_validation_never_assigns_supplied_api_key_to_environment(
 def test_config_load_key_override_preserves_other_sources(tmp_path, monkeypatch) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
-        '[database]\nurl="sqlite:///:memory:"\n[llm]\nmodel="model-from-file"\nmax_tokens=200\n'
+        '[database]\nurl="mysql+pymysql://u@db.invalid/shop"\n[llm]\nmodel="model-from-file"\nmax_tokens=200\n'
     )
     monkeypatch.setenv("SQLLENS_LLM__MAX_TOKENS", "300")
     monkeypatch.setenv("SQLLENS_LLM__API_KEY", "environment-key")
     cfg = Config.load(path, llm_api_key="explicit-key")
     assert cfg.llm.api_key.get_secret_value() == "explicit-key"
     assert cfg.llm.model == "model-from-file" and cfg.llm.max_tokens == 300
-    assert cfg.database.url == "sqlite:///:memory:"
+    assert cfg.database.url == "mysql+pymysql://u@db.invalid/shop"
 
 
 @pytest.mark.parametrize(
@@ -189,7 +189,7 @@ def test_installer_invalid_port_diagnostic_withholds_value(base_options) -> None
 
 def test_explicit_key_does_not_bypass_bom_diagnostic(tmp_path) -> None:
     path = tmp_path / "config.toml"
-    path.write_bytes(b'\xef\xbb\xbf[database]\nurl="sqlite:///:memory:"\n')
+    path.write_bytes(b'\xef\xbb\xbf[database]\nurl="mysql+pymysql://u@db.invalid/shop"\n')
     with pytest.raises(ConfigBomError):
         Config.load(path, llm_api_key="explicit-synthetic-key")
 

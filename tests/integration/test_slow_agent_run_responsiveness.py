@@ -173,7 +173,7 @@ async def test_health_and_list_data_sources_answer_during_slow_agent_runs(
                 quick.cancel()
                 await asyncio.gather(quick, return_exceptions=True)
                 pytest.fail(f"list_data_sources did not answer within {QUICK_TIMEOUT_S} s")
-            assert "chinook-test" in quick.result()
+            assert "shop-test" in quick.result()
             # The quick requests finished while the agent runs were still held.
             assert not any(run.done() for run in held)
         except BaseException:

@@ -68,14 +68,16 @@ def test_run_sql_scratch_anchored_to_absolute_tempdir(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("url", "dialect", "query_type"),
+    ("url", "dialect", "sql", "query_type"),
     [
-        ("mysql+pymysql://u:p@db.internal:3306/shop", "mysql", "SELECT"),
-        ("sqlite:///:memory:", "sqlite", ""),
+        ("mysql+pymysql://u:p@db.internal:3306/shop", "mysql", "# c\nSELECT n FROM t", "SELECT"),
+        ("sqlite:///:memory:", "sqlite", "# c\nSELECT n FROM t", ""),
+        # The same symbol-led statement in MySQL syntax, where "#" would open a comment.
+        ("mysql+pymysql://u:p@db.internal:3306/shop", "mysql", "? c\nSELECT n FROM t", ""),
     ],
 )
 async def test_run_sql_classifies_with_database_dialect(
-    tmp_path: Path, url: str, dialect: str, query_type: str
+    tmp_path: Path, url: str, dialect: str, sql: str, query_type: str
 ) -> None:
     """Issue #304: ``RunSqlTool`` must classify with the dialect the runner uses.
 
@@ -109,9 +111,9 @@ async def test_run_sql_classifies_with_database_dialect(
 
     run_sql_tool.sql_runner = _Rows()
     run_sql_tool.file_system = _Files()
-    out = await run_sql_tool.execute(None, RunSqlToolArgs(sql="# c\nSELECT n FROM t"))
+    out = await run_sql_tool.execute(None, RunSqlToolArgs(sql=sql))
     assert out.metadata["query_type"] == query_type
-    assert ("results" in out.metadata) is (dialect == "mysql")
+    assert ("results" in out.metadata) is (query_type == "SELECT")
 
 
 def test_default_max_tool_iterations_is_twenty(tmp_path: Path) -> None:
@@ -354,7 +356,7 @@ async def test_save_text_memory_tool_omitted_when_field_unset(
     exercises the field default rather than an explicit value.
     """
     cfg = Config(
-        database=DatabaseConfig(url="sqlite:///:memory:"),
+        database=DatabaseConfig(url="mysql+pymysql://u@db.invalid/shop"),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
         auth=AuthConfig(mode="none"),
@@ -434,7 +436,7 @@ def test_memory_similarity_threshold_flows_into_search_tool(tmp_path: Path) -> N
     argument — otherwise the operator-facing config knob is dead (issue #76).
     """
     cfg = Config(
-        database=DatabaseConfig(url="sqlite:///:memory:"),
+        database=DatabaseConfig(url="mysql+pymysql://u@db.invalid/shop"),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(persist_dir=tmp_path / "chroma", similarity_threshold=0.42),
         auth=AuthConfig(mode="none"),
@@ -456,7 +458,7 @@ def test_memory_thresholds_flow_into_context_enhancer(tmp_path: Path) -> None:
     all (it rides ``Agent``'s 0.7/0.7 fallback), so this pins the wiring.
     """
     cfg = Config(
-        database=DatabaseConfig(url="sqlite:///:memory:"),
+        database=DatabaseConfig(url="mysql+pymysql://u@db.invalid/shop"),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(
             persist_dir=tmp_path / "chroma",
@@ -487,12 +489,12 @@ def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None
     runner. With the setting on (the default), WholeRowSelectGuardRunner sits
     between masking and the read-only guard.
     """
-    from sqllens.agent.integrations.sqlite import SqliteRunner
+    from sqllens.agent.integrations.mysql import MySQLRunner
     from sqllens.safety import ReadOnlyGuardRunner, ResultMaskingRunner, RowCapRunner
 
     cfg = Config(
         database=DatabaseConfig(
-            url="sqlite:///:memory:",
+            url="mysql+pymysql://u@db.invalid/shop",
             statement_timeout_ms=1234,
             max_rows=77,
             # Off so the stack below asserts the shape without the whole-row
@@ -516,7 +518,7 @@ def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None
     assert isinstance(cap, RowCapRunner)
     assert cap._max_rows == 77
     inner = cap._inner
-    assert isinstance(inner, SqliteRunner)
+    assert isinstance(inner, MySQLRunner)
     assert inner._statement_timeout_ms == 1234
     assert inner._max_rows == 77
 
@@ -535,12 +537,12 @@ def test_readonly_guard_wraps_iff_read_only_enabled(
     between them, and with the whole-row setting on (the default),
     ``WholeRowSelectGuardRunner`` sits beneath masking.
     """
-    from sqllens.agent.integrations.sqlite import SqliteRunner
+    from sqllens.agent.integrations.mysql import MySQLRunner
     from sqllens.safety import ReadOnlyGuardRunner, ResultMaskingRunner
 
     cfg = Config(
         database=DatabaseConfig(
-            url="sqlite:///:memory:",
+            url="mysql+pymysql://u@db.invalid/shop",
             read_only=read_only,
             # Off so the stack below asserts the shape without the whole-row
             # guard, which test_safety_whole_row.py pins directly beneath
@@ -579,7 +581,7 @@ def test_readonly_guard_wraps_iff_read_only_enabled(
     leaf = runner
     while getattr(leaf, "_inner", None) is not None:
         leaf = leaf._inner
-    assert isinstance(leaf, SqliteRunner)
+    assert isinstance(leaf, MySQLRunner)
     assert leaf._read_only is read_only
 
 

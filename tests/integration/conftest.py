@@ -3,8 +3,8 @@
 
 """Integration test fixtures for SQL Lens HTTP transport.
 
-The fixtures here spin up a real uvicorn server in a thread, pointed at the
-bundled SQLite Chinook DB, with a configurable auth mode. We use a real
+The fixtures here spin up a real uvicorn server in a thread, configured for
+a MySQL database it never connects to, with a configurable auth mode. We use a real
 ``mcp`` SDK client over Streamable HTTP — these tests prove the wire protocol
 works, not just our internal abstractions.
 
@@ -36,8 +36,9 @@ from sqllens.config import (
 )
 from sqllens.transport.http import build_asgi_app
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CHINOOK_DB = REPO_ROOT / "examples" / "sqlite-demo" / "chinook.db"
+# The reserved .invalid domain does not resolve under a conforming resolver, so
+# a real connect cannot reach a developer's local server.
+MYSQL_URL = "mysql+pymysql://u@db.invalid/shop"
 
 
 def _free_port() -> int:
@@ -63,8 +64,8 @@ def _make_config(
 ) -> Config:
     return Config.model_construct(
         database=DatabaseConfig(
-            url=f"sqlite:///{CHINOOK_DB}",
-            name="chinook-test",
+            url=MYSQL_URL,
+            name="shop-test",
             read_only=True,
         ),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test-not-used")),
