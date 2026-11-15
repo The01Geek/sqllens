@@ -51,8 +51,10 @@ from sqllens.safety.masking import (
 from sqllens.tools._format import components_to_blocks
 
 from ._agent_stubs import StubAgentMemory
+from ._fake_pymysql import FakeMySQL, mysql_runner
 
 W = "[withheld]"
+_MYSQL_URL = "mysql+pymysql://u@db.invalid/shop"
 
 # --- word rule -------------------------------------------------------------
 
@@ -466,7 +468,7 @@ def test_relation_check_unwraps_the_masking_guard() -> None:
 
 
 def test_absent_section_uses_builtin_list_with_no_exemptions() -> None:
-    cfg = Config(database=DatabaseConfig(url="sqlite:///:memory:"))
+    cfg = Config(database=DatabaseConfig(url=_MYSQL_URL))
     assert cfg.result_masking.extra_words == []
     assert cfg.result_masking.unmasked_columns == []
 
@@ -495,7 +497,7 @@ def test_invalid_section_fails_naming_the_setting(section: dict, needle: str) ->
 def _write_toml(tmp_path: Path, extra: str) -> Path:
     path = tmp_path / "sqllens.toml"
     path.write_text(
-        '[database]\nurl = "sqlite:///:memory:"\n[llm]\napi_key = "sk-ant-x"\n' + extra
+        f'[database]\nurl = "{_MYSQL_URL}"\n[llm]\napi_key = "sk-ant-x"\n' + extra
     )
     return path
 
@@ -602,7 +604,7 @@ def _cfg(  # type: ignore[no-untyped-def]
 ) -> Config:
     return Config(
         database=DatabaseConfig(
-            url="sqlite:///:memory:",
+            url=_MYSQL_URL,
             read_only=read_only,
             refuse_whole_row_selects=whole_row,
         ),
@@ -646,7 +648,7 @@ def test_masking_guard_is_outermost(
     assert WholeRowSelectGuardRunner not in chain
     if rls:
         executor = _relation_check_executor(inner._inner)
-        assert type(executor).__name__ == "SqliteRunner"
+        assert type(executor).__name__ == "MySQLRunner"
 
 
 def test_config_reaches_the_guard(tmp_path: Path) -> None:
@@ -677,24 +679,23 @@ def test_labels_without_an_entry_word_stay_unmasked(label: str) -> None:
     assert not SecretColumnMatcher().is_secret(label)
 
 
-def test_sqlite_alias_hides_secret_but_unaliased_expression_is_masked(tmp_path: Path) -> None:
-    import sqlite3
+def test_mysql_alias_hides_secret_but_unaliased_expression_is_masked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The keys are the column labels MySQL 8.0 and PyMySQL's SSDictCursor give
+    # these statements; the connector suite checks them against a live server.
+    server = FakeMySQL()
+    server.install(monkeypatch)
+    guard = ResultMaskingRunner(mysql_runner())
 
-    from sqllens.agent.integrations.sqlite import SqliteRunner
-
-    db = tmp_path / "u.db"
-    conn = sqlite3.connect(db)
-    conn.execute("CREATE TABLE users (id INTEGER, password_hash TEXT)")
-    conn.execute("INSERT INTO users VALUES (1, 'SENTINEL-HASH')")
-    conn.commit()
-    conn.close()
-    guard = ResultMaskingRunner(SqliteRunner(database_path=str(db)))
-
+    server.rows = [{"h": "SENTINEL-HASH"}]
     aliased = asyncio.run(
         guard.run_sql(RunSqlToolArgs(sql="SELECT password_hash AS h FROM users"), _context())
     )
     assert aliased["h"].tolist() == ["SENTINEL-HASH"]
+    server.rows = [{"upper(password_hash)": "SENTINEL-HASH"}]
     expression = asyncio.run(
         guard.run_sql(RunSqlToolArgs(sql="SELECT upper(password_hash) FROM users"), _context())
     )
+    assert expression.columns.tolist() == ["upper(password_hash)"]
     assert expression.iloc[0, 0] == W

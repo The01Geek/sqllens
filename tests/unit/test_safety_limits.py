@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for ``RowCapRunner`` and the SQLite runner's row-cap + timeout."""
+"""Unit tests for ``RowCapRunner`` and the runners' row cap and timeout."""
 
 from __future__ import annotations
 
@@ -21,6 +21,10 @@ from sqllens.safety.limits import (
     RowCapRunner,
     mark_truncation,
 )
+
+from ._fake_pymysql import FakeMySQL, mysql_runner
+
+_MYSQL_URL = "mysql+pymysql://u@db.invalid/shop"
 
 
 def _ctx() -> Any:
@@ -88,35 +92,29 @@ class TestRowCapRunner:
             RowCapRunner(_StaticRunner(pd.DataFrame()), max_rows=0)
 
 
-class TestSqliteRunnerCap:
+class TestMySQLRunnerCap:
     @pytest.mark.asyncio
     async def test_fetchmany_caps_at_max_rows_and_marks_truncation(
-        self, tmp_path: Path
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        db_path = tmp_path / "rows.db"
-        # Populate 50 rows so a cap of 10 must truncate.
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE t (n INTEGER)")
-        conn.executemany("INSERT INTO t (n) VALUES (?)", [(i,) for i in range(50)])
-        conn.commit()
-        conn.close()
+        # 50 rows on the server, so a cap of 10 must truncate.
+        server = FakeMySQL(rows=[{"n": i} for i in range(50)])
+        server.install(monkeypatch)
 
-        runner = SqliteRunner(database_path=str(db_path), max_rows=10)
+        runner = mysql_runner(max_rows=10)
         df = await runner.run_sql(RunSqlToolArgs(sql="SELECT n FROM t"), _ctx())
         assert len(df) == 10
         assert df.attrs[TRUNCATED_ATTR] is True
         assert df.attrs[MAX_ROWS_ATTR] == 10
+        [query] = server.only_connection.query_cursors
+        assert query.fetchmany_sizes == [11]
 
     @pytest.mark.asyncio
-    async def test_no_truncation_when_under_cap(self, tmp_path: Path) -> None:
-        db_path = tmp_path / "rows.db"
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE t (n INTEGER)")
-        conn.executemany("INSERT INTO t (n) VALUES (?)", [(i,) for i in range(5)])
-        conn.commit()
-        conn.close()
+    async def test_no_truncation_when_under_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        server = FakeMySQL(rows=[{"n": i} for i in range(5)])
+        server.install(monkeypatch)
 
-        runner = SqliteRunner(database_path=str(db_path), max_rows=10)
+        runner = mysql_runner(max_rows=10)
         df = await runner.run_sql(RunSqlToolArgs(sql="SELECT n FROM t"), _ctx())
         assert len(df) == 5
         assert df.attrs[TRUNCATED_ATTR] is False
@@ -198,7 +196,7 @@ class TestFirstSqlKeyword:
 
         assert first_sql_keyword(sql) == expected
 
-    @pytest.mark.parametrize("dialect", [None, "sqlite", "mysql"])
+    @pytest.mark.parametrize("dialect", [None, "mysql"])
     @pytest.mark.parametrize("keyword", ["SELECT", "WITH"])
     @pytest.mark.parametrize(
         "prefix",
@@ -212,7 +210,7 @@ class TestFirstSqlKeyword:
         body = "SELECT 1" if keyword == "SELECT" else "WITH x AS (SELECT 1) SELECT * FROM x"
         assert first_sql_keyword(prefix + body, dialect) == keyword
 
-    @pytest.mark.parametrize("dialect", [None, "sqlite", "mysql"])
+    @pytest.mark.parametrize("dialect", [None, "mysql"])
     @pytest.mark.parametrize("sql", ["SELECT*FROM t", "SELECT/* c */1", "select*from t"])
     def test_keyword_touching_symbol(self, sql: str, dialect: str | None) -> None:
         from sqllens.safety import first_sql_keyword
@@ -221,7 +219,7 @@ class TestFirstSqlKeyword:
 
     @pytest.mark.parametrize(
         ("dialect", "expected"),
-        [("mysql", "C"), ("sqlite", "C")],
+        [("mysql", "C")],
     )
     def test_nested_block_comment_follows_engine(self, dialect: str, expected: str) -> None:
         from sqllens.safety import first_sql_keyword
@@ -275,7 +273,7 @@ class TestFirstSqlKeyword:
             assert first_sql_keyword(sql, "no-such-dialect") == first_sql_keyword(sql)
         assert "unknown sqlglot dialect 'no-such-dialect'" in caplog.text
 
-    @pytest.mark.parametrize("dialect", [None, "sqlite", "mysql"])
+    @pytest.mark.parametrize("dialect", [None, "mysql"])
     @pytest.mark.parametrize("sql", ["-- c\nSELECT 'x", "/* unterminated SELECT 1"])
     def test_untokenizable_sql_is_empty(self, sql: str, dialect: str | None) -> None:
         from sqllens.safety import first_sql_keyword
@@ -304,16 +302,16 @@ class TestFirstSqlKeyword:
     @pytest.mark.parametrize(
         ("sql", "dialect", "expected"),
         [
-            ("-- c\nSELECT n FROM t", "sqlite", True),
+            ("-- c\nSELECT n FROM t", "mysql", True),
             ("/* c */ WITH x AS (SELECT 1) SELECT * FROM x", "mysql", True),
             ("/* c */ SHOW TABLES", "mysql", True),
-            ("SELECT*FROM t", "sqlite", True),
+            ("SELECT*FROM t", "mysql", True),
             ("# c\nSELECT 1", "mysql", True),
-            ("SELECT n FROM widgets /* note", "sqlite", False),
+            ("SELECT n FROM widgets /* note", "mysql", False),
             ("SHOW 'abc", "mysql", False),
             ("/* c */ SHOW 'abc", "mysql", False),
             ("EXPLAIN SELECT 1", "mysql", False),
-            ("VALUES (1)", "sqlite", False),
+            ("VALUES (1)", "mysql", False),
         ],
     )
     def test_is_read_shaped_by_dialect(self, sql: str, dialect: str, expected: bool) -> None:
@@ -322,7 +320,7 @@ class TestFirstSqlKeyword:
         assert is_read_shaped(sql, dialect) is expected
 
 
-class TestSqliteRunnerCteRowCap:
+class TestMySQLRunnerCteRowCap:
     """Regression: CTE queries (`WITH ... SELECT`) must honor max_rows.
 
     Before the fix, the runner classified by first keyword == "SELECT" only,
@@ -331,42 +329,35 @@ class TestSqliteRunnerCteRowCap:
     """
 
     @pytest.mark.asyncio
-    async def test_cte_row_cap_truncates(self, tmp_path: Path) -> None:
-        db_path = tmp_path / "cte.db"
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE t (n INTEGER)")
-        conn.executemany("INSERT INTO t (n) VALUES (?)", [(i,) for i in range(50)])
-        conn.commit()
-        conn.close()
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "WITH src AS (SELECT n FROM t) SELECT n FROM src",
+            # The exact attack shape from issue #37: WITH RECURSIVE with no LIMIT.
+            "WITH RECURSIVE x(n) AS ("
+            "  SELECT 1 UNION ALL SELECT n + 1 FROM x WHERE n < 100"
+            ") SELECT n FROM x",
+        ],
+    )
+    async def test_cte_row_cap_truncates(
+        self, monkeypatch: pytest.MonkeyPatch, sql: str
+    ) -> None:
+        server = FakeMySQL(rows=[{"n": i} for i in range(50)])
+        server.install(monkeypatch)
 
-        sql = "WITH src AS (SELECT n FROM t) SELECT n FROM src"
-        runner = SqliteRunner(database_path=str(db_path), max_rows=10)
+        runner = mysql_runner(max_rows=10, read_only=False)
         df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
 
         # The streaming branch produced an "n" column, not a rows_affected DF.
+        conn = server.only_connection
+        [query] = conn.query_cursors
+        assert [(e.cursor, e.sql) for e in conn.executed] == [("SSDictCursor", sql)]
+        assert query.fetchmany_sizes == [11]
         assert "n" in df.columns
         assert "rows_affected" not in df.columns
         assert len(df) == 10
         assert df.attrs[TRUNCATED_ATTR] is True
         assert df.attrs[MAX_ROWS_ATTR] == 10
-
-    @pytest.mark.asyncio
-    async def test_recursive_cte_row_cap_truncates(self, tmp_path: Path) -> None:
-        """The exact attack shape from issue #37: WITH RECURSIVE with no LIMIT."""
-        db_path = tmp_path / "rcte.db"
-        sql = (
-            "WITH RECURSIVE x(n) AS ("
-            "  SELECT 1 UNION ALL SELECT n + 1 FROM x WHERE n < 100"
-            ") SELECT n FROM x"
-        )
-        # read_only=False: exercises the row-cap primitive, not read-only.
-        # The default mode=ro URI can't open a not-yet-created temp DB file.
-        runner = SqliteRunner(database_path=str(db_path), max_rows=10, read_only=False)
-        df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
-
-        assert "n" in df.columns
-        assert len(df) == 10
-        assert df.attrs[TRUNCATED_ATTR] is True
 
 
 class TestSqliteRunnerTimeout:
@@ -488,29 +479,34 @@ class TestRunSqlToolTruncationSurface:
         assert out.metadata["row_count"] == 0
 
 
-def _widgets_db(tmp_path: Path, rows: int) -> str:
-    db_path = tmp_path / "widgets.db"
-    conn = sqlite3.connect(db_path)
-    conn.execute("CREATE TABLE widgets (n INTEGER, label TEXT)")
-    conn.executemany(
-        "INSERT INTO widgets (n, label) VALUES (?, ?)", [(i, f"w{i}") for i in range(rows)]
-    )
-    conn.commit()
-    conn.close()
-    return str(db_path)
+def _widgets(monkeypatch: pytest.MonkeyPatch, rows: int, **kwargs: Any) -> FakeMySQL:
+    server = FakeMySQL(rows=[{"n": i, "label": f"w{i}"} for i in range(rows)], **kwargs)
+    server.install(monkeypatch)
+    return server
 
 
-class TestSqliteRunnerCommentLedRowCap:
+class TestMySQLRunnerCommentLedRowCap:
     """Issue #304: a comment-led or touching-symbol read used to take the write
     branch and return a one-row ``rows_affected`` frame."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "sql", ["-- note\nSELECT n, label FROM widgets", "SELECT*FROM widgets"]
+        "sql",
+        [
+            "-- note\nSELECT n, label FROM widgets",
+            "# note\nSELECT n, label FROM widgets",
+            "SELECT*FROM widgets",
+        ],
     )
-    async def test_read_is_streamed_and_capped(self, tmp_path: Path, sql: str) -> None:
-        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 50), max_rows=10)
+    async def test_read_is_streamed_and_capped(
+        self, monkeypatch: pytest.MonkeyPatch, sql: str
+    ) -> None:
+        server = _widgets(monkeypatch, 50)
+        runner = mysql_runner(max_rows=10)
         df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+        [query] = server.only_connection.query_cursors
+        assert server.only_connection.executed[-1].cursor == "SSDictCursor"
+        assert query.fetchmany_sizes == [11]
         assert list(df.columns) == ["n", "label"]
         assert list(df["n"]) == list(range(10))
         assert df.attrs[TRUNCATED_ATTR] is True
@@ -540,26 +536,33 @@ class TestRunSqlToolReadShapedResults:
             ("WITH w AS (SELECT n FROM widgets) SELECT n FROM w", "WITH"),
             ("-- note\nSELECT n FROM widgets", "SELECT"),
             ("/* note */ SELECT n FROM widgets", "SELECT"),
+            ("# note\nSELECT n FROM widgets", "SELECT"),
             ("SELECT n FROM widgets", "SELECT"),
         ],
     )
-    async def test_sqlite_reads_return_rows(
-        self, tmp_path: Path, sql: str, query_type: str
+    async def test_runner_reads_return_rows(
+        self, monkeypatch: pytest.MonkeyPatch, sql: str, query_type: str
     ) -> None:
         from sqllens.agent.tools.run_sql import RunSqlTool
 
-        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 3), max_rows=100)
-        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+        server = FakeMySQL(rows=[{"n": 0}, {"n": 1}, {"n": 2}])
+        server.install(monkeypatch)
+        runner = mysql_runner(max_rows=100)
+        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="mysql")
         out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
+        assert server.only_connection.executed[-1].cursor == "SSDictCursor"
         self._assert_table(out, query_type, [{"n": 0}, {"n": 1}, {"n": 2}])
         assert out.result_for_llm.startswith("n\n0\n1\n2\n")
 
     @pytest.mark.asyncio
-    async def test_sqlite_touching_symbol_read_returns_rows(self, tmp_path: Path) -> None:
+    async def test_touching_symbol_read_returns_rows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from sqllens.agent.tools.run_sql import RunSqlTool
 
-        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 2), max_rows=100)
-        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+        _widgets(monkeypatch, 2)
+        runner = mysql_runner(max_rows=100)
+        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="mysql")
         out = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT*FROM widgets"))
         self._assert_table(out, "SELECT", [{"n": 0, "label": "w0"}, {"n": 1, "label": "w1"}])
 
@@ -585,11 +588,12 @@ class TestRunSqlToolReadShapedResults:
         self._assert_table(out, query_type, [{"n": 1}, {"n": 2}])
 
     @pytest.mark.asyncio
-    async def test_empty_read_reports_no_rows(self, tmp_path: Path) -> None:
+    async def test_empty_read_reports_no_rows(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from sqllens.agent.tools.run_sql import RunSqlTool
 
-        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 3), max_rows=100)
-        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+        _widgets(monkeypatch, 0)
+        runner = mysql_runner(max_rows=100)
+        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="mysql")
         sql = "WITH w AS (SELECT n FROM widgets WHERE n > 99) SELECT n FROM w"
         out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
         assert out.success is True
@@ -606,7 +610,7 @@ class TestRunSqlToolReadShapedResults:
         df = pd.DataFrame()
         mark_truncation(df, truncated=True, max_rows=5)
         tool = RunSqlTool(
-            sql_runner=_StaticRunner(df), file_system=_NoopFileSystem(), dialect="sqlite"
+            sql_runner=_StaticRunner(df), file_system=_NoopFileSystem(), dialect="mysql"
         )
         sql = "-- c\nWITH w AS (SELECT 1) SELECT * FROM w"
         out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
@@ -619,17 +623,22 @@ class TestRunSqlToolReadShapedResults:
         "sql",
         ["UPDATE widgets SET n = n + 1", "SELECT n FROM widgets /* note"],
     )
-    async def test_not_read_shaped_gets_rows_affected(self, tmp_path: Path, sql: str) -> None:
+    async def test_not_read_shaped_gets_rows_affected(
+        self, monkeypatch: pytest.MonkeyPatch, sql: str
+    ) -> None:
         # read_only off: these reach the runner's write branch. The unterminated
-        # comment does not tokenize, so it is not read-shaped though SQLite runs it.
+        # comment does not tokenize, so it is not read-shaped.
         from sqllens.agent.components import NotificationComponent
         from sqllens.agent.tools.run_sql import RunSqlTool
 
-        runner = SqliteRunner(
-            database_path=_widgets_db(tmp_path, 3), max_rows=100, read_only=False
-        )
-        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+        server = _widgets(monkeypatch, 3, rowcount=3)
+        runner = mysql_runner(max_rows=100, read_only=False)
+        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="mysql")
         out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
+        assert [(e.cursor, e.sql) for e in server.only_connection.executed] == [
+            ("DictCursor", sql)
+        ]
+        assert server.only_connection.committed
         assert out.success is True
         assert "row(s) affected" in out.result_for_llm
         assert isinstance(out.ui_component.rich_component, NotificationComponent)
@@ -658,18 +667,21 @@ class TestRunSqlToolReadShapedResults:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("read_only", [True, False])
     @pytest.mark.parametrize("sql", ["", "   \n\t"])
-    async def test_empty_sql_fails(self, tmp_path: Path, sql: str, read_only: bool) -> None:
+    async def test_empty_sql_fails(
+        self, monkeypatch: pytest.MonkeyPatch, sql: str, read_only: bool
+    ) -> None:
         from sqllens.agent.tools.run_sql import RunSqlTool
         from sqllens.safety import ReadOnlyGuardRunner
 
-        runner: SqlRunner = SqliteRunner(
-            database_path=_widgets_db(tmp_path, 1), max_rows=10, read_only=read_only
-        )
+        server = _widgets(monkeypatch, 1)
+        runner: SqlRunner = mysql_runner(max_rows=10, read_only=read_only)
         if read_only:
-            runner = ReadOnlyGuardRunner(runner, dialect="sqlite")
-        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+            runner = ReadOnlyGuardRunner(runner, dialect="mysql")
+        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="mysql")
         out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
         assert out.success is False
+        assert "SQL is empty" in out.result_for_llm
+        assert server.connections == []
 
 
 class TestRunnerNegativeTimeoutRejection:
@@ -721,7 +733,7 @@ class TestDatabaseConfigTimeoutUpperBound:
             # 3_000_000_000 ms ≈ 35 days — classic unit-confusion typo (likely
             # microseconds intended, or someone treating the field as a
             # nanosecond/microsecond knob).
-            DatabaseConfig(url="sqlite:///x.db", statement_timeout_ms=3_000_000_000)
+            DatabaseConfig(url=_MYSQL_URL, statement_timeout_ms=3_000_000_000)
 
     def test_rejects_just_above_24h(self) -> None:
         """Pin the off-by-one: 86_400_001 must reject so a future ``le``→``lt``
@@ -731,10 +743,10 @@ class TestDatabaseConfigTimeoutUpperBound:
         from sqllens.config import DatabaseConfig
 
         with pytest.raises(ValidationError):
-            DatabaseConfig(url="sqlite:///x.db", statement_timeout_ms=86_400_001)
+            DatabaseConfig(url=_MYSQL_URL, statement_timeout_ms=86_400_001)
 
     def test_accepts_exactly_24h(self) -> None:
         from sqllens.config import DatabaseConfig
 
-        cfg = DatabaseConfig(url="sqlite:///x.db", statement_timeout_ms=86_400_000)
+        cfg = DatabaseConfig(url=_MYSQL_URL, statement_timeout_ms=86_400_000)
         assert cfg.statement_timeout_ms == 86_400_000
