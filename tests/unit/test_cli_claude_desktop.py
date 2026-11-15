@@ -48,7 +48,7 @@ FAKE_KEY = "sk-ant-test-fake"
 class TestTomlGeneration:
     def test_no_bom_in_generated_toml(self, tmp_path: Path) -> None:
         toml = generate_toml(
-            db_url="sqlite:///./demo.db",
+            db_url="mysql+pymysql://u@db.invalid/demo",
             db_name="demo",
             read_only=True,
             model="claude-opus-5-5",
@@ -63,7 +63,7 @@ class TestTomlGeneration:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         toml = generate_toml(
-            db_url="sqlite:///./demo.db",
+            db_url="mysql+pymysql://u@db.invalid/demo",
             db_name="demo",
             read_only=True,
             model="claude-opus-5-5",
@@ -75,7 +75,7 @@ class TestTomlGeneration:
         from sqllens.config import Config
 
         cfg = Config.load(path)
-        assert cfg.database.url == "sqlite:///./demo.db"
+        assert cfg.database.url == "mysql+pymysql://u@db.invalid/demo"
         assert cfg.database.name == "demo"
         assert cfg.database.read_only is True
         assert cfg.llm.model == "claude-opus-5-5"
@@ -86,7 +86,7 @@ class TestTomlGeneration:
         # TOML literal strings (single-quoted) avoid the backslash-escape trap.
         windows_path = r"C:\Users\dan\sqllens\chroma"
         toml = generate_toml(
-            db_url="sqlite:///./demo.db",
+            db_url="mysql+pymysql://u@db.invalid/demo",
             db_name="demo",
             read_only=True,
             model="claude-opus-5-5",
@@ -105,7 +105,7 @@ class TestTomlGeneration:
 
     def test_toml_omits_api_key(self, tmp_path: Path) -> None:
         toml = generate_toml(
-            db_url="sqlite:///./demo.db",
+            db_url="mysql+pymysql://u@db.invalid/demo",
             db_name="demo",
             read_only=True,
             model="claude-opus-5-5",
@@ -304,7 +304,7 @@ def fake_config_json(tmp_path: Path) -> Path:
 @pytest.fixture
 def base_options(tmp_path: Path, fake_config_json: Path) -> InstallOptions:
     return InstallOptions(
-        db_url="sqlite:///./demo.db",
+        db_url="mysql+pymysql://u@db.invalid/demo",
         api_key=FAKE_KEY,
         name="demo",
         model="claude-opus-5-5",
@@ -837,7 +837,7 @@ class TestResolveOptions:
         cfg = tmp_path / "claude_desktop_config.json"
         cfg.write_text("{}", encoding="utf-8")
         opts = resolve_options(
-            db_url="sqlite:///./demo.db",
+            db_url="mysql+pymysql://u@db.invalid/demo",
             api_key=None,
             name=None,
             model="claude-opus-5-5",
@@ -856,7 +856,7 @@ class TestResolveOptions:
         cfg.write_text("{}", encoding="utf-8")
         with pytest.raises(InstallError, match="API key is required"):
             resolve_options(
-                db_url="sqlite:///./demo.db",
+                db_url="mysql+pymysql://u@db.invalid/demo",
                 api_key=None,
                 name=None,
                 model="claude-opus-5-5",
@@ -871,7 +871,7 @@ class TestResolveOptions:
     def test_raises_for_unknown_platform_without_config_path(self, tmp_path: Path) -> None:
         with pytest.raises(InstallError, match="Could not detect"):
             resolve_options(
-                db_url="sqlite:///./demo.db",
+                db_url="mysql+pymysql://u@db.invalid/demo",
                 api_key=FAKE_KEY,
                 name=None,
                 model="claude-opus-5-5",
@@ -961,7 +961,7 @@ class TestCli:
                 "claude-desktop",
                 "install",
                 "--db",
-                "sqlite:///./demo.db",
+                "mysql+pymysql://u@db.invalid/demo",
                 "--working-dir",
                 str(tmp_path / "workdir"),
                 "--config-path",
@@ -988,7 +988,7 @@ class TestCli:
                 "claude-desktop",
                 "install",
                 "--db",
-                "sqlite:///./demo.db",
+                "mysql+pymysql://u@db.invalid/demo",
                 "--working-dir",
                 str(tmp_path / "workdir"),
                 "--config-path",
@@ -1014,7 +1014,7 @@ class TestCli:
                 "claude-desktop",
                 "install",
                 "--db",
-                "sqlite:///./demo.db",
+                "mysql+pymysql://u@db.invalid/demo",
                 "--working-dir",
                 str(tmp_path / "workdir"),
                 "--config-path",
@@ -1223,7 +1223,7 @@ class TestTomlStringDoubleQuotedFallback:
         # A DSN containing a single quote forces _toml_string into its
         # double-quoted basic-string fallback. The generated TOML must still
         # parse cleanly back through Config.load.
-        url_with_apostrophe = "sqlite:///./demo's.db"
+        url_with_apostrophe = "mysql+pymysql://u@db.invalid/demo's"
         toml = generate_toml(
             db_url=url_with_apostrophe,
             db_name="demo",
@@ -1232,7 +1232,7 @@ class TestTomlStringDoubleQuotedFallback:
             memory_dir=str(tmp_path / "chroma"),
         )
         # Must have picked the double-quoted form for this field.
-        assert 'url = "sqlite:///./demo\'s.db"' in toml
+        assert 'url = "mysql+pymysql://u@db.invalid/demo\'s"' in toml
         path = tmp_path / "sqllens.toml"
         path.write_text(toml, encoding="utf-8")
         monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
@@ -1328,7 +1328,7 @@ class TestCliUnexpectedError:
                 "claude-desktop",
                 "install",
                 "--db",
-                "sqlite:///./demo.db",
+                "mysql+pymysql://u@db.invalid/demo",
                 "--working-dir",
                 str(tmp_path / "workdir"),
                 "--config-path",

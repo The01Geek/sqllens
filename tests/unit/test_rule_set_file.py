@@ -263,7 +263,7 @@ def test_missing_file_is_refused(tmp_path: Path) -> None:
         load_rule_sets(tmp_path / "absent.toml", database_url=MYSQL_URL)
 
 
-@pytest.mark.parametrize("url", ["sqlite:///demo.db", "sqlite:///:memory:"])
+@pytest.mark.parametrize("url", ["postgresql://u@db.invalid/shop"])
 def test_non_mysql_url_is_refused(tmp_path: Path, url: str) -> None:
     with pytest.raises(RuleSetFileError, match="need a MySQL database"):
         _load(tmp_path, example_document(), url=url)

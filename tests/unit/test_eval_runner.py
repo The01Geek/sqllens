@@ -22,7 +22,7 @@ def _config(tmp_path: Path) -> Config:
     cfg_path.write_text(
         f"""
 [database]
-url = "sqlite:///:memory:"
+url = "mysql+pymysql://u@db.invalid/shop"
 name = "primary"
 
 [llm]
@@ -195,7 +195,7 @@ def test_dialect_threaded_from_config(tmp_path: Path, monkeypatch) -> None:
     cases = [GoldenCase("q", "SELECT 1")]
     driver = _scripted_driver([("ok", [], {"sql": "SELECT 1"}, None, None)])
     asyncio.run(run_verification(cfg, cases, driver=driver))
-    assert seen == ["sqlite"]
+    assert seen == ["mysql"]
 
 
 def test_unknown_dialect_surfaces_per_case_error(tmp_path: Path) -> None:
@@ -208,7 +208,7 @@ def test_unknown_dialect_surfaces_per_case_error(tmp_path: Path) -> None:
     cfg_path.write_text(
         f"""
 [database]
-url = "sqlite:///:memory:"
+url = "mysql+pymysql://u@db.invalid/shop"
 name = "primary"
 
 [llm]
@@ -417,25 +417,22 @@ def test_production_driver_uses_default_profile_and_forces_details(
 
 
 def test_async_comparator_can_compare_rows(tmp_path: Path) -> None:
-    import sqlite3
-
-    connection = sqlite3.connect(":memory:")
+    # The rows each statement returns on the database the comparator reads.
+    rows = {"SELECT 1 + 1": [(2,)], "SELECT 2": [(2,)]}
+    compared: list[tuple[str, str]] = []
 
     async def rows_equal(expected: str, actual: str) -> Status:
         await asyncio.sleep(0)
-        expected_rows = connection.execute(expected).fetchall()
-        actual_rows = connection.execute(actual).fetchall()
-        return Status.PASS if expected_rows == actual_rows else Status.CHANGED
+        compared.append((expected, actual))
+        return Status.PASS if rows[expected] == rows[actual] else Status.CHANGED
 
-    try:
-        report = asyncio.run(run_verification(
-            _config(tmp_path),
-            [GoldenCase("q", "SELECT 1 + 1")],
-            driver=_scripted_driver([("ok", [], {"sql": "SELECT 2"}, None, None)]),
-            comparator=rows_equal,
-        ))
-    finally:
-        connection.close()
+    report = asyncio.run(run_verification(
+        _config(tmp_path),
+        [GoldenCase("q", "SELECT 1 + 1")],
+        driver=_scripted_driver([("ok", [], {"sql": "SELECT 2"}, None, None)]),
+        comparator=rows_equal,
+    ))
+    assert compared == [("SELECT 1 + 1", "SELECT 2")]
     assert report.passed == 1
 
 

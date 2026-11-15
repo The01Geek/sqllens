@@ -13,45 +13,49 @@ from sqllens.eval.compare import Status, compare, compare_sql, normalize_sql
 def test_normalize_collapses_whitespace_and_casing() -> None:
     a = "select   *  FROM  users  WHERE  id=1"
     b = "SELECT * FROM users WHERE id = 1"
-    assert normalize_sql(a, dialect="sqlite") == normalize_sql(b, dialect="sqlite")
+    assert normalize_sql(a, dialect="mysql") == normalize_sql(b, dialect="mysql")
 
 
 def test_pass_on_casing_only_diff() -> None:
     expected = "SELECT count(*) FROM users"
     actual = "select COUNT(*) from users"
-    assert compare(expected, actual, dialect="sqlite") is Status.PASS
+    assert compare(expected, actual, dialect="mysql") is Status.PASS
 
 
 def test_pass_on_whitespace_only_diff() -> None:
     expected = "SELECT id, name FROM users WHERE active = 1"
     actual = "SELECT    id,name    FROM users WHERE  active=1"
-    assert compare(expected, actual, dialect="sqlite") is Status.PASS
+    assert compare(expected, actual, dialect="mysql") is Status.PASS
 
 
 def test_changed_on_different_structure() -> None:
     expected = "SELECT id FROM users WHERE active = 1"
     actual = "SELECT id FROM users WHERE active = 1 AND deleted = 0"
-    assert compare(expected, actual, dialect="sqlite") is Status.CHANGED
+    assert compare(expected, actual, dialect="mysql") is Status.CHANGED
 
 
 def test_changed_on_different_table() -> None:
     expected = "SELECT id FROM users"
     actual = "SELECT id FROM accounts"
-    assert compare(expected, actual, dialect="sqlite") is Status.CHANGED
+    assert compare(expected, actual, dialect="mysql") is Status.CHANGED
 
 
-def test_error_when_expected_unparseable() -> None:
-    expected = "this is not sql ## ?? !!"
+@pytest.mark.parametrize(
+    ("dialect", "expected"),
+    # ``#`` opens a comment under mysql, so its malformed input carries none.
+    [("sqlite", "this is not sql ## ?? !!"), ("mysql", "this is not sql ?? !!")],
+)
+def test_error_when_expected_unparseable(dialect: str, expected: str) -> None:
     actual = "SELECT 1"
     # The golden file is malformed — surface ERROR, not "every case CHANGED".
-    assert compare(expected, actual, dialect="sqlite") is Status.ERROR
+    assert compare(expected, actual, dialect=dialect) is Status.ERROR
 
 
 def test_actual_unparseable_classifies_as_error() -> None:
     """Unparseable agent output follows the issue's ERROR taxonomy."""
     expected = "SELECT 1"
     actual = "@@@ definitely not sql @@@"
-    assert compare(expected, actual, dialect="sqlite") is Status.ERROR
+    assert compare(expected, actual, dialect="mysql") is Status.ERROR
 
 
 def test_dialect_none_still_classifies() -> None:
@@ -90,7 +94,7 @@ def test_sqlalchemy_dialect_name_mariadb_normalises() -> None:
 
 def test_unmapped_dialect_passes_through() -> None:
     """A dialect name sqlglot already recognises must pass through unchanged."""
-    assert compare("SELECT 1", "select 1", dialect="sqlite") is Status.PASS
+    assert compare("SELECT 1", "select 1", dialect="mysql") is Status.PASS
     assert compare("SELECT 1", "select 1", dialect="mysql") is Status.PASS
 
 
@@ -104,7 +108,7 @@ def test_actual_unterminated_string_classifies_as_error() -> None:
     """Tokenization and grammar errors both classify as ERROR."""
     expected = "SELECT name FROM users"
     actual = 'SELECT name FROM users WHERE name = "unterminated'  # lex error
-    assert compare(expected, actual, dialect="sqlite") is Status.ERROR
+    assert compare(expected, actual, dialect="mysql") is Status.ERROR
 
 
 def test_expected_unterminated_string_classifies_as_error() -> None:
@@ -114,7 +118,7 @@ def test_expected_unterminated_string_classifies_as_error() -> None:
     """
     expected = 'SELECT * FROM users WHERE name = "unterminated'  # lex error
     actual = "SELECT * FROM users"
-    assert compare(expected, actual, dialect="sqlite") is Status.ERROR
+    assert compare(expected, actual, dialect="mysql") is Status.ERROR
 
 
 def test_unknown_dialect_raises_not_swallowed() -> None:
@@ -135,4 +139,4 @@ def test_unknown_dialect_raises_not_swallowed() -> None:
     ],
 )
 def test_comparison_covers_every_statement(expected: str, actual: str, status: Status) -> None:
-    assert compare(expected, actual, dialect="sqlite") is status
+    assert compare(expected, actual, dialect="mysql") is status

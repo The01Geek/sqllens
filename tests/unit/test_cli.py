@@ -9,8 +9,9 @@ import os
 import stat
 import textwrap
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import pymysql
 import pytest
 from typer.testing import CliRunner
 
@@ -19,11 +20,31 @@ from sqllens.cli import app
 
 runner = CliRunner()
 
+# An unresolvable host: a test whose fake connect was missed fails the same
+# way on every machine instead of reaching a developer's local server.
+_MYSQL_URL = "mysql+pymysql://u@db.invalid/shop"
+
+
+@pytest.fixture(autouse=True)
+def mysql_connect() -> MagicMock:
+    """Fake ``pymysql.connect`` for the preflight database probe.
+
+    ``serve`` (preflight on) and ``validate --check-db`` connect to the
+    configured MySQL server; every test here gets this fake instead, which
+    accepts the connection. Set ``side_effect`` to make it fail.
+    """
+    with patch.object(pymysql, "connect") as connect:
+        yield connect
+
+
+def _unreachable() -> pymysql.err.OperationalError:
+    return pymysql.err.OperationalError(2003, "Can't connect to MySQL server")
+
 
 def _write_config(
     path: Path,
     *,
-    db_url: str = "sqlite:///:memory:",
+    db_url: str = _MYSQL_URL,
     auth_block: str = '[auth]\nmode = "none"\n',
     memory_dir: str | None = None,
 ) -> Path:
@@ -179,19 +200,19 @@ def test_serve_preflight_blocks_on_bearer_without_token(tmp_path: Path) -> None:
     mock_run.assert_not_called()
 
 
-def test_serve_preflight_blocks_on_bad_database(tmp_path: Path) -> None:
-    # Parent directory does not exist, so sqlite3.connect's underlying open() fails.
-    cfg_path = _write_config(
-        tmp_path / "sqllens.toml",
-        db_url=f"sqlite:///{tmp_path / 'missing-subdir' / 'db.sqlite'}",
-        memory_dir=str(tmp_path / "chroma"),
-    )
+def test_serve_preflight_blocks_on_bad_database(
+    tmp_path: Path, mysql_connect: MagicMock
+) -> None:
+    mysql_connect.side_effect = _unreachable()
+    cfg_path = _write_config(tmp_path / "sqllens.toml", memory_dir=str(tmp_path / "chroma"))
 
     with patch("sqllens.server.run") as mock_run:
         result = runner.invoke(app, ["serve", "--config", str(cfg_path)])
 
     assert result.exit_code == 2
-    assert "Preflight failed: database:" in result.stderr
+    stderr = " ".join(result.stderr.split())
+    assert "Preflight failed: database: OperationalError: connection failed" in stderr
+    mysql_connect.assert_called_once()
     mock_run.assert_not_called()
 
 
@@ -228,58 +249,52 @@ def test_postgresql_url_refused_at_config_load_without_echoing_password(
     mock_run.assert_not_called()
 
 
-def test_serve_no_preflight_flag_skips_probes(tmp_path: Path) -> None:
-    # Same broken DB as above, but --no-preflight should skip and let run() execute.
-    cfg_path = _write_config(
-        tmp_path / "sqllens.toml",
-        db_url=f"sqlite:///{tmp_path / 'missing-subdir' / 'db.sqlite'}",
-        memory_dir=str(tmp_path / "chroma"),
-    )
+def test_serve_no_preflight_flag_skips_probes(
+    tmp_path: Path, mysql_connect: MagicMock
+) -> None:
+    # Same unreachable DB as above, but --no-preflight should skip and let run() execute.
+    mysql_connect.side_effect = _unreachable()
+    cfg_path = _write_config(tmp_path / "sqllens.toml", memory_dir=str(tmp_path / "chroma"))
 
     with patch("sqllens.server.run") as mock_run:
         result = runner.invoke(app, ["serve", "--config", str(cfg_path), "--no-preflight"])
 
     assert result.exit_code == 0, result.stdout
+    mysql_connect.assert_not_called()
     mock_run.assert_called_once()
 
 
 def test_serve_no_preflight_env_var_skips_probes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mysql_connect: MagicMock
 ) -> None:
-    cfg_path = _write_config(
-        tmp_path / "sqllens.toml",
-        db_url=f"sqlite:///{tmp_path / 'missing-subdir' / 'db.sqlite'}",
-        memory_dir=str(tmp_path / "chroma"),
-    )
+    mysql_connect.side_effect = _unreachable()
+    cfg_path = _write_config(tmp_path / "sqllens.toml", memory_dir=str(tmp_path / "chroma"))
     monkeypatch.setenv("SQLLENS_NO_PREFLIGHT", "1")
 
     with patch("sqllens.server.run") as mock_run:
         result = runner.invoke(app, ["serve", "--config", str(cfg_path)])
 
     assert result.exit_code == 0, result.stdout
+    mysql_connect.assert_not_called()
     mock_run.assert_called_once()
 
 
-def test_serve_preflight_passes_on_clean_sqlite_config(tmp_path: Path) -> None:
-    cfg_path = _write_config(
-        tmp_path / "sqllens.toml",
-        db_url="sqlite:///:memory:",
-        memory_dir=str(tmp_path / "chroma"),
-    )
+def test_serve_preflight_passes_on_clean_mysql_config(
+    tmp_path: Path, mysql_connect: MagicMock
+) -> None:
+    cfg_path = _write_config(tmp_path / "sqllens.toml", memory_dir=str(tmp_path / "chroma"))
 
     with patch("sqllens.server.run") as mock_run:
         result = runner.invoke(app, ["serve", "--config", str(cfg_path)])
 
     assert result.exit_code == 0, result.stdout
+    assert mysql_connect.call_args.kwargs["host"] == "db.invalid"
+    mysql_connect.return_value.close.assert_called_once()
     mock_run.assert_called_once()
 
 
-def test_validate_check_flags_exercise_probes(tmp_path: Path) -> None:
-    cfg_path = _write_config(
-        tmp_path / "sqllens.toml",
-        db_url="sqlite:///:memory:",
-        memory_dir=str(tmp_path / "chroma"),
-    )
+def test_validate_check_flags_exercise_probes(tmp_path: Path, mysql_connect: MagicMock) -> None:
+    cfg_path = _write_config(tmp_path / "sqllens.toml", memory_dir=str(tmp_path / "chroma"))
 
     result = runner.invoke(
         app,
@@ -299,27 +314,23 @@ def test_validate_check_flags_exercise_probes(tmp_path: Path) -> None:
     assert "llm OK" in result.stdout
     assert "memory OK" in result.stdout
     assert "auth OK" in result.stdout
+    mysql_connect.assert_called_once()
 
 
-def test_validate_check_db_reports_failure(tmp_path: Path) -> None:
-    cfg_path = _write_config(
-        tmp_path / "sqllens.toml",
-        db_url=f"sqlite:///{tmp_path / 'missing' / 'x.db'}",
-        memory_dir=str(tmp_path / "chroma"),
-    )
+def test_validate_check_db_reports_failure(tmp_path: Path, mysql_connect: MagicMock) -> None:
+    mysql_connect.side_effect = _unreachable()
+    cfg_path = _write_config(tmp_path / "sqllens.toml", memory_dir=str(tmp_path / "chroma"))
 
     result = runner.invoke(app, ["validate", "--config", str(cfg_path), "--check-db"])
 
     assert result.exit_code == 2
-    assert "Preflight failed: database:" in result.stderr
+    stderr = " ".join(result.stderr.split())
+    assert "Preflight failed: database: OperationalError: connection failed" in stderr
 
 
-def test_serve_no_preflight_announces_the_skip(tmp_path: Path) -> None:
-    cfg_path = _write_config(
-        tmp_path / "sqllens.toml",
-        db_url=f"sqlite:///{tmp_path / 'missing-subdir' / 'db.sqlite'}",
-        memory_dir=str(tmp_path / "chroma"),
-    )
+def test_serve_no_preflight_announces_the_skip(tmp_path: Path, mysql_connect: MagicMock) -> None:
+    mysql_connect.side_effect = _unreachable()
+    cfg_path = _write_config(tmp_path / "sqllens.toml", memory_dir=str(tmp_path / "chroma"))
 
     with patch("sqllens.server.run") as mock_run:
         result = runner.invoke(app, ["serve", "--config", str(cfg_path), "--no-preflight"])
@@ -342,7 +353,7 @@ def _write_serve_config(tmp_path: Path, *, host: str, transport: str = "http") -
         textwrap.dedent(
             f"""\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/shop"
 
             [llm]
             api_key = "sk-ant-test"
@@ -417,7 +428,7 @@ def test_serve_insecure_opt_out_via_toml(
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/shop"
 
             [llm]
             api_key = "sk-ant-test"
@@ -626,7 +637,7 @@ def test_validate_insecure_opt_out_via_toml(
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/shop"
 
             [llm]
             api_key = "sk-ant-test"
@@ -803,7 +814,7 @@ def _build_cfg(transport: str, mode: str, host: str, *, insecure: bool = False):
     from sqllens.config import AuthConfig, Config, DatabaseConfig, ServerConfig
 
     return Config.model_construct(
-        database=DatabaseConfig(url="sqlite:///./demo.db"),
+        database=DatabaseConfig(url=_MYSQL_URL),
         server=ServerConfig.model_construct(transport=transport, host=host),
         auth=AuthConfig.model_construct(mode=mode, insecure=insecure),
     )
@@ -891,7 +902,7 @@ def _write_full_config(
         textwrap.dedent(
             f"""\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/shop"
 
             [llm]
             {api_key_line}
@@ -1005,7 +1016,7 @@ def test_validate_exit_two_on_schema_error(tmp_path: Path) -> None:
     # O-8 exit 2: schema-invalid config (top-level extra key — Config forbids
     # extras, so this is a ValidationError, distinct from would-fail-to-start).
     cfg_path = tmp_path / "sqllens.toml"
-    cfg_path.write_text('bogus_top_level = 1\n[database]\nurl = "sqlite:///./demo.db"\n')
+    cfg_path.write_text('bogus_top_level = 1\n[database]\nurl = "mysql+pymysql://u@db.invalid/shop"\n')
 
     result = runner.invoke(app, ["validate", "-c", str(cfg_path)])
     assert result.exit_code == 2, result.stdout

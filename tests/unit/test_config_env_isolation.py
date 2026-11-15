@@ -23,7 +23,7 @@ def _write_minimal_toml(tmp_path: Path) -> Path:
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/demo"
 
             [llm]
             api_key = "sk-ant-test"
@@ -64,7 +64,7 @@ def test_unprefixed_env_var_does_not_leak_into_sub_models(
     assert cfg.server.host == "127.0.0.1"
     assert cfg.server.port == 8765
     assert cfg.server.transport == "stdio"
-    assert cfg.database.url == "sqlite:///./demo.db"
+    assert cfg.database.url == "mysql+pymysql://u@db.invalid/demo"
     assert cfg.database.name == "primary"
     assert cfg.llm.provider == "anthropic"
     assert cfg.llm.model == "claude-opus-5-5"

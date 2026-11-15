@@ -24,7 +24,7 @@ def _config(tmp_path: Path) -> Path:
     cfg.write_text(
         f"""
 [database]
-url = "sqlite:///:memory:"
+url = "mysql+pymysql://u@db.invalid/shop"
 name = "primary"
 
 [llm]

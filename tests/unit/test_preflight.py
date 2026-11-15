@@ -38,7 +38,7 @@ from sqllens.preflight import (
 
 def _cfg(
     *,
-    db_url: str = "sqlite:///:memory:",
+    db_url: str = "mysql+pymysql://u@db.invalid/shop",
     api_key: str | None = "sk-ant-test",
     persist_dir: Path | None = None,
     auth: AuthConfig | None = None,
@@ -101,6 +101,19 @@ def test_probe_database_refuses_postgresql_url_as_unsupported(db_url: str) -> No
 
 def test_probe_database_sqlite_memory_passes() -> None:
     probe_database(_cfg(db_url="sqlite:///:memory:"))  # does not raise
+
+
+def test_probe_database_mysql_passes_and_closes_its_connection() -> None:
+    import pymysql
+
+    with patch.object(pymysql, "connect") as mock_connect:
+        probe_database(_cfg())  # does not raise
+
+    mock_connect.assert_called_once()
+    connection = mock_connect.return_value
+    # Without a rule-set file the probe runs no SQL of its own.
+    connection.cursor.assert_not_called()
+    connection.close.assert_called_once()
 
 
 def test_probe_database_sqlite_chains_cause(tmp_path: Path) -> None:

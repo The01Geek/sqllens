@@ -1846,13 +1846,20 @@ def test_introspection_dataframe_adds_no_table_block() -> None:
     assert markdown == "(no answer)"
 
 
-def test_introspection_one_row_result_adds_no_text_block() -> None:
+@pytest.mark.parametrize(
+    ("dialect", "sql"),
+    [
+        ("sqlite", "SELECT sql FROM sqlite_master WHERE name = 'widgets'"),
+        ("mysql", "SHOW CREATE TABLE widgets"),
+    ],
+)
+def test_introspection_one_row_result_adds_no_text_block(dialect: str, sql: str) -> None:
     stream = [
-        *_sql_call("SELECT sql FROM sqlite_master WHERE name = 'widgets'"),
+        *_sql_call(sql),
         _one_row({"sql": "CREATE TABLE widgets (id INTEGER)"}),
         _answer_text("Widgets has an id column."),
     ]
-    markdown, _is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect="sqlite")
+    markdown, _is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect=dialect)
     assert blocks == [{"type": "text", "text": "Widgets has an id column."}]
     assert "CREATE TABLE" not in markdown
 
@@ -1922,6 +1929,7 @@ def test_sqlite_pragma_introspection_does_not_clear_error() -> None:
     [
         ("SELECT amount FROM sqlite_payments", "mysql"),
         ("SELECT amount FROM sys.payments", "sqlite"),
+        ("SELECT amount FROM sys_payments", "mysql"),
     ],
 )
 def test_other_engine_catalog_name_data_query_shown_and_clears_error(
@@ -1937,7 +1945,7 @@ def test_other_engine_catalog_name_data_query_shown_and_clears_error(
     assert [b["type"] for b in blocks] == ["table"]
 
 
-@pytest.mark.parametrize("dialect", ["mysql", "sqlite"])
+@pytest.mark.parametrize("dialect", ["mysql"])
 def test_unparseable_sql_result_still_shown_with_dialect(dialect: str) -> None:
     stream = [*_sql_call("SELECT FROM WHERE ;;;"), _catalog_df()]
     _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect=dialect)
@@ -2003,7 +2011,7 @@ def _widgets_df() -> UiComponent:
 @pytest.mark.parametrize(
     ("sql", "dialect"),
     [
-        ("WITH w AS (SELECT n FROM widgets) SELECT n FROM w", "sqlite"),
+        ("WITH w AS (SELECT n FROM widgets) SELECT n FROM w", "mysql"),
         ("WITH sqlite_recent AS (SELECT n FROM widgets) SELECT n FROM sqlite_recent", "sqlite"),
     ],
 )
@@ -2147,12 +2155,19 @@ def test_payload_build_failure_emits_could_not_be_displayed_text(monkeypatch) ->
     ]
 
 
-def test_hidden_schema_lookup_with_oversized_headers_adds_nothing() -> None:
+@pytest.mark.parametrize(
+    ("dialect", "sql"),
+    [
+        ("sqlite", "SELECT name FROM sqlite_master"),
+        ("mysql", "SELECT table_name FROM information_schema.tables"),
+    ],
+)
+def test_hidden_schema_lookup_with_oversized_headers_adds_nothing(dialect: str, sql: str) -> None:
     huge_col = "h" * (_MAX_TABLE_PAYLOAD_BYTES + 50)
     stream = [
-        _sql_card("SELECT name FROM sqlite_master", status="running"),
+        _sql_card(sql, status="running"),
         _ui(DataFrameComponent(rows=[{huge_col: 1}], columns=[huge_col])),
-        _sql_card("SELECT name FROM sqlite_master"),
+        _sql_card(sql),
     ]
-    _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect="sqlite")
+    _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect=dialect)
     assert blocks == []
