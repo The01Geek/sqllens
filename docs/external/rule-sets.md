@@ -318,7 +318,13 @@ Rule sets limit which tables and columns a query can read and, through row rules
 
 - **Memory is shared by every rule set.** Nothing is saved to memory while rule sets are on, but memory you load yourself (with `sqllens import-memory` or the memory administration tools) is searched for every request. Table and column names, SQL literal values, notes and chart data in curated memory can reach any role. Load only what every role may see.
 - **The administration tools act for every rule set.** The memory and profile administration tools and the `get_access_rules` tool are not limited by rule sets. Register them only where end users' assistants cannot call them.
-- **`show_details` shows the model's SQL.** When a profile turns `show_details` on, the SQL in the answer is the SQL the model wrote, before the guard's rewrite, not the SQL MySQL ran.
+- **`show_details` shows the model's SQL.** When a profile turns `show_details` on, the SQL in the answer is the SQL the model wrote, before the guard's rewrite, not the SQL MySQL ran. The answer labels it as such: it appears under `**Query as written:**`, its first line is this note line,
+
+  ```sql
+  -- SQL Lens applies this server's access rules to queries before running them, so the query that ran can differ from this text.
+  ```
+
+  and the `sqllens/query` metadata entry carries `as_written: true`. Its `sql` value is the same note line, a newline and the model's SQL.
 - **Conversations are bound to identity.** A follow-up must carry the same rule set, account and user as the turn that started the conversation.
 - **`sqllens verify-memory` checks one identity per run.** The golden file has no per-case identity, and the command has no option for other `_meta` fields, so a flat `[[rls]]` rule whose `value_from_metadata` names another key blocks every case that reads its table. The identity values reach flat row-level security as the strings given on the command line. A run that passes its checks does not print the account it used, so after the file's only bound account changes, a command that omits `--account` runs under the new one without notice.
 - **SQL Lens trusts `_meta`.** It does not check who sent a request. Any caller that can reach `query_database` chooses its own rule set, account and user, so only your application should be able to reach it.

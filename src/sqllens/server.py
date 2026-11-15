@@ -41,7 +41,12 @@ from sqllens.profiles import (
 )
 from sqllens.tools._format import append_conversation_footer
 from sqllens.tools.list_data_sources import list_data_sources_impl
-from sqllens.tools.query_database import AgentRunError, query_database_impl_with_widgets
+from sqllens.tools.query_database import (
+    AgentRunError,
+    has_rewriting_guard,
+    outgoing_query_info,
+    query_database_impl_with_widgets,
+)
 from sqllens.ui import load_widget_html
 
 logger = logging.getLogger("sqllens.server")
@@ -53,9 +58,9 @@ logger = logging.getLogger("sqllens.server")
 # per block (chart, table, or text) in stream order. The widget does **not**
 # render ``_meta["sqllens/query"]``: that channel still rides on the
 # CallToolResult for apps-aware/programmatic consumers (#202 removed the
-# in-widget "Executed SQL" panel), and the executed SQL itself reaches users
-# via the Markdown rail (the ``**Executed SQL:**`` fenced block appended by
-# ``_append_sql_block`` in ``tools/query_database.py``). Non-apps hosts ignore
+# in-widget "Executed SQL" panel), and the SQL itself reaches users via the
+# Markdown rail (the fenced block appended by ``_append_sql_block`` in
+# ``tools/query_database.py``). Non-apps hosts ignore
 # ``_meta`` entirely, so the plain Markdown text content (a serialization of
 # the same ordered blocks) keeps working byte-for-byte everywhere else.
 _WIDGET_URI = "ui://sqllens/query-results.html"
@@ -83,13 +88,14 @@ _ACCESS_RULES_WIDGET_URI = "ui://sqllens/access-rules.html"
 # this same key. The previous flat sqllens/chart + sqllens/table channels were
 # retired in favour of this ordered array (#194).
 _BLOCKS_META_KEY = "sqllens/blocks"
-# Sibling channel: the executed SQL + lightweight metadata ({"sql",
-# "query_type", "row_count"?}). Present only when ``agent.show_details`` is on
+# Sibling channel: the SQL the agent wrote + lightweight metadata ({"sql",
+# "query_type", "row_count"?}, plus "as_written" under a rewriting guard — see
+# ``outgoing_query_info``). Present only when ``agent.show_details`` is on
 # and SQL ran. Apps-aware hosts and programmatic consumers (debuggers, audit
 # pipelines, observability tooling) can read the SQL off the CallToolResult
 # via this channel. The query-result widget does **not** consume it (#202
 # removed the in-widget "Executed SQL" panel) — users see the SQL via the
-# fenced ``**Executed SQL:**`` block in the Markdown text content instead.
+# fenced block in the Markdown text content instead.
 _QUERY_META_KEY = "sqllens/query"
 # Memory hit/miss channel. Present whenever a memory search completed (a hit or
 # a miss) this turn (a search that errored emits no signal). This channel is
@@ -445,9 +451,16 @@ def build_server(cfg: Config) -> MCPServer:
         ``delete_profile`` (all gated on ``profiles.allow_admin_tools``).
 
         When the resolved profile's ``show_details`` is on and the agent
-        successfully executed a SQL query, the answer also includes the
-        executed SQL — as a fenced ``sql`` block in the text and, for
-        apps-aware hosts, as structured data the result widget renders.
+        successfully executed a SQL query, the answer also includes the SQL
+        the agent wrote — as a fenced ``sql`` block in the text and as
+        structured data under ``_meta["sqllens/query"]``. The heading is
+        ``**Executed SQL:**`` only on a server with no rule-set file and no
+        ``[[rls]]`` rules. On a server with a rule-set file or
+        ``[[rls]]`` rules, access rules rewrite that SQL before it runs, so the
+        SQL is the query as written: the heading is ``**Query as written:**``,
+        the SQL starts with the line ``-- SQL Lens applies this server's access
+        rules to queries before running them, so the query that ran can differ
+        from this text.``, and ``sqllens/query`` carries ``"as_written": true``.
         Non-SELECT / no-SQL / error responses omit the SQL block; the default
         profile keeps ``show_details`` off so the SQL block is suppressed.
 
@@ -508,7 +521,9 @@ def build_server(cfg: Config) -> MCPServer:
         if blocks:
             extra_meta[_BLOCKS_META_KEY] = blocks
         if query_info:
-            extra_meta[_QUERY_META_KEY] = query_info
+            extra_meta[_QUERY_META_KEY] = outgoing_query_info(
+                query_info, as_written=has_rewriting_guard(cfg)
+            )
         if memory_info:
             extra_meta[_MEMORY_META_KEY] = memory_info
         if agent_trace is not None:

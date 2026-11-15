@@ -507,20 +507,61 @@ def _rollback_conversation(
         )
 
 
-def _append_sql_block(markdown: str, query_info: dict | None) -> str:
-    """Append the executed SQL as a fenced ``sql`` block (text fallback).
+AS_WRITTEN_NOTE_LINE = (
+    "-- SQL Lens applies this server's access rules to queries before running them, "
+    "so the query that ran can differ from this text."
+)
+
+
+def has_rewriting_guard(cfg: Config) -> bool:
+    """Whether a guard rewrites the model's SQL before it runs.
+
+    True when a rule-set file is loaded or at least one ``[[rls]]`` rule is
+    configured: the two cases in which ``build_agent`` wires a rewriting guard.
+    """
+    return cfg.rule_sets.loaded is not None or bool(cfg.rls)
+
+
+def _as_written_sql(sql: str) -> str:
+    return f"{AS_WRITTEN_NOTE_LINE}\n{sql}"
+
+
+def outgoing_query_info(query_info: dict, *, as_written: bool) -> dict:
+    """The ``_meta["sqllens/query"]`` value for ``query_info``.
+
+    With ``as_written``, a copy whose ``sql`` starts with the note line and
+    which carries ``"as_written": True``. Never mutates ``query_info``: the
+    verify-memory runner compares its ``sql`` with golden SQL, and sqlglot's
+    comparison keeps comments.
+    """
+    sql = query_info.get("sql")
+    if not as_written or not sql:
+        return query_info
+    return {**query_info, "sql": _as_written_sql(sql), "as_written": True}
+
+
+def _append_sql_block(
+    markdown: str, query_info: dict | None, *, as_written: bool = False
+) -> str:
+    """Append the model's SQL as a fenced ``sql`` block (text fallback).
 
     Structured ``query_info`` in ``_meta`` is the source of truth; this is the
     plain-text rendering for non-apps clients. Falsy ``query_info`` returns
-    markdown unchanged byte-for-byte (show_details off / no SQL ran).
+    markdown unchanged byte-for-byte (show_details off / no SQL ran). With
+    ``as_written`` (a rewriting guard is configured) the heading is
+    ``**Query as written:**`` and the note line precedes the SQL; otherwise the
+    heading is ``**Executed SQL:**``.
     """
     if not query_info:
         return markdown
     sql = query_info.get("sql")
     if not sql:
         return markdown
+    heading = "Executed SQL"
+    if as_written:
+        heading, sql = "Query as written", _as_written_sql(sql)
     fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", sql)), default=0))
-    return f"{markdown}\n\n**Executed SQL:**\n\n{fence}sql\n{sql}\n{fence}"
+    return f"{markdown}\n\n**{heading}:**\n\n{fence}sql\n{sql}\n{fence}"
 
 
 async def query_database_impl(
@@ -598,10 +639,11 @@ async def query_database_impl_with_widgets(
     on the error path and on a turn that produced no structured artifacts;
     callers attach it to ``_meta`` only when non-empty.
 
-    ``query_info`` carries the executed SQL when the **resolved profile's**
-    ``show_details`` is on, ``None`` otherwise — and when present, the same
-    SQL is also appended to ``markdown`` as a fenced ``sql`` block so
-    plain-text clients see it too. The gate is the per-request
+    ``query_info`` carries the SQL the agent wrote when the **resolved
+    profile's** ``show_details`` is on, ``None`` otherwise — and when present,
+    the same SQL is also appended to ``markdown`` as a fenced ``sql`` block so
+    plain-text clients see it too (under a rewriting guard the block, but never
+    ``query_info``, carries the note line; see ``_append_sql_block``). The gate is the per-request
     ``effective.show_details``; a profile can flip it on for one request
     without ``cfg.agent.show_details`` ever being true.
 
@@ -895,7 +937,7 @@ async def _query_database_turn(
                 agent_trace=agent_trace,
                 query_info=query_info,
             )
-        markdown = _append_sql_block(answer, query_info)
+        markdown = _append_sql_block(answer, query_info, as_written=has_rewriting_guard(cfg))
         return markdown, blocks, query_info, memory_info, agent_trace
     finally:
         reset_rule_set_selection(_rule_set_token)

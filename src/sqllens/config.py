@@ -537,14 +537,16 @@ class AgentRuntimeConfig(BaseModel):
     # (catalog lookups + memory searches + final query) routinely needs more
     # than 10 tool calls on untrained databases. Upper bound caps runaway loops.
     max_tool_iterations: int = Field(default=20, ge=1, le=100)
-    # When true (default), query_database surfaces the executed SQL alongside
+    # When true, query_database surfaces the SQL the agent wrote alongside
     # the answer: as structured data in the result _meta and as a fenced
-    # ```sql block in the Markdown text. Set false to restore the pre-feature
-    # answer-only output. Env override: SQLLENS_AGENT__SHOW_DETAILS.
+    # ```sql block in the Markdown text (labelled the query as written under a
+    # rule-set file or [[rls]] rules). Env override: SQLLENS_AGENT__SHOW_DETAILS.
     show_details: bool = Field(
         default=False,
         description=(
-            "Append the executed SQL to query answers. OFF by default: exposing "
+            "Append the SQL the agent wrote to query answers (with a rule-set file "
+            "or [[rls]] rules, labelled as the query as written, since access rules "
+            "change it before it runs). OFF by default: exposing "
             "the generated SQL to MCP clients can leak schema details and query "
             "logic. Enable only for trusted, debugging-oriented deployments."
         ),
