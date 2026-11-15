@@ -229,8 +229,33 @@ The messages name only what class of problem occurred. They never name a table, 
 - **Queries over a table with a row rule can be slower.** MySQL builds that table's visible rows in full before applying the query's own conditions, so no expression in the query ever runs on a hidden row. On a very large table this work can reach the statement timeout.
 - **Nothing is saved to memory.** The assistant saves no questions and no notes while a rule-set file is configured, whatever your `[memory]` settings say, because memory is shared by every rule set. Loading memory with `sqllens import-memory`, and the memory administration tools, are not affected.
 - **A conversation belongs to one identity.** When a follow-up question carries a conversation identifier, the rule set, account and user must be the same ones that started the conversation. A follow-up under a different identity is refused.
-- **`sqllens verify-memory` is not available.** It prints `sqllens verify-memory does not support rule sets yet; run it against a config without [rule_sets] file` and stops. Run it against a configuration that has no `[rule_sets] file`.
+- **`sqllens verify-memory` runs under one rule set, account and user.** You name them on the command line, and every golden case faces that identity's tables, columns and rows. See [Verifying Memory Under a Rule Set](#verifying-memory-under-a-rule-set).
 - **Unconfirmed sets warn at startup.** `sqllens validate` prints a `Warning:` line for each set whose `confirmed_against_production` is not `true`, and `sqllens serve` logs the same warning, so where it appears depends on how you have the server's logging set up. Requests selecting such a set are refused.
+
+## Verifying Memory Under a Rule Set
+
+While a rule-set file is configured, [`sqllens verify-memory`](managing-memory.md#verifying-memory-after-an-import) runs every golden case as a `query_database` request under the identity you give it:
+
+```bash
+sqllens verify-memory golden.json --rule-set 2 --account 5 --user 7
+```
+
+- `--rule-set` and `--user` are required. `--account` may be omitted (or given empty) when the file's `[binding] account_ids` lists exactly one ID; that ID is then used. When the file binds more than one account, `--account` is required.
+- SQL Lens puts the three values into each case's `_meta` under the key names your file's `[metadata]` table defines, so rule-set selection, the guard's table, column and row rules, and the audit line apply to each case as they do to a real request with that `_meta`. Each case starts a new conversation.
+- Without a rule-set file these options are refused: giving any of them, even with an empty value, stops the command with an error saying they need a `[rule_sets] file`.
+
+**Checks before the first case.** After the configuration, `--format`, API-key and golden-file checks, and before any case runs or any request goes to your language-model provider, the command:
+
+1. checks the identity exactly as a `query_database` request is checked, so every request refusal above applies, `rule set not confirmed` included;
+2. checks once, on its own MySQL connection (5 seconds to connect, 30 seconds per read or write), the existence and type check the server runs at startup (see [Writing the Rule-Set File](#writing-the-rule-set-file)): every table and column the file names exists as written, and each compared column has a type its `value_type` accepts. When it passes, no case repeats it.
+
+A run refused here exits 1 with one error. A refused identity prints the `Request refused: …` message with the rule set, account and user the run used, and says when the account was the file's only bound one, for example `Request refused: rule set not confirmed (--rule-set '3', --account '5' (the file's only bound account), --user '7')`. A failed catalog check names the table or column that does not match, or the error that stopped the check. A missing option is named, and so is a missing `--account` when the file binds more than one account.
+
+**Write the golden file for one identity.**
+
+- A run checks one identity, and the golden file has no per-case identity. Include only questions the selected rule set may answer; a question about a table the set does not list fails as that request would.
+- Row rules apply to every case, so `--user` decides which rows each case's queries return. Run the file as a user whose rows the questions expect.
+- The comparison uses the SQL the model wrote, before the guard's rewrite, not the SQL MySQL ran. Write the expected SQL without any row-rule filter: the guard adds that filter after the model writes its SQL.
 
 ## When a Query Is Refused
 
@@ -285,6 +310,8 @@ rule-set audit: {"outcome": "served", "rule_set": "2", "account_id": "5", "user_
 
 The audit line is written whatever `[agent.audit] enabled` says; that setting does not control it. With no rule-set file configured, neither kind of line is written.
 
+Each `sqllens verify-memory` case writes the same `rule-set audit:` line at info level as a `query_database` request. `sqllens verify-memory` sets up no logging of its own, so it does not display info-level log lines; warning-level lines still reach the terminal. A run refused before its first case writes neither kind of line.
+
 ## Limits
 
 Rule sets limit which tables and columns a query can read and, through row rules, which rows. They do not separate everything else, so plan around these limits:
@@ -293,7 +320,7 @@ Rule sets limit which tables and columns a query can read and, through row rules
 - **The administration tools act for every rule set.** The memory and profile administration tools are not limited by rule sets. Register them only where end users' assistants cannot call them.
 - **`show_details` shows the model's SQL.** When a profile turns `show_details` on, the SQL in the answer is the SQL the model wrote, before the guard's rewrite, not the SQL MySQL ran.
 - **Conversations are bound to identity.** A follow-up must carry the same rule set, account and user as the turn that started the conversation.
-- **`sqllens verify-memory` is not supported** while a rule-set file is configured.
+- **`sqllens verify-memory` checks one identity per run.** The golden file has no per-case identity, and the command has no option for other `_meta` fields, so a flat `[[rls]]` rule whose `value_from_metadata` names another key blocks every case that reads its table. The identity values reach flat row-level security as the strings given on the command line. A run that passes its checks does not print the account it used, so after the file's only bound account changes, a command that omits `--account` runs under the new one without notice.
 - **SQL Lens trusts `_meta`.** It does not check who sent a request. Any caller that can reach `query_database` chooses its own rule set, account and user, so only your application should be able to reach it.
 - **`agent.standing_instructions` is shared by every rule set.** Do not put anything in it that one role may not see.
 - **Dropped keys look like missing keys.** A calling application that drops its own `_meta` keys (for example because its own size limit was exceeded) looks like one that sent none. SQL Lens can only report a `_meta` it dropped itself.
