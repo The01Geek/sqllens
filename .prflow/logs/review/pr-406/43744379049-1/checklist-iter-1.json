@@ -1,0 +1,1578 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "`_source` assumes `Source.model_dump(mode=\"python\", exclude_unset=True)` renders `global_switches` as a list of dicts each having the keys `name` and `value`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 90,
+    "verify_against": "the `GlobalSwitch` and `Source` pydantic models",
+    "verify_hint": "Check `class GlobalSwitch(_Record)` and `class Source(_Record)` field names in `src/sqllens/rule_sets.py`",
+    "claim_signature": "dependency_interaction:access_rules.py:global-switch-dump-keys:90",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "data_format_assumption",
+    "claim": "Every value `Source.model_dump(mode=\"python\")` can produce is a str, int, float, bool, list or None, so `typed_value` never raises its `TypeError` for a source field (for example `generated_on`).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 92,
+    "verify_against": "the `Source` model's field types",
+    "verify_hint": "Check the annotations of `confirmed_against_production`, `generated_on`, `permission_fingerprint` and the other fields of `class Source` in `src/sqllens/rule_sets.py` for datetime/date/Path/enum types",
+    "claim_signature": "data_format_assumption:access_rules.py:source-value-types:92",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "data_format_assumption",
+    "claim": "A dumped row-rule node that carries a comparison value uses the key `value` with a sibling key `kind` equal to `\"compare\"`, so `_encode_row_rule` types exactly the compare values.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 68,
+    "verify_against": "the row-rule node models and their discriminator field",
+    "verify_hint": "Check the row-rule node classes (compare, is_null, any_of, owner_via, inherit, referenced_by) and their `kind` discriminator in `src/sqllens/rule_sets.py`",
+    "claim_signature": "data_format_assumption:access_rules.py:compare-kind-discriminator:68",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "data_format_assumption",
+    "claim": "`row_rule.model_dump(mode=\"python\", exclude_unset=True)` keeps every node the file defines, including an `inherit` node's `parent_rule` and a `referenced_by` node's `link`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 109,
+    "source_line_end": 115,
+    "verify_against": "the row-rule model definitions and how nested rules are stored",
+    "verify_hint": "Check `parent_rule` and `link` field declarations on the inherit/referenced_by node models in `src/sqllens/rule_sets.py` and whether they are set during loading",
+    "claim_signature": "data_format_assumption:access_rules.py:row-rule-model-dump-nesting:109",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "dependency_interaction",
+    "claim": "`_rule_set_file` reads `loaded.path`, `loaded.sha256`, `loaded.file.binding.database`, `binding.account_ids`, `file.metadata.rule_set/account_id/user_id`, `loaded.catalog.confirmed` and `file.rule_sets`, all of which exist with those names.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 122,
+    "source_line_end": 138,
+    "verify_against": "`LoadedRuleSets`, `RuleSetFile`, `Binding`, `Metadata` and `CatalogConfirmation`",
+    "verify_hint": "Check `class LoadedRuleSets`, `class RuleSetFile` and `class CatalogConfirmation` in `src/sqllens/rule_sets.py`",
+    "claim_signature": "dependency_interaction:access_rules.py:loaded-rule-sets-attrs:122",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "`_rule_set` reads `rule_set.name`, `scope`, `source`, `confirmed` and `tables`, and each table's `name`, `columns`, `predicate_columns` and `row_rule`; `confirmed` is true exactly when the set is not refused for being unconfirmed.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 96,
+    "source_line_end": 119,
+    "verify_against": "the `RuleSet` and table models and the refusal check",
+    "verify_hint": "Check `RuleSet.confirmed` and the refusal path that rejects a set whose `source.confirmed_against_production` is not true in `src/sqllens/rule_sets.py`",
+    "claim_signature": "dependency_interaction:access_rules.py:rule-set-confirmed-attr:96",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "api_contract",
+    "claim": "`cfg.rule_sets.loaded` raises `RuntimeError` (not returning `None`) when `rule_sets.file` is set but the file was never loaded, so the tool's `except RuntimeError` turns that case into `isError: true`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 147,
+    "verify_against": "the `loaded` property on `RuleSetsConfig`",
+    "verify_hint": "Check the `loaded` property of `class RuleSetsConfig` in `src/sqllens/config.py` (around line 799)",
+    "claim_signature": "api_contract:access_rules.py:never-loaded-runtimeerror:147",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "api_contract",
+    "claim": "`Config.loaded_at` is set once per validated `Config` and raises `RuntimeError` on a never-validated config, so two calls in one process return the same ISO 8601 UTC time.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 866,
+    "source_line_end": 870,
+    "verify_against": "`Config._load_rule_sets` and every path that mutates or revalidates a `Config`",
+    "verify_hint": "Check `_load_rule_sets` in `src/sqllens/config.py` and any `model_copy`/`model_validate` re-validation on the request path (`runtime.py`, `profiles.py`)",
+    "claim_signature": "api_contract:config.py:loaded-at-stability:866",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "dependency_interaction",
+    "claim": "`repr()` of a Python float yields `nan`, `inf` and `-inf` for non-finite values and keeps a trailing `.0` for whole floats, so the typed encoding distinguishes float from int.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 41,
+    "verify_against": "CPython float repr behavior and the widget's parsing of `{\"type\",\"text\"}`",
+    "verify_hint": "Check how `src/sqllens/ui/access_rules.html` renders a `{\"type\": \"float\", \"text\": ...}` pair against the strings `repr` produces",
+    "claim_signature": "dependency_interaction:access_rules.py:float-repr-nonfinite:41",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "api_contract",
+    "claim": "`json.dumps(..., allow_nan=False)` cannot raise for this payload because no raw float survives the typed encoding anywhere in the listing (flat RLS, source fields, row-rule trees).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 159,
+    "source_line_end": 161,
+    "verify_against": "every value path in `access_rules_listing`",
+    "verify_hint": "Trace `_flat_rule`, `_source`, `_rule_set` and `_encode_row_rule` in `src/sqllens/access_rules.py` for a value that reaches `json.dumps` untyped",
+    "claim_signature": "api_contract:access_rules.py:allow-nan-false-safe:159",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "dependency_interaction",
+    "claim": "The `_tool` helper accepts `structured_output=False` and `meta=` and surfaces `_meta.ui.visibility` in `tools/list`, and `_resource` accepts `mime_type=` and `meta=`, for the installed `mcp` 2.x SDK.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 1106,
+    "source_line_end": 1114,
+    "verify_against": "the `_tool` and `_resource` wrappers and the MCP SDK signatures they forward to",
+    "verify_hint": "Check the `_tool` and `_resource` definitions in `src/sqllens/server.py` and the `FastMCP.tool`/`resource` keyword arguments in the installed `mcp` package",
+    "claim_signature": "dependency_interaction:server.py:tool-meta-kwargs:1106",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "api_contract",
+    "claim": "`_json_error_result` returns a `CallToolResult` with `isError: true` carrying the `RuntimeError` message, so both error conditions reach the MCP client as structured errors.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 1132,
+    "verify_against": "the `_json_error_result` helper",
+    "verify_hint": "Check `_json_error_result` in `src/sqllens/server.py` for `isError=True`",
+    "claim_signature": "api_contract:server.py:access-rules-iserror:1132",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "api_contract",
+    "claim": "`load_widget_html(\"access_rules.html\")` resolves a packaged file of that exact name and inlines the `app-with-deps.js` bundle via the matching `_RECIPES` key, leaving no `./vendor/` import.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/__init__.py",
+    "source_line": 145,
+    "source_line_end": 147,
+    "verify_against": "`load_widget_html`, the `_RECIPES` table and the packaged widget file",
+    "verify_hint": "Check `load_widget_html` and `_inline_app_sdk` in `src/sqllens/ui/__init__.py`, the packaged `src/sqllens/ui/access_rules.html` placeholder script tag, and the wheel's package-data rules in `pyproject.toml`",
+    "claim_signature": "api_contract:__init__.py:access-rules-recipe-key:145",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "dependency_interaction",
+    "claim": "Reading the rule-set file as bytes and translating `\\r\\n` and bare `\\r` to `\\n` before `tomllib.loads` produces the same parsed data `path.read_text(encoding=\"utf-8\")` produced, and the same `RuleSetFileError` messages for a non-UTF-8 file.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/rule_sets.py",
+    "source_line": 808,
+    "source_line_end": 814,
+    "verify_against": "Python's `Path.read_text` newline handling and the `UnicodeDecodeError` branch of `load_rule_sets`",
+    "verify_hint": "Check the `except` clauses after the parse in `load_rule_sets` in `src/sqllens/rule_sets.py` and whether `read_text` universal newlines match this replacement",
+    "claim_signature": "dependency_interaction:rule_sets.py:bytes-read-newline-parity:808",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "api_contract",
+    "claim": "`LoadedRuleSets.sha256` defaults to `\"\"` for instances built outside `load_rule_sets`, and every consumer of the listing tolerates that empty hash.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/rule_sets.py",
+    "source_line": 735,
+    "verify_against": "all constructors of `LoadedRuleSets` and the widget's hash rendering",
+    "verify_hint": "Grep for `LoadedRuleSets(` across `src/` and `tests/`, and check how `src/sqllens/ui/access_rules.html` renders `sha256`",
+    "claim_signature": "api_contract:rule_sets.py:sha256-empty-default:735",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "absolute_claim",
+    "claim": "No JSON number ever reaches a client's `JSON.parse`, because every number and every rule value is sent as a typed `{\"type\", \"text\"}` pair.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Every number and every rule value is sent as ``{\"type\": ..., \"text\": ...}``\n(``type`` one of ``str``, ``int``, ``float``, ``bool``), so no JSON number\nreaches a client's ``JSON.parse``: an integer keeps every digit, a whole float\nkeeps its float type, and a non-finite float is sent as text instead of the\n``NaN``/``Infinity`` tokens strict JSON rejects.",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 10,
+    "source_line_end": 14,
+    "verify_against": "every value the listing emits",
+    "verify_hint": "Look for a numeric value that bypasses typing in `src/sqllens/access_rules.py` — e.g. a non-`compare` row-rule node key named `value`, a list member, or a number nested under a `source` field",
+    "claim_signature": "absolute_claim:access_rules.py:no-json-number-reaches-parse:10",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "absolute_claim",
+    "claim": "`query_database` never sends a rule set's `source` to the model, and `get_access_rules` returns it.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    Validated. ``query_database`` never sends it to the model;\n    ``get_access_rules`` returns it.",
+    "source_file": "src/sqllens/rule_sets.py",
+    "source_line": 120,
+    "source_line_end": 121,
+    "verify_against": "every prompt/context path that reads `RuleSet.source`",
+    "verify_hint": "Grep for `.source` reads on a `RuleSet` in `src/sqllens/safety/rule_sets.py`, `src/sqllens/rule_sets.py` and the agent prompt assembly, and confirm `access_rules.py::_source` returns it",
+    "claim_signature": "absolute_claim:rule_sets.py:source-never-sent-to-model:120",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "`query_database` never sends any `[rule_sets.source]` field to the model; the `get_access_rules` administration tool returns it.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`query_database` never sends any of this to the model; the `get_access_rules` administration tool returns it (see [Section: `[access_rules]`](configuration.md#section-access_rules)).",
+    "source_file": "docs/external/rule-sets.md",
+    "source_line": 64,
+    "verify_against": "the prompt paths and `access_rules.py::_source`",
+    "verify_hint": "Check the `source` consumers in `src/sqllens/safety/rule_sets.py` and the prompt builder, and that the linked anchor `#section-access_rules` exists in `docs/external/configuration.md`",
+    "claim_signature": "absolute_claim:rule-sets.md:source-never-sent-to-model:64",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "`source` is provenance that `query_database` never sends to the model, and `get_access_rules` returns it.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- `source` is provenance, validated; `query_database` never sends it to the model, and `get_access_rules` returns it. `confirmed_against_production` (Boolean) is required; when `role_id` is set it must equal the set's `name`.",
+    "source_file": "docs/internal/database-connectors/rule-sets.md",
+    "source_line": 19,
+    "verify_against": "the prompt paths and `access_rules.py::_source`",
+    "verify_hint": "Check every reader of `RuleSet.source` under `src/sqllens/` for one that reaches model-visible text",
+    "claim_signature": "absolute_claim:rule-sets.md:source-never-sent-internal:19",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "Every client sees `get_access_rules` in `tools/list` and can call it, with no check of who the caller is.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **Visibility.** The tool carries `meta={\"ui\": {\"visibility\": [\"app\"]}}`. The server does not act on it: every client sees the tool in `tools/list` and can call it, with no check of who the caller is. Hosts that follow the MCP Apps specification keep it out of the model's tool list.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 541,
+    "verify_against": "the registration block and any tool-filtering or auth policy",
+    "verify_hint": "Check the `cfg.access_rules.allow_admin_tools` block in `src/sqllens/server.py` and any tool filtering in `src/sqllens/transport/http.py` and `src/sqllens/auth/policy.py`",
+    "claim_signature": "absolute_claim:tools.md:every-client-can-call:541",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "absolute_claim",
+    "claim": "The server ships four widgets (the always-registered query-results widget plus three admin widgets), and exactly four opt-in surfaces are registered conditionally.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The server ships four widgets: the always-registered query-results widget and the three admin widgets.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 7,
+    "verify_against": "the widget resources and gating blocks in `server.py` and the files under `src/sqllens/ui/`",
+    "verify_hint": "Count `@_resource(` widget registrations in `src/sqllens/server.py` and the `.html` files in `src/sqllens/ui/`",
+    "claim_signature": "absolute_claim:tools.md:four-widgets-count:7",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "absolute_claim",
+    "claim": "The access-rules widget calls `get_access_rules` through `app.callServerTool` on mount, calls no other tool, makes no direct network request and has no editing controls.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "it calls no other tool, makes no direct network request and has no editing controls (pinned in `tests/unit/test_ui_widget.py`)",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 542,
+    "verify_against": "the widget source",
+    "verify_hint": "Grep `src/sqllens/ui/access_rules.html` for `fetch(`, `XMLHttpRequest`, `WebSocket`, `import(` and any `callTool(`/`callServerTool(` call other than `get_access_rules`",
+    "claim_signature": "absolute_claim:tools.md:widget-no-network-no-edit:542",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "absolute_claim",
+    "claim": "The ext-apps bundle's `App` export-alias extraction is used by every widget.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# from which we extract the local identifier for ``App``. Used by every widget.",
+    "source_file": "src/sqllens/ui/__init__.py",
+    "source_line": 59,
+    "verify_against": "the `_RECIPES` table's inliners",
+    "verify_hint": "Check that every `_RECIPES` entry in `src/sqllens/ui/__init__.py` includes `_inline_app_sdk`, the only user of `_BUNDLE_EXPORT_RE`",
+    "claim_signature": "absolute_claim:__init__.py:app-alias-every-widget:59",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "absolute_claim",
+    "claim": "An unknown key inside `[access_rules]` makes the configuration fail to load, and `SQLLENS_ACCESS_RULES__ALLOW_ADMIN_TOOLS=true` sets the switch.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "As an environment variable: `SQLLENS_ACCESS_RULES__ALLOW_ADMIN_TOOLS=true`. An unknown key inside `[access_rules]` makes the configuration fail to load.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 308,
+    "verify_against": "`AccessRulesConfig` and the env-var nesting delimiter",
+    "verify_hint": "Check `model_config = ConfigDict(extra=\"forbid\")` on `class AccessRulesConfig` and the `env_nested_delimiter` / env prefix settings on `Config` in `src/sqllens/config.py`",
+    "claim_signature": "absolute_claim:configuration.md:access-rules-extra-forbid-env:308",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "absolute_claim",
+    "claim": "The widget calls `get_access_rules` when it opens and has no controls that change a rule.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The widget calls `get_access_rules` when it opens and has no controls that change a rule.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 312,
+    "verify_against": "the widget source",
+    "verify_hint": "Check the mount/initial-load path and the absence of mutating controls in `src/sqllens/ui/access_rules.html`",
+    "claim_signature": "absolute_claim:configuration.md:widget-read-only:312",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "absolute_claim",
+    "claim": "The `get_access_rules` tool is not limited by rule sets, like the memory and profile administration tools.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **The administration tools act for every rule set.** The memory and profile administration tools and the `get_access_rules` tool are not limited by rule sets. Register them only where end users' assistants cannot call them.",
+    "source_file": "docs/external/rule-sets.md",
+    "source_line": 320,
+    "verify_against": "the rule-set guard's scope over admin tools",
+    "verify_hint": "Check whether `RuleSetGuardRunner` / the rule-set selection path in `src/sqllens/safety/rule_sets.py` wraps anything the `get_access_rules` handler in `src/sqllens/server.py` calls",
+    "claim_signature": "absolute_claim:rule-sets.md:admin-tools-unscoped:320",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "absolute_claim",
+    "claim": "Two tools are always exposed, and the opt-in memory and profile admin tools and the read-only access-rules admin tool `get_access_rules` with its widget are registered only when an operator enables them.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Two tools are always exposed (opt-in memory and profile admin tools, and the read-only access-rules admin tool `get_access_rules` with its widget, are registered only when an operator enables them):",
+    "source_file": "AGENTS.md",
+    "source_line": 7,
+    "verify_against": "the registration blocks in `server.py`",
+    "verify_hint": "Count unconditional `@_tool` registrations and the gated blocks in `src/sqllens/server.py` (`memory.allow_import`, `memory.allow_admin_tools`, `profiles.allow_admin_tools`, `access_rules.allow_admin_tools`)",
+    "claim_signature": "absolute_claim:AGENTS.md:always-exposed-tool-count:7",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "absolute_claim",
+    "claim": "Any caller that passes the server's authentication can read the access-rules listing, which includes the rule-set file path, the SHA-256 of the bytes read at load, binding and metadata key names, catalog-check state and each set's scope, source fields, refusal state, tables and row rules.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Any caller that passes the server's authentication can read the\nlisting, so turn the switch on only on an instance end users' assistants\ncannot reach. (#404)",
+    "source_file": "changelog.d/406.added.md",
+    "source_line": 8,
+    "source_line_end": 10,
+    "verify_against": "the listing builder and the tool registration",
+    "verify_hint": "Compare the keys built in `access_rules_listing` in `src/sqllens/access_rules.py` with this list, and check for any caller check in the `get_access_rules` handler in `src/sqllens/server.py`",
+    "claim_signature": "absolute_claim:406.added.md:any-authenticated-caller:8",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "The widget imports `App` from `./vendor/app-with-deps.js` and constructs it as `new App({name, version}, {}, {autoResize: true})`, so the MCP App SDK bundle must export `App` with that three-argument constructor.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 105,
+    "source_line_end": 107,
+    "verify_against": "The bundled App SDK (`src/sqllens/ui/vendor/app-with-deps.js`) and the other widgets' constructor calls",
+    "verify_hint": "Compare with the `new App(...)` call in `src/sqllens/ui/query_results.html` / `config_admin.html` and the `App` export in the vendored `app-with-deps.js`",
+    "claim_signature": "dependency_interaction:access_rules.html:app-sdk-constructor:105",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "api_contract",
+    "claim": "`app.callServerTool({name, arguments})` resolves to an object whose `content[0].text` holds the tool result text and whose `isError` flag marks a failure, and an `isError` body's JSON carries the message under the key `error`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 116,
+    "source_line_end": 136,
+    "verify_against": "The App SDK's `callServerTool` return type and the `get_access_rules` error payload built in the server",
+    "verify_hint": "Check `callServerTool` in the vendored App SDK and the `isError` branch of the `get_access_rules` tool in `src/sqllens/server.py` (plus `access_rules_json` in `src/sqllens/access_rules.py`)",
+    "claim_signature": "api_contract:access_rules.html:tool-result-envelope:116",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "dependency_interaction",
+    "claim": "`app.getHostContext()` returns an object with `theme` (`\"dark\"`/`\"light\"`) and `styles.variables` as a string-keyed map, and the widget only applies keys starting with `--color-` whose value is a string.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 146,
+    "source_line_end": 163,
+    "verify_against": "The App SDK's host-context shape and the sibling widgets' `applyHostContext`",
+    "verify_hint": "Compare `applyHostContext` in `src/sqllens/ui/memory_admin.html` and the SDK's `getHostContext` declaration",
+    "claim_signature": "dependency_interaction:access_rules.html:host-context-shape:146",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "data_format_assumption",
+    "claim": "A typed value in the listing is an object with exactly the two string keys `type` and `text`, and `type` equals `\"str\"` for strings (the only type the widget quotes) with `int`, `float` and `bool` rendered unquoted.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 173,
+    "source_line_end": 197,
+    "verify_against": "The typed-value encoder in the listing builder",
+    "verify_hint": "Check the value-encoding helper in `src/sqllens/access_rules.py` for the exact key set and the `type` strings it emits",
+    "claim_signature": "data_format_assumption:access_rules.html:typed-value-pair:173",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "data_format_assumption",
+    "claim": "The listing's top level has `loaded_at` (a string), `empty`, `flat_rls` (an array) and `rule_set_file` (an object or null), and `rule_set_file` carries `path`, `sha256`, `binding.database`, `binding.account_ids` (array), `metadata_keys.rule_set`/`.account_id`/`.user_id`, `catalog_check_passed` and `rule_sets`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 260,
+    "source_line_end": 276,
+    "verify_against": "The JSON the listing builder emits",
+    "verify_hint": "Check `access_rules_json` and its helpers in `src/sqllens/access_rules.py` for these exact keys",
+    "claim_signature": "data_format_assumption:access_rules.html:listing-top-level-keys:260",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "data_format_assumption",
+    "claim": "Each `flat_rls` entry has `table`, `column`, `operator`, `value` (typed value, list of typed values, or null) and `value_from_metadata`, which is `null` rather than absent when unset.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 308,
+    "source_line_end": 318,
+    "verify_against": "The flat-RLS part of the listing builder and `RlsRule` in config",
+    "verify_hint": "Check the flat-RLS serialization in `src/sqllens/access_rules.py` against `RlsRule` in `src/sqllens/config.py`",
+    "claim_signature": "data_format_assumption:access_rules.html:flat-rls-entry-keys:308",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "data_format_assumption",
+    "claim": "Each rule-set entry has `name`, `scope`, `refused_unconfirmed`, `source` (an object) and `tables`, and each table has `name`, `columns`, `predicate_columns` (always an array) and `row_rule` (a node object or null).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 325,
+    "source_line_end": 356,
+    "verify_against": "The rule-set part of the listing builder and the rule-set model",
+    "verify_hint": "Check the rule-set serialization in `src/sqllens/access_rules.py` against the models in `src/sqllens/rule_sets.py`",
+    "claim_signature": "data_format_assumption:access_rules.html:rule-set-entry-keys:325",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "data_format_assumption",
+    "claim": "A row-rule node is an object with a `kind` field plus per-kind fields, where `rules` is an array of nodes, `parent_rule` is a single nested node, and any other non-typed object field (such as `link`) is a flat key/value map.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 211,
+    "source_line_end": 242,
+    "verify_against": "The row-rule node serialization and the row-rule models",
+    "verify_hint": "Check the row-rule tree builder in `src/sqllens/access_rules.py` against the eight node kinds in `src/sqllens/rule_sets.py`",
+    "claim_signature": "data_format_assumption:access_rules.html:row-rule-node-shape:211",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "absolute_claim",
+    "claim": "The comment asserts the widget pulls its data on mount through `callServerTool` and calls no other tool, and that every number and rule value arrives as `{\"type\", \"text\"}` so rendering must never use `Number(text)`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "  through the App SDK's callServerTool and calls no other tool. Do not add a fetch, XHR,",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 6,
+    "source_line_end": 14,
+    "verify_against": "The widget's own script and the listing builder's encoding of every numeric field",
+    "verify_hint": "Look for a listing field the builder in `src/sqllens/access_rules.py` emits as a bare JSON number (for example an array length, a count or `loaded_at`) that the widget would render through a path other than `renderValue`",
+    "claim_signature": "absolute_claim:access_rules.html:every-number-typed:6",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "absolute_claim",
+    "claim": "The comment asserts `global_switches` is `[{name, value: <typed bool>}]` and that every other `source` value is a typed value.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "// global_switches is [{name, value: <typed bool>}]; every other source value is typed.",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 359,
+    "verify_against": "The `source` serialization in the listing builder and the `Source` model",
+    "verify_hint": "Check whether any `Source` field in `src/sqllens/rule_sets.py` serializes to a list or nested object other than `global_switches` in `src/sqllens/access_rules.py`",
+    "claim_signature": "absolute_claim:access_rules.html:source-values-typed:359",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "dependency_interaction",
+    "claim": "The header tells the operator that when the catalog check has not passed, the next rule-set request runs the check.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    if (!f.catalog_check_passed) cell.append(\" — the next rule-set request runs the check\");",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 272,
+    "verify_against": "Where the catalog check is actually triggered",
+    "verify_hint": "Check the catalog-check call site in `src/sqllens/safety/rule_sets.py` / `src/sqllens/rule_sets.py` (the `catalog.confirmed` transition) to confirm the next rule-set-selecting request runs it",
+    "claim_signature": "dependency_interaction:access_rules.html:catalog-check-on-next-request:272",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "absolute_claim",
+    "claim": "The flat-RLS subtitle asserts those rules come from the main configuration, carry no hash, and may come from `sqllens.toml` or `SQLLENS_RLS`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"[[rls]] rules from the main configuration. No hash: they may come from sqllens.toml or SQLLENS_RLS.\"",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 307,
+    "verify_against": "The RLS config sources accepted by config loading",
+    "verify_hint": "Check the `rls` field and env-var naming in `src/sqllens/config.py` to confirm `SQLLENS_RLS` is the override name",
+    "claim_signature": "absolute_claim:access_rules.html:flat-rls-sources:307",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "api_contract",
+    "claim": "The widget resource is served with the vendored SDK inlined, so the delivered HTML contains no `./vendor/` import even though the source file imports `./vendor/app-with-deps.js`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 105,
+    "verify_against": "The widget inlining recipes",
+    "verify_hint": "Check the `_RECIPES` entry for `access_rules.html` and `load_widget_html` in `src/sqllens/ui/__init__.py`",
+    "claim_signature": "api_contract:access_rules.html:vendor-inlining-recipe:105",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "dependency_interaction",
+    "claim": "`AccessRulesConfig` exists in `sqllens.config` with an `allow_admin_tools` field, and `Config` accepts it as the `access_rules` keyword.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/_config_builders.py",
+    "source_line": 60,
+    "verify_against": "The config models",
+    "verify_hint": "Check `AccessRulesConfig` and the `access_rules` field of `Config` in `src/sqllens/config.py`",
+    "claim_signature": "dependency_interaction:_config_builders.py:access-rules-config-field:60",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "dependency_interaction",
+    "claim": "`Config` exposes a `loaded_at` attribute that is a timezone-aware UTC datetime with an `isoformat()` matching the listing's `loaded_at`, and it is stable across calls in one process.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 235,
+    "source_line_end": 237,
+    "verify_against": "The `loaded_at` implementation on `Config`",
+    "verify_hint": "Check the `loaded_at` property/field and its validator in `src/sqllens/config.py`",
+    "claim_signature": "dependency_interaction:test_access_rules.py:config-loaded-at:235",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "dependency_interaction",
+    "claim": "The test reaches into `cfg.rule_sets._loaded` and sets it to `None` to simulate a configured-but-never-loaded rule-set file, so `RuleSetsConfig` must store the loaded rule sets in that private attribute and have `loaded` read it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 250,
+    "verify_against": "`RuleSetsConfig` in config",
+    "verify_hint": "Check the `_loaded` attribute and `loaded` accessor of `RuleSetsConfig` in `src/sqllens/config.py`",
+    "claim_signature": "dependency_interaction:test_access_rules.py:rule-sets-private-loaded:250",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "dependency_interaction",
+    "claim": "`cfg.rule_sets.loaded` returns a `LoadedRuleSets` with a mutable `catalog.confirmed` flag whose value the listing reports as `catalog_check_passed`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 219,
+    "verify_against": "`LoadedRuleSets` and its catalog object",
+    "verify_hint": "Check `LoadedRuleSets` and the catalog state object in `src/sqllens/rule_sets.py`",
+    "claim_signature": "dependency_interaction:test_access_rules.py:loaded-catalog-confirmed:219",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "dependency_interaction",
+    "claim": "`load_rule_sets(path, database_url=...)` returns an object with a `file` model and a `sha256` string equal to the lowercase hex SHA-256 of the file's bytes.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 276,
+    "source_line_end": 280,
+    "verify_against": "`load_rule_sets` and `LoadedRuleSets.sha256`",
+    "verify_hint": "Check `load_rule_sets` in `src/sqllens/rule_sets.py` for how it reads bytes and computes `sha256`",
+    "claim_signature": "dependency_interaction:test_access_rules.py:load-rule-sets-sha256:276",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "dependency_interaction",
+    "claim": "`load_rule_sets` raises `RuleSetFileError` whose message contains \"could not be read\" for a missing file, \"is not UTF-8 text\" for non-UTF-8 bytes and \"is not valid TOML\" for malformed TOML.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 296,
+    "source_line_end": 311,
+    "verify_against": "The error messages raised by the loader",
+    "verify_hint": "Check the read/decode/parse error branches of `load_rule_sets` in `src/sqllens/rule_sets.py`",
+    "claim_signature": "dependency_interaction:test_access_rules.py:loader-error-messages:296",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "test_mock_alignment",
+    "claim": "`_widget_renderers` slices the widget's JavaScript between the literal markers `function node_(` and `// ───────── render ─────────`, so both must occur exactly once in `src/sqllens/ui/access_rules.html` and the slice must contain `renderValue`, `renderRuleNode`, `isTyped` and `kvGrid` with no reference to anything outside it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 351,
+    "source_line_end": 355,
+    "verify_against": "The marker comments and helper boundaries in the widget",
+    "verify_hint": "Check lines 165-247 of `src/sqllens/ui/access_rules.html` for the two marker strings and for helpers referenced from the sliced region",
+    "claim_signature": "test_mock_alignment:test_access_rules.py:renderer-slice-markers:351",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "test_mock_alignment",
+    "claim": "The `_DOM_SHIM` `Node`/`document` stub supports every DOM API the sliced renderers use — `document.createElement`, `className`, `textContent` get/set, `append` of nodes and strings, and `v instanceof Node` in `kvGrid`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 338,
+    "source_line_end": 348,
+    "verify_against": "The DOM calls made by `node_`, `renderValue`, `kvGrid` and `renderRuleNode`",
+    "verify_hint": "Compare the shim against the renderer helpers at `src/sqllens/ui/access_rules.html` lines 166-242",
+    "claim_signature": "test_mock_alignment:test_access_rules.py:dom-shim-coverage:338",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "test_mock_alignment",
+    "claim": "The expected rendered strings (`\"inffloat\"`, `\"\\\"inf\\\"str\"`, `f\"{BIG}int\"`, `\"1.0float\"`, `'[1int, 2.5float, \"x\"str, truebool]'`, `\"nanfloat\"`) are what `renderValue` produces for those listing values via the shim's `textContent` concatenation.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 385,
+    "source_line_end": 398,
+    "verify_against": "`renderValue`'s append order and the listing's typed encoding",
+    "verify_hint": "Trace `renderValue` at `src/sqllens/ui/access_rules.html` lines 180-197 and the encoder in `src/sqllens/access_rules.py`",
+    "claim_signature": "test_mock_alignment:test_access_rules.py:expected-rendered-text:385",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "data_format_assumption",
+    "claim": "The flat-RLS assertion expects exactly the encodings `{\"type\":\"float\",\"text\":\"nan\"}`, `{\"float\",\"inf\"}`, `{\"str\",\"inf\"}`, `{\"int\", str(BIG)}`, `{\"float\",\"1.0\"}`, a list of typed members, and `None` for a `value_from_metadata` rule, in the order the rules were configured.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 144,
+    "source_line_end": 155,
+    "verify_against": "The flat-RLS encoder and `RlsRule` value handling",
+    "verify_hint": "Check the flat-RLS branch of `src/sqllens/access_rules.py` and `RlsRule` coercion in `src/sqllens/config.py` (does `value=1.0` stay a float, is `bool` encoded as `\"true\"`?)",
+    "claim_signature": "data_format_assumption:test_access_rules.py:flat-rls-encoding-order:144",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "test_mock_alignment",
+    "claim": "The fixture-derived expectations hold: the confirmed set is named `\"2\"` and the draft `\"3\"`, `customers.columns == [\"id\",\"name\",\"region_id\"]` with `predicate_columns == [\"sales_rep_id\"]`, `currencies.row_rule` is null, and `tags.row_rule.link` is `{table, source_column, target_column}`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 187,
+    "source_line_end": 202,
+    "verify_against": "The shared rule-set fixtures",
+    "verify_hint": "Check `row_rule_document`, `row_rule_tables` and `example_document` in `tests/unit/_rule_set_fixtures.py`",
+    "claim_signature": "test_mock_alignment:test_access_rules.py:fixture-table-expectations:187",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "data_format_assumption",
+    "claim": "The `source` object of the confirmed set serializes to exactly the nine listed keys with typed values, `global_switches` as `[{\"name\": ..., \"value\": typed-bool}]`, and `generated_on` as a `str` typed value despite being a TOML date.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 175,
+    "source_line_end": 186,
+    "verify_against": "The `Source` model and its serialization",
+    "verify_hint": "Check the `Source` class in `src/sqllens/rule_sets.py` and its encoding in `src/sqllens/access_rules.py`",
+    "claim_signature": "data_format_assumption:test_access_rules.py:source-field-encoding:175",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "dependency_interaction",
+    "claim": "`to_toml` from the fixtures serializes `_all_kinds_document` (including the integer 9007199254740993 and nested row-rule tables) into TOML that `load_rule_sets` accepts, and rewriting it with `\\r\\n` or bare `\\r` line endings still loads to an identical `file` model.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 274,
+    "source_line_end": 280,
+    "verify_against": "`to_toml` in the fixtures and the newline translation in the loader",
+    "verify_hint": "Check `_toml_value`/`to_toml` in `tests/unit/_rule_set_fixtures.py` and the newline handling in `load_rule_sets` (`src/sqllens/rule_sets.py`)",
+    "claim_signature": "dependency_interaction:test_access_rules.py:toml-fixture-line-endings:274",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "api_contract",
+    "claim": "`client.call_tool(\"get_access_rules\", {})` returns a result whose joined `content[*].text` is the whole JSON listing in one block and whose `is_error` is false, with no paging or truncation.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 72,
+    "source_line_end": 76,
+    "verify_against": "The `get_access_rules` tool registration",
+    "verify_hint": "Check the `get_access_rules` tool body in `src/sqllens/server.py` for its return type and any size limit",
+    "claim_signature": "api_contract:test_access_rules.py:single-result-no-paging:72",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "dependency_interaction",
+    "claim": "`access_rules_json(cfg)` is a public callable in `sqllens.access_rules` taking only a `Config` and returning the listing as a JSON string.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "source_line": 128,
+    "verify_against": "The listing module's public API",
+    "verify_hint": "Check the signature of `access_rules_json` in `src/sqllens/access_rules.py`",
+    "claim_signature": "dependency_interaction:test_access_rules_widget_render.py:access-rules-json-signature:128",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "dependency_interaction",
+    "claim": "A `Config` built with only `database`, `llm`, `rls`, `rule_sets` and `access_rules` validates (memory, auth and agent defaults apply) and its `loaded_at` is set, so `access_rules_json` can run on it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "source_line": 114,
+    "source_line_end": 128,
+    "verify_against": "`Config` defaults and the `loaded_at` validator",
+    "verify_hint": "Check `Config`'s field defaults and the validator that stamps `loaded_at` in `src/sqllens/config.py`",
+    "claim_signature": "dependency_interaction:test_access_rules_widget_render.py:config-defaults-loaded-at:114",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "test_mock_alignment",
+    "claim": "The stub replaces the inlined SDK by regex-matching `var App = \\w+;` in the loaded HTML and supplies only `connect()`, `getHostContext()` and `callServerTool(req)`, which are the sole App members the widget uses.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "source_line": 78,
+    "source_line_end": 91,
+    "verify_against": "The inlined widget HTML and the widget's uses of `app`",
+    "verify_hint": "Check the inlined output of `load_widget_html(\"access_rules.html\")` for the `var App = <name>;` form (`_RECIPES` in `src/sqllens/ui/__init__.py`) and every `app.` reference in `src/sqllens/ui/access_rules.html`",
+    "claim_signature": "test_mock_alignment:test_access_rules_widget_render.py:app-stub-regex-and-members:78",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-30"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "test_mock_alignment",
+    "claim": "The probe is injected by replacing the literal `</script>\\n</body>` in the inlined HTML, so that exact sequence must occur in the served widget.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "source_line": 93,
+    "verify_against": "The end of the widget HTML as inlined",
+    "verify_hint": "Check lines 418-420 of `src/sqllens/ui/access_rules.html` and whether `load_widget_html` in `src/sqllens/ui/__init__.py` alters that tail",
+    "claim_signature": "test_mock_alignment:test_access_rules_widget_render.py:script-body-marker:93",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-60",
+    "category": "dependency_interaction",
+    "claim": "The headless Chromium invocation (`--headless --no-sandbox --disable-gpu --window-size --virtual-time-budget=3000 --dump-dom` on a `file://` URI) prints a DOM containing the `<pre id=\"probe\">` the 200 ms `setTimeout` appended, for every binary the discovery helper may pick (`chromium`, `chromium-browser`, `google-chrome`, `chrome-headless-shell`, a Playwright cache shell, or `SQLLENS_TEST_CHROMIUM`).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "source_line": 96,
+    "source_line_end": 105,
+    "verify_against": "Chromium's headless CLI behavior and the binaries the helper discovers",
+    "verify_hint": "Check `_chromium` at `tests/unit/test_access_rules_widget_render.py` lines 38-49 and the flags passed in `_render`; confirm `--dump-dom` with `--virtual-time-budget` emits post-timeout DOM and that ES-module scripts load from `file://`",
+    "claim_signature": "dependency_interaction:test_access_rules_widget_render.py:headless-chromium-dump-dom:96",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-32"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-61",
+    "category": "test_mock_alignment",
+    "claim": "The probe's observations match the widget's DOM: `#header`, `#entries li`, `#detail`, `#errbar` with class `show`, a single `input`, no `button`/`select`/`textarea`/`form`, and `getComputedStyle(.layout).gridTemplateColumns` splitting into 2 columns at 1000 px and 1 at 420 px.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "source_line": 60,
+    "source_line_end": 70,
+    "verify_against": "The widget's element ids, controls and CSS grid rules",
+    "verify_hint": "Check the ids and the `.layout` / `@media (max-width: 560px)` rules in `src/sqllens/ui/access_rules.html` lines 55-102",
+    "claim_signature": "test_mock_alignment:test_access_rules_widget_render.py:probe-selectors-and-grid:60",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-33"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-62",
+    "category": "test_mock_alignment",
+    "claim": "The search step's expectations hold: searching `tags` leaves Flat RLS plus `Rule set 2` in the sidebar and `{source, order_tags, tags}` as the detail cards, and searching `zzz` renders exactly \"The selected rule set does not match the search.\"",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "source_line": 157,
+    "source_line_end": 184,
+    "verify_against": "The widget's `matches`/`entryVisible`/`renderRuleSet` logic and the fixture's table names",
+    "verify_hint": "Trace `entryVisible` and `renderRuleSet` at `src/sqllens/ui/access_rules.html` lines 280-356 against `row_rule_tables` in `tests/unit/_rule_set_fixtures.py`",
+    "claim_signature": "test_mock_alignment:test_access_rules_widget_render.py:search-expectations:157",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-34"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-63",
+    "category": "api_contract",
+    "claim": "The error-state test asserts the widget shows `get_access_rules: <message>` taken from the `error` key of the tool's JSON body, with the message \"rule_sets.file is set but the rule-set file was never loaded\".",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "source_line": 193,
+    "source_line_end": 199,
+    "verify_against": "The `isError` payload the server returns for a never-loaded rule-set file",
+    "verify_hint": "Compare with the `RuntimeError` message and error JSON in `src/sqllens/server.py` / `src/sqllens/access_rules.py` (and the \"never loaded\" assertion in `tests/unit/test_access_rules.py`)",
+    "claim_signature": "api_contract:test_access_rules_widget_render.py:error-payload-message:193",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-35"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-64",
+    "category": "api_contract",
+    "claim": "`get_access_rules` is registered with an empty input schema and `_meta` exactly `{\"ui\": {\"visibility\": [\"app\"]}}`, and the widget resource `ui://sqllens/access-rules.html` is listed with mime type `text/html;profile=mcp-app` and meta `{\"ui\": {\"prefersBorder\": True}}`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mcp_sdk_contract.py",
+    "source_line": 110,
+    "source_line_end": 120,
+    "verify_against": "The tool and resource registration in the server factory",
+    "verify_hint": "Check the `get_access_rules` tool decorator and the access-rules resource registration in `src/sqllens/server.py`",
+    "claim_signature": "api_contract:test_mcp_sdk_contract.py:access-rules-tool-meta:110",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-36"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-65",
+    "category": "test_mock_alignment",
+    "claim": "The grep-style assertions hold against the widget source: `load_widget_html` output contains `var App = ` and no `./vendor/`, the raw file contains no `echarts`, exactly one `app.callServerTool`, exactly one `callTool(\"...\")` name, and exactly the one `<input ...>` tag quoted in the test.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_ui_widget.py",
+    "source_line": 424,
+    "source_line_end": 449,
+    "verify_against": "The widget source text and the inlining recipe",
+    "verify_hint": "Check `src/sqllens/ui/access_rules.html` line 93 for the exact `<input>` markup and the `access_rules.html` recipe in `src/sqllens/ui/__init__.py`",
+    "claim_signature": "test_mock_alignment:test_ui_widget.py:widget-source-assertions:424",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-37"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-66",
+    "category": "test_mock_alignment",
+    "claim": "The shared theme test's stub (`document.documentElement` with `dataset`, `setAttribute` and `style.setProperty`) supports the access-rules widget's `applyHostContext`, which the regex `function applyHostContext\\(ctx\\) \\{.*?\\n\\}` must capture whole from `access_rules.html`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_output_boundaries.py",
+    "source_line": 127,
+    "source_line_end": 133,
+    "verify_against": "The widget's `applyHostContext` body",
+    "verify_hint": "Check `applyHostContext` at `src/sqllens/ui/access_rules.html` lines 146-159 for a nested closing brace at column 0 or DOM calls the stub lacks",
+    "claim_signature": "test_mock_alignment:test_output_boundaries.py:apply-host-context-regex:127",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-38"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `[access_rules] allow_admin_tools` unset or `false`, the server lists neither the `get_access_rules` tool nor the `ui://sqllens/access-rules.html` resource. With it `true`, it lists both, and the tool takes no arguments.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 1103,
+    "verify_hint": "Check the `if cfg.access_rules.allow_admin_tools:` block in `src/sqllens/server.py` and the zero-parameter `get_access_rules` signature",
+    "id": "VC-67",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`tools/list` shows `get_access_rules` with `_meta.ui.visibility` equal to `[\"app\"]`. The server itself does not act on that field: it lists the tool to every client and runs a `tools/call` for it from any client.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 1114,
+    "verify_hint": "Check the `meta={\"ui\": {\"visibility\": [\"app\"]}}` argument on `@_tool` in `src/sqllens/server.py` and how `_tool` forwards `meta` to the SDK",
+    "id": "VC-68",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "While the switch is on, `get_access_rules` answers every caller that passes the server's authentication, with no check of who the caller is.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 256,
+    "verify_hint": "Check the `get_access_rules` tool body in `src/sqllens/server.py` for any caller/identity check",
+    "id": "VC-69",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`get_access_rules` reports only the process it runs in. When the switch is on only in a separate admin instance, the result shows that instance's load time and catalog-check state, not those of the instance that serves end users.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 141,
+    "verify_hint": "Check that `access_rules_listing` in `src/sqllens/access_rules.py` reads only `cfg` and `cfg.rule_sets.loaded`, and that `server.py` closes over the guards' `cfg`",
+    "id": "VC-70",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "For a configuration with flat `[[rls]]` rules, `get_access_rules` returns each rule's table, column, operator, and static value or `value_from_metadata` key. The flat-RLS part of the result carries no hash.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 75,
+    "verify_hint": "Check `_flat_rule` in `src/sqllens/access_rules.py` against the `RlsRule` fields in `src/sqllens/config.py`",
+    "id": "VC-71",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The widget shows every value in the result exactly as the server loaded it, with its type: a string, an integer, a float or a boolean. This covers flat-RLS values and their list members and the values in rule-set fields and row rules. An integer keeps every digit (for example `9007199254740993`, which a plain JavaScript `JSON.parse` would show as `9007199254740992`). A float keeps its float type even when its value is whole (`1.0` shows as a float, not as the integer `1`). A non-finite float shows as `nan`, `inf` or `-inf`. A rule with `value = inf` and one with `value = \"inf\"` show different types. The tool's whole result parses with a strict JSON parser that rejects `NaN` and `Infinity`.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 189,
+    "verify_hint": "Check `renderValue`/`isTyped` in `src/sqllens/ui/access_rules.html` and the encoder in `src/sqllens/access_rules.py`; note `-inf` is not covered by any test in this batch",
+    "id": "VC-72",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "For a configuration with a rule-set file, `get_access_rules` returns the file path, the `binding` database and account IDs, and the `metadata` key names. For each set it returns its name, its `scope`, and every `source` field the file sets. It returns each table's `columns`, `predicate_columns` and `row_rule`.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 122,
+    "verify_hint": "Check `_rule_set_file`, `_rule_set` and `_source` in `src/sqllens/access_rules.py`",
+    "id": "VC-73",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A returned `row_rule` is a nested tree that keeps every node the file defines. A fixture covering all eight kinds on `main` (compare, is_null, is_not_null, any_of, all_of, owner_via, inherit and referenced_by) shows each node. The fixture also covers an `inherit` node with a `parent_rule` and a `referenced_by` node with a `link`, and both show their nested parts.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "tests/unit/test_access_rules.py",
+    "source_line": 187,
+    "verify_hint": "Check the row-rule serialization in `src/sqllens/access_rules.py` and the fixture `_all_kinds_document` at `tests/unit/test_access_rules.py` lines 85-100",
+    "id": "VC-74",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The returned rule-set hash equals the lowercase hex SHA-256 of the file's bytes as `load_rule_sets` read them. For a file with CRLF line endings, it equals `sha256sum` of that file. Changing or deleting the file after the server loaded it does not change the hash or the rules `get_access_rules` returns.",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/rule_sets.py",
+    "source_line": 808,
+    "verify_hint": "Check `path.read_bytes()` / `hashlib.sha256(raw).hexdigest()` in `load_rule_sets` in `src/sqllens/rule_sets.py`",
+    "id": "VC-75",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A rule-set file that loads today loads to the same rules after the change, including a file with CRLF or bare-CR line endings. A file that fails to load today fails with the same error message.",
+    "claim_signature": "issue-acceptance-10",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-406/43744379049-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A rule-set file that loads today loads to the same rules after the change, including a file with CRLF or bare-CR line endings. A file that fails to load today fails with the same error message.",
+    "id": "VC-76",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`get_access_rules` returns, for each rule set, whether requests that select it are refused because `confirmed_against_production` is not `true`. It also returns the process's current catalog-check state: `false` before the check has passed and `true` after it has.",
+    "claim_signature": "issue-acceptance-11",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 101,
+    "verify_hint": "Check `refused_unconfirmed` in `_rule_set` and `catalog_check_passed` in `_rule_set_file` in `src/sqllens/access_rules.py` against `CatalogConfirmation` in `src/sqllens/rule_sets.py`",
+    "id": "VC-77",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`get_access_rules` returns the time the configuration holding the returned rules was loaded, as an ISO 8601 UTC timestamp. Two calls in one process return the same time.",
+    "claim_signature": "issue-acceptance-12",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-406/43744379049-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: `get_access_rules` returns the time the configuration holding the returned rules was loaded, as an ISO 8601 UTC timestamp. Two calls in one process return the same time.",
+    "id": "VC-78",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With neither flat RLS rules nor a rule-set file configured, `get_access_rules` returns a successful result that says no access rules are loaded. When `rule_sets.file` is set but the file was never loaded, it returns `isError: true` with a message saying so.",
+    "claim_signature": "issue-acceptance-13",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/access_rules.py",
+    "source_line": 153,
+    "verify_hint": "Check the `empty`/`message` branch in `access_rules_listing` and the `except RuntimeError` branch of `get_access_rules` in `src/sqllens/server.py`",
+    "id": "VC-79",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The widget calls only `get_access_rules`, and only through the host (`callServerTool`). It makes no direct network request. It has no control that edits, adds or deletes a rule.",
+    "claim_signature": "issue-acceptance-14",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "source_line": 398,
+    "verify_hint": "Check every `app.` and network-capable construct in `src/sqllens/ui/access_rules.html` against `tests/unit/test_ui_widget.py` lines 431-449",
+    "id": "VC-80",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The widget resource is served with `app-with-deps.js` inlined, so its HTML contains no `./vendor/` import.",
+    "claim_signature": "issue-acceptance-15",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "tests/unit/test_ui_widget.py",
+    "source_line": 424,
+    "verify_hint": "Check the `access_rules.html` entry in `_RECIPES` in `src/sqllens/ui/__init__.py`",
+    "id": "VC-81",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The widget shows the layout, search, collapsed row-rule trees and the loading, empty, error and narrow-width states that the Visual Specification lists.",
+    "claim_signature": "issue-acceptance-16",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "source_line": 131,
+    "verify_hint": "Compare the Visual Specification section of the issue file with the states rendered in `src/sqllens/ui/access_rules.html` (lines 99-102, 371-384) and the tests at `tests/unit/test_access_rules_widget_render.py` lines 131-204",
+    "id": "VC-82",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`get_access_rules` returns the whole listing in one result. The change adds no paging and no size limit on that result.",
+    "claim_signature": "issue-acceptance-17",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-406/43744379049-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: `get_access_rules` returns the whole listing in one result. The change adds no paging and no size limit on that result.",
+    "id": "VC-83",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/external/configuration.md` documents `[access_rules] allow_admin_tools` and its environment override `SQLLENS_ACCESS_RULES__ALLOW_ADMIN_TOOLS`: off by default, what it exposes, that any authenticated caller can read it while on, and that operators should turn it on only on an instance end users' assistants cannot reach.",
+    "claim_signature": "issue-acceptance-18",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 297,
+    "verify_hint": "Read the `## Section: [access_rules]` block in `docs/external/configuration.md`",
+    "id": "VC-84",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "No text in the repository says the rule-set `source` fields are never sent to the model. Each of exactly these 3 places that say so today (complete by construction: a search of the whole tree for \"sent to the model\" finds four lines, and the fourth, about refused requests, is not about `source`) instead says `query_database` never sends them and `get_access_rules` returns them: `docs/external/rule-sets.md` (the `[rule_sets.source]` entry), `docs/internal/database-connectors/rule-sets.md` (the `source` bullet), and the `Source` docstring in `src/sqllens/rule_sets.py`.",
+    "claim_signature": "issue-acceptance-19",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "src/sqllens/rule_sets.py",
+    "source_line": 120,
+    "verify_hint": "Search the whole tree for \"sent to the model\" and check the three updated places: `docs/external/rule-sets.md`, `docs/internal/database-connectors/rule-sets.md` and the `Source` docstring in `src/sqllens/rule_sets.py`",
+    "id": "VC-85",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/external/rule-sets.md`'s note that the administration tools act for every rule set names `get_access_rules` too.",
+    "claim_signature": "issue-acceptance-20",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-406/43744379049-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: `docs/external/rule-sets.md`'s note that the administration tools act for every rule set names `get_access_rules` too.",
+    "id": "VC-86",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/internal/mcp-server/tools.md` describes the access-rules tool, its widget and their switch. Its statements of how many widgets and opt-in surfaces the server has match the code, and it no longer says every widget shares the ECharts recipe.",
+    "claim_signature": "issue-acceptance-21",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 534,
+    "verify_hint": "Read the `## Access-rules tool` section and the `_RECIPES` paragraph in `docs/internal/mcp-server/tools.md` and compare the counts with `src/sqllens/server.py`",
+    "id": "VC-87",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`AGENTS.md`'s project overview and architecture tree name the access-rules admin tool and widget beside the memory and profile admin surfaces.",
+    "claim_signature": "issue-acceptance-22",
+    "criteria_file": ".prflow/tmp/review/pr-406/43744379049-1/criteria.json",
+    "source_file": "AGENTS.md",
+    "source_line": 7,
+    "verify_hint": "Read the project overview paragraph and the `src/sqllens/` tree block in `AGENTS.md` (the `access_rules.py` and `ui/` lines)",
+    "id": "VC-88",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-89",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. `src/sqllens/rule_sets.py:733-735` — `LoadedRuleSets.sha256` defaults to the empty string, so a record for a file the process loaded can carry no digest, and the widget would then render a blank `SHA-256` row where an operator expects the value to compare against `sha256sum`. Nothing validates that the string is sixty-four lowercase hex digits, and the rule lives only in the adjacent comment. The only construction site in the tree always passes the digest, so nothing is wrong today. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/rule_sets.py",
+    "verify_against": "The `LoadedRuleSets` dataclass definition and every construction site of it in `src/sqllens/rule_sets.py`",
+    "verify_hint": "Check the `LoadedRuleSets` dataclass (its `sha256` field default) and the `load_rule_sets` function in `src/sqllens/rule_sets.py`",
+    "prior_ref": "finding 1 (Suggestion / Minor)",
+    "prior_evidence": "1. `src/sqllens/rule_sets.py:733-735` — `LoadedRuleSets.sha256` defaults to the empty string, so a record for a file the process loaded can carry no digest, and the widget would then render a blank `SHA-256` row where an operator expects the value to compare against `sha256sum`. Nothing validates that the string is sixty-four lowercase hex digits, and the rule lives only in the adjacent comment. The only construction site in the tree always passes the digest, so nothing is wrong today. (raised by 2/6 agents)",
+    "claim_signature": "data_format_assumption:rule_sets.py:sha256-empty-default",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-90",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. `tests/unit/test_access_rules_widget_render.py` — the whole module skips when no Chromium-family binary is found, and neither CI nor the development extras install one, so the only automated evidence for the widget-rendering criterion can disappear without a test failure. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "verify_against": "The module-level Chromium-discovery skip in `tests/unit/test_access_rules_widget_render.py` and the dev/all extras in `pyproject.toml`",
+    "verify_hint": "Check the Chromium binary lookup and `pytest.skip` at the top of `tests/unit/test_access_rules_widget_render.py` against the `[dev,all]` extras in `pyproject.toml`",
+    "prior_ref": "finding 2 (Suggestion / Minor)",
+    "prior_evidence": "2. `tests/unit/test_access_rules_widget_render.py` — the whole module skips when no Chromium-family binary is found, and neither CI nor the development extras install one, so the only automated evidence for the widget-rendering criterion can disappear without a test failure. (raised by 2/6 agents)",
+    "claim_signature": "test_mock_alignment:test_access_rules_widget_render.py:silent-chromium-skip",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-91",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 3. `tests/unit/test_ui_widget.py:411-415` — four consecutive blank lines open the new section, unlike every other section separator in the file. Ruff's `E303` is preview-only, so lint does not catch it. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_ui_widget.py",
+    "verify_against": "The section separators elsewhere in `tests/unit/test_ui_widget.py` and the ruff configuration in `pyproject.toml`",
+    "verify_hint": "Check the blank lines preceding the new access-rules section in `tests/unit/test_ui_widget.py` against the file's other section headers",
+    "prior_ref": "finding 3 (Suggestion / Minor)",
+    "prior_evidence": "3. `tests/unit/test_ui_widget.py:411-415` — four consecutive blank lines open the new section, unlike every other section separator in the file. Ruff's `E303` is preview-only, so lint does not catch it. (raised by 2/6 agents)",
+    "claim_signature": "api_contract:test_ui_widget.py:section-separator-blank-lines",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-92",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 4. `src/sqllens/server.py:1128-1132` — the `try` wraps the whole `access_rules_json(cfg)` call while only two `RuntimeError` conditions are intended, so any other `RuntimeError` raised deeper in the listing build is reported to the client as the same configuration error. Nothing is logged on the server, so an internal fault leaves no trace there. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "verify_against": "The `get_access_rules` tool body in `src/sqllens/server.py` and the `RuntimeError` raise sites in `src/sqllens/access_rules.py`",
+    "verify_hint": "Check the `get_access_rules` tool function in `src/sqllens/server.py` and every `raise RuntimeError` in `src/sqllens/access_rules.py`",
+    "prior_ref": "finding 4 (Suggestion / Minor)",
+    "prior_evidence": "4. `src/sqllens/server.py:1128-1132` — the `try` wraps the whole `access_rules_json(cfg)` call while only two `RuntimeError` conditions are intended, so any other `RuntimeError` raised deeper in the listing build is reported to the client as the same configuration error. Nothing is logged on the server, so an internal fault leaves no trace there. (raised by 1/6 agents)",
+    "claim_signature": "dependency_interaction:server.py:broad-runtimeerror-catch",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-93",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 5. `src/sqllens/ui/access_rules.html:413-417` — the single `.catch` on the `app.connect()` chain also covers the host-context call and the first load, so an error after the connection succeeded is shown to the operator as `Failed to connect to host: …`, pointing at the wrong layer. The same shape is copied from `config_admin.html`, so this is an existing project pattern rather than a new one. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/access_rules.html",
+    "verify_against": "The `app.connect()` chain and its `.catch` handler in `src/sqllens/ui/access_rules.html`, compared with `src/sqllens/ui/config_admin.html`",
+    "verify_hint": "Check the `app.connect().then(...).catch(...)` chain near the bottom of the module script in `src/sqllens/ui/access_rules.html`",
+    "prior_ref": "finding 5 (Suggestion / Minor)",
+    "prior_evidence": "5. `src/sqllens/ui/access_rules.html:413-417` — the single `.catch` on the `app.connect()` chain also covers the host-context call and the first load, so an error after the connection succeeded is shown to the operator as `Failed to connect to host: …`, pointing at the wrong layer. The same shape is copied from `config_admin.html`, so this is an existing project pattern rather than a new one. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:access_rules.html:connect-catch-mislabels-errors",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-94",
+    "category": "absolute_claim",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 6. `docs/internal/mcp-server/tools.md:11` — the sentence still ends \"and conditionally a third\", while the paragraph four lines above now correctly says there are four opt-in surfaces. This line is not part of the diff, so the inaccuracy predates this change, but it sits in the same file and section the change was asked to make consistent. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 11,
+    "verify_against": "The conditional registration blocks in `build_server` in `src/sqllens/server.py`",
+    "verify_hint": "Check `build_server` in `src/sqllens/server.py` for every conditionally registered tool and `ui://` resource, against the counts stated in `docs/internal/mcp-server/tools.md`",
+    "prior_ref": "finding 6 (Suggestion / Minor)",
+    "prior_evidence": "6. `docs/internal/mcp-server/tools.md:11` — the sentence still ends \"and conditionally a third\", while the paragraph four lines above now correctly says there are four opt-in surfaces. This line is not part of the diff, so the inaccuracy predates this change, but it sits in the same file and section the change was asked to make consistent. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: the mechanism under discussion is `build_server`'s conditional registration, whose registered set no doc edit changes; a git grep of the head view for this file's path and the sentence found no shell, Python, jq, workflow or agent-instruction reader, only this run's scratch files and the issue text; `docs/internal/` is an internal page nothing publishes -->",
+    "claim_signature": "absolute_claim:tools.md:conditional-surface-count",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-95",
+    "category": "absolute_claim",
+    "claim": "A widget HTML file with no `_RECIPES` entry gets no inlining and hangs on its placeholder in a host.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A widget HTML with no `_RECIPES` entry gets no inlining and hangs on its placeholder in a host.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 530,
+    "verify_against": "`_read_widget_html` and the `_RECIPES` table in `src/sqllens/ui/__init__.py`",
+    "verify_hint": "Check `_RECIPES`, its documented empty-recipe case, and `_read_widget_html`'s `_RECIPES.get(filename, [])` in `src/sqllens/ui/__init__.py` — specifically a widget HTML that imports no `./vendor/` bundle",
+    "prior_ref": "finding 7 (Suggestion / Minor)",
+    "prior_evidence": "7. `docs/internal/mcp-server/tools.md:146` — the added sentence \"A widget HTML with no `_RECIPES` entry gets no inlining and hangs on its placeholder in a host\" states as general what holds only for a widget that imports a `./vendor/` bundle. `src/sqllens/ui/__init__.py:128-130` documents an empty recipe list as supported, which is the same runtime behavior as no entry at all. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: the mechanism under discussion is `_read_widget_html`'s `_RECIPES.get(filename, [])`, whose covered set is the four registered widget filenames and changes with no doc edit; a git grep of the head view for this file's path and the sentence found no shell, Python, jq, workflow or agent-instruction reader, only this run's scratch files and the issue text; `docs/internal/` is an internal page nothing publishes -->",
+    "claim_signature": "absolute_claim:tools.md:no-recipe-entry-hangs",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-96",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 8. `src/sqllens/access_rules.py:28-71` — the typed-value envelope is a plain dictionary whose shape, its closed set of type names, and its \"exactly two keys\" rule are enforced by neither the Python side nor the widget's duck-check. The row-rule encoder also dispatches on `node.get(\"kind\") == \"compare\"` over an already-dumped dictionary rather than over the typed union, so a future node kind carrying a scalar value would quietly lose its typed encoding. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "verify_against": "The row-rule node union in `src/sqllens/rule_sets.py` and the widget's typed-value duck-check in `src/sqllens/ui/access_rules.html`",
+    "verify_hint": "Check `typed_value` / `_encode_numbers` and the `node.get(\"kind\") == \"compare\"` dispatch in `src/sqllens/access_rules.py` against the row-rule node models in `src/sqllens/rule_sets.py`",
+    "prior_ref": "finding 8 (Suggestion / Minor)",
+    "prior_evidence": "8. `src/sqllens/access_rules.py:28-71` — the typed-value envelope is a plain dictionary whose shape, its closed set of type names, and its \"exactly two keys\" rule are enforced by neither the Python side nor the widget's duck-check. The row-rule encoder also dispatches on `node.get(\"kind\") == \"compare\"` over an already-dumped dictionary rather than over the typed union, so a future node kind carrying a scalar value would quietly lose its typed encoding. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:access_rules.py:typed-value-envelope-unenforced",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-97",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 9. `src/sqllens/config.py:852-870` — the load timestamp is stamped inside the `_load_rule_sets` validator, whose name no longer covers everything it does, and the optional private attribute plus a raising property make \"a validated config with no load time\" expressible. This follows the existing `RuleSetsConfig.loaded` precedent in the same file. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "verify_against": "The `_load_rule_sets` model validator, the `_loaded_at` private attribute and the `loaded_at` property in `src/sqllens/config.py`",
+    "verify_hint": "Check the `_load_rule_sets` validator and the `loaded_at` property in `src/sqllens/config.py`, plus the `RuleSetsConfig.loaded` precedent in the same file",
+    "prior_ref": "finding 9 (Suggestion / Minor)",
+    "prior_evidence": "9. `src/sqllens/config.py:852-870` — the load timestamp is stamped inside the `_load_rule_sets` validator, whose name no longer covers everything it does, and the optional private attribute plus a raising property make \"a validated config with no load time\" expressible. This follows the existing `RuleSetsConfig.loaded` precedent in the same file. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:config.py:loaded-at-stamped-in-validator",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-98",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 10. `tests/unit/test_access_rules_widget_render.py:181-182` — the assertion for sidebar filtering compares the search result against a list rebuilt from that same result, so it also passes when the search wrongly hides the rule set it should show. The branch that lists a rule set because one of its tables matches is therefore unprotected. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules_widget_render.py",
+    "verify_against": "The sidebar search assertion in `tests/unit/test_access_rules_widget_render.py` and the `entryVisible` predicate in `src/sqllens/ui/access_rules.html`",
+    "verify_hint": "Check the search/sidebar-filtering test around the `search_tables` assertion in `tests/unit/test_access_rules_widget_render.py` against `entryVisible` in `src/sqllens/ui/access_rules.html`",
+    "prior_ref": "finding 10 (Suggestion / Minor)",
+    "prior_evidence": "10. `tests/unit/test_access_rules_widget_render.py:181-182` — the assertion for sidebar filtering compares the search result against a list rebuilt from that same result, so it also passes when the search wrongly hides the rule set it should show. The branch that lists a rule set because one of its tables matches is therefore unprotected. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_access_rules_widget_render.py:self-referential-search-assertion",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-99",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 11. `tests/unit/test_access_rules.py:128-158` — typed values are exercised only through rules built directly in Python, never through a configuration loaded from TOML or the environment, so a change in how the value union coerces its input could break the \"keeps every digit, stays a float\" guarantee with every test still green. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "verify_against": "The typed-value tests in `tests/unit/test_access_rules.py` and the RLS value union in `src/sqllens/config.py`",
+    "verify_hint": "Check the typed-value tests in `tests/unit/test_access_rules.py` against how the flat `[[rls]]` value field is declared and coerced in `src/sqllens/config.py`",
+    "prior_ref": "finding 11 (Suggestion / Minor)",
+    "prior_evidence": "11. `tests/unit/test_access_rules.py:128-158` — typed values are exercised only through rules built directly in Python, never through a configuration loaded from TOML or the environment, so a change in how the value union coerces its input could break the \"keeps every digit, stays a float\" guarantee with every test still green. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_access_rules.py:typed-values-direct-construction-only",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-100",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 12. `src/sqllens/access_rules.py:137-141` — the second documented error condition, a configuration that was never validated, has no test, although the helper that builds such an object is used by fixtures elsewhere in this repository. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/access_rules.py",
+    "verify_against": "The documented `RuntimeError` conditions in `access_rules_json` and the tests in `tests/unit/test_access_rules.py`",
+    "verify_hint": "Check the `RuntimeError` branches of `access_rules_json` in `src/sqllens/access_rules.py` against the tests in `tests/unit/test_access_rules.py`",
+    "prior_ref": "finding 12 (Suggestion / Minor)",
+    "prior_evidence": "12. `src/sqllens/access_rules.py:137-141` — the second documented error condition, a configuration that was never validated, has no test, although the helper that builds such an object is used by fixtures elsewhere in this repository. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:access_rules.py:never-validated-config-untested",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-101",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 13. `tests/unit/test_access_rules.py` (`test_any_client_may_call`) — opening two clients one after another against one server does not tell \"any caller\" apart from \"the same caller twice\", so the criterion that no check is made of who the caller is would be better pinned by a call under a different authentication mode. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_access_rules.py",
+    "verify_against": "`test_any_client_may_call` in `tests/unit/test_access_rules.py` and the authentication modes in `src/sqllens/auth/`",
+    "verify_hint": "Check `test_any_client_may_call` in `tests/unit/test_access_rules.py` against the authenticator options in `src/sqllens/auth/` (none | bearer | jwt)",
+    "prior_ref": "finding 13 (Suggestion / Minor)",
+    "prior_evidence": "13. `tests/unit/test_access_rules.py` (`test_any_client_may_call`) — opening two clients one after another against one server does not tell \"any caller\" apart from \"the same caller twice\", so the criterion that no check is made of who the caller is would be better pinned by a call under a different authentication mode. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_access_rules.py:any-caller-weak-test",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  }
+]

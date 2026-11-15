@@ -1,0 +1,90 @@
+[
+  {
+    "criterion": 1,
+    "text": "With `[access_rules] allow_admin_tools` unset or `false`, the server lists neither the `get_access_rules` tool nor the `ui://sqllens/access-rules.html` resource. With it `true`, it lists both, and the tool takes no arguments."
+  },
+  {
+    "criterion": 2,
+    "text": "`tools/list` shows `get_access_rules` with `_meta.ui.visibility` equal to `[\"app\"]`. The server itself does not act on that field: it lists the tool to every client and runs a `tools/call` for it from any client."
+  },
+  {
+    "criterion": 3,
+    "text": "While the switch is on, `get_access_rules` answers every caller that passes the server's authentication, with no check of who the caller is."
+  },
+  {
+    "criterion": 4,
+    "text": "`get_access_rules` reports only the process it runs in. When the switch is on only in a separate admin instance, the result shows that instance's load time and catalog-check state, not those of the instance that serves end users."
+  },
+  {
+    "criterion": 5,
+    "text": "For a configuration with flat `[[rls]]` rules, `get_access_rules` returns each rule's table, column, operator, and static value or `value_from_metadata` key. The flat-RLS part of the result carries no hash."
+  },
+  {
+    "criterion": 6,
+    "text": "The widget shows every value in the result exactly as the server loaded it, with its type: a string, an integer, a float or a boolean. This covers flat-RLS values and their list members and the values in rule-set fields and row rules. An integer keeps every digit (for example `9007199254740993`, which a plain JavaScript `JSON.parse` would show as `9007199254740992`). A float keeps its float type even when its value is whole (`1.0` shows as a float, not as the integer `1`). A non-finite float shows as `nan`, `inf` or `-inf`. A rule with `value = inf` and one with `value = \"inf\"` show different types. The tool's whole result parses with a strict JSON parser that rejects `NaN` and `Infinity`."
+  },
+  {
+    "criterion": 7,
+    "text": "For a configuration with a rule-set file, `get_access_rules` returns the file path, the `binding` database and account IDs, and the `metadata` key names. For each set it returns its name, its `scope`, and every `source` field the file sets. It returns each table's `columns`, `predicate_columns` and `row_rule`."
+  },
+  {
+    "criterion": 8,
+    "text": "A returned `row_rule` is a nested tree that keeps every node the file defines. A fixture covering all eight kinds on `main` (compare, is_null, is_not_null, any_of, all_of, owner_via, inherit and referenced_by) shows each node. The fixture also covers an `inherit` node with a `parent_rule` and a `referenced_by` node with a `link`, and both show their nested parts."
+  },
+  {
+    "criterion": 9,
+    "text": "The returned rule-set hash equals the lowercase hex SHA-256 of the file's bytes as `load_rule_sets` read them. For a file with CRLF line endings, it equals `sha256sum` of that file. Changing or deleting the file after the server loaded it does not change the hash or the rules `get_access_rules` returns."
+  },
+  {
+    "criterion": 10,
+    "text": "A rule-set file that loads today loads to the same rules after the change, including a file with CRLF or bare-CR line endings. A file that fails to load today fails with the same error message."
+  },
+  {
+    "criterion": 11,
+    "text": "`get_access_rules` returns, for each rule set, whether requests that select it are refused because `confirmed_against_production` is not `true`. It also returns the process's current catalog-check state: `false` before the check has passed and `true` after it has."
+  },
+  {
+    "criterion": 12,
+    "text": "`get_access_rules` returns the time the configuration holding the returned rules was loaded, as an ISO 8601 UTC timestamp. Two calls in one process return the same time."
+  },
+  {
+    "criterion": 13,
+    "text": "With neither flat RLS rules nor a rule-set file configured, `get_access_rules` returns a successful result that says no access rules are loaded. When `rule_sets.file` is set but the file was never loaded, it returns `isError: true` with a message saying so."
+  },
+  {
+    "criterion": 14,
+    "text": "The widget calls only `get_access_rules`, and only through the host (`callServerTool`). It makes no direct network request. It has no control that edits, adds or deletes a rule."
+  },
+  {
+    "criterion": 15,
+    "text": "The widget resource is served with `app-with-deps.js` inlined, so its HTML contains no `./vendor/` import."
+  },
+  {
+    "criterion": 16,
+    "text": "The widget shows the layout, search, collapsed row-rule trees and the loading, empty, error and narrow-width states that the Visual Specification lists."
+  },
+  {
+    "criterion": 17,
+    "text": "`get_access_rules` returns the whole listing in one result. The change adds no paging and no size limit on that result."
+  },
+  {
+    "criterion": 18,
+    "text": "`docs/external/configuration.md` documents `[access_rules] allow_admin_tools` and its environment override `SQLLENS_ACCESS_RULES__ALLOW_ADMIN_TOOLS`: off by default, what it exposes, that any authenticated caller can read it while on, and that operators should turn it on only on an instance end users' assistants cannot reach."
+  },
+  {
+    "criterion": 19,
+    "text": "No text in the repository says the rule-set `source` fields are never sent to the model. Each of exactly these 3 places that say so today (complete by construction: a search of the whole tree for \"sent to the model\" finds four lines, and the fourth, about refused requests, is not about `source`) instead says `query_database` never sends them and `get_access_rules` returns them: `docs/external/rule-sets.md` (the `[rule_sets.source]` entry), `docs/internal/database-connectors/rule-sets.md` (the `source` bullet), and the `Source` docstring in `src/sqllens/rule_sets.py`."
+  },
+  {
+    "criterion": 20,
+    "text": "`docs/external/rule-sets.md`'s note that the administration tools act for every rule set names `get_access_rules` too."
+  },
+  {
+    "criterion": 21,
+    "text": "`docs/internal/mcp-server/tools.md` describes the access-rules tool, its widget and their switch. Its statements of how many widgets and opt-in surfaces the server has match the code, and it no longer says every widget shares the ECharts recipe."
+  },
+  {
+    "criterion": 22,
+    "text": "`AGENTS.md`'s project overview and architecture tree name the access-rules admin tool and widget beside the memory and profile admin surfaces."
+  }
+]
