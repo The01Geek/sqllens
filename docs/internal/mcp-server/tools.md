@@ -348,7 +348,7 @@ A server has a **rewriting guard** when its config loads a rule-set file or defi
 
 - `_meta["sqllens/query"]` is a copy of `query_info` built by `outgoing_query_info`: `sql` is the note line, a newline and the model's SQL, and `"as_written": true` is added. `query_type` and `row_count` are unchanged; `query_type` is computed from the model's SQL without the note line. MySQL reads the note line as a comment (`--` followed by a space), so a consumer that runs the outgoing text runs the model's statement.
 - The note line and `as_written` are parts of the outgoing `_meta["sqllens/query"]` value and the Markdown block only. The `query_info` dict `query_database_impl_with_widgets` returns, and `AgentRunError.query_info`, keep the documented `{"sql", "query_type", "row_count"?}` shape with the model's SQL and no note line: `sqllens verify-memory` runs on flat-RLS servers and compares that SQL with golden SQL through sqlglot, which keeps comments.
-- Neither rail shows the rewritten SQL, which can hold the inlined user ID, the compiled row predicates, link-table names the role cannot query, or values from the request's metadata. The `run_sql` steps in `_meta["sqllens/agent_trace"]` keep the model's SQL in `arguments.sql`, with no note line.
+- The `run_sql` steps in `_meta["sqllens/agent_trace"]` keep the model's SQL in `arguments.sql`, with no note line.
 - With no rewriting guard both rails are byte-for-byte what they were: `**Executed SQL:**`, no note line, no `as_written` key.
 
 Pinned by `tests/unit/test_query_as_written.py`.
