@@ -514,7 +514,7 @@ Each widget has its own recipe. `query_results.html` splices ECharts, markdown-i
 
 ## Access-rules tool — `cfg.access_rules.allow_admin_tools`
 
-`build_server` registers one read-only tool, `get_access_rules`, and one widget resource, `ui://sqllens/access-rules.html`, **only when `cfg.access_rules.allow_admin_tools` is true** (`AccessRulesConfig.allow_admin_tools`, default `False`, env `SQLLENS_ACCESS_RULES__ALLOW_ADMIN_TOOLS`; issue #404). Both are registered in the same `if` block through `_tool` / `_resource`.
+`build_server` registers one read-only tool, `get_access_rules`, and one widget resource, `ui://sqllens/access-rules.html`, **only when `cfg.access_rules.allow_admin_tools` is true** (`AccessRulesConfig.allow_admin_tools`, default `False`, env `SQLLENS_ACCESS_RULES__ALLOW_ADMIN_TOOLS`). Both are registered in the same `if` block through `_tool` / `_resource`.
 
 - **No arguments, no writes.** The tool returns `access_rules_json(cfg)` from [src/sqllens/access_rules.py](../../../src/sqllens/access_rules.py), built from the `cfg` `build_server` closes over, the object the SQL guards were built from. It never re-reads a file, so it reports only the process it runs in: `loaded_at` is `Config.loaded_at` (set once when `Config` finishes validating), and `rule_set_file.catalog_check_passed` is that process's `LoadedRuleSets.catalog.confirmed`.
 - **Result.** `loaded_at`, `flat_rls` (each `[[rls]]` rule's `table`, `column`, `operator`, `value`, `value_from_metadata`; no hash), `rule_set_file` (`null` with no file; else `path`, `sha256`, `binding`, `metadata_keys`, `catalog_check_passed` and `rule_sets`, each with `name`, `scope`, the `source` fields the file sets, `refused_unconfirmed` and `tables` with `columns`, `predicate_columns` and `row_rule`), and `empty`; an empty result also carries `message: "No access rules are loaded."`. `row_rule` is the pydantic record's `model_dump(exclude_unset=True)`, so an `inherit` node keeps its `parent_rule` (the `_rule_nodes` walker skips it).
@@ -523,6 +523,8 @@ Each widget has its own recipe. `query_results.html` splices ECharts, markdown-i
 - **Errors.** Two conditions return `isError: true` with the `RuntimeError` message: `rule_sets.file` set but never loaded (`RuleSetsConfig.loaded`), and a `Config` that was never validated, so it has no load time (`Config.loaded_at`).
 - **Visibility.** The tool carries `meta={"ui": {"visibility": ["app"]}}`. The server does not act on it: every client sees the tool in `tools/list` and can call it, with no check of who the caller is. Hosts that follow the MCP Apps specification keep it out of the model's tool list.
 - **Widget.** `access_rules.html` is self-driving like the other admin widgets: on mount it calls `get_access_rules` through `app.callServerTool`, and it calls no other tool, makes no direct network request and has no editing controls (pinned in `tests/unit/test_ui_widget.py`). It renders a header strip (file path, hash, load time, binding, metadata keys, catalog-check state), a left list (Flat RLS plus one entry per rule set, with an `unconfirmed` badge), a detail pane with collapsed row-rule trees, a name search, and loading, empty, error and narrow-width states.
+
+Provenance: issue #404.
 
 ## Eager warmup shares the request-path singleton (issue #116)
 
