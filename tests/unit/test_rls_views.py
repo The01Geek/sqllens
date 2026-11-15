@@ -53,8 +53,10 @@ def _guard(database, *, read_only=True):
     )
 
 
-# A MySQL server holding the same objects as ``database``: base tables
-# ``orders`` and ``public_values``, and views over ``orders``.
+# The objects of ``database`` as a MySQL server reports them. The upper-case
+# names are separate entries: with lower_case_table_names = 0, MySQL looks a
+# name up as written, so these rows pin what the guard does with the type the
+# catalog reports, not how MySQL resolves letter case.
 _MYSQL_KINDS = {
     "orders": "BASE TABLE",
     "ORDERS": "BASE TABLE",
@@ -169,7 +171,7 @@ async def test_catalog_results_are_not_cached_between_queries(monkeypatch) -> No
     with pytest.raises(RlsError, match="database views are not supported"):
         await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM public_values"), context)
     assert _user_statements(server) == ["SELECT id FROM public_values"]
-    # Each query looked the relation up on its own connection.
+    # The second query looked the relation up again rather than reusing the first answer.
     lookups = [
         e.params for conn in server.connections for e in conn.executed
         if e.params == (None, "public_values")

@@ -163,6 +163,7 @@ def test_allowed_shapes(sql: str, dialect: str | None) -> None:
         # Documented limit: a table whose name has the dialect's catalog
         # prefix counts as a catalog, and with no dialect every prefix counts.
         ("SELECT * FROM sqlite_stuff", None),
+        # Likewise, with no dialect a table in MySQL's catalog schemas counts.
         ("SELECT * FROM mysql.users", None),
     ],
 )

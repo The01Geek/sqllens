@@ -4,16 +4,18 @@
 """A fake ``pymysql`` module for unit tests that run a real ``MySQLRunner``.
 
 ``install_fake_pymysql`` replaces ``pymysql`` in ``sys.modules`` for one test,
-so no test reaches a MySQL server. ``FakeMySQL`` is a ``connect`` factory whose
+so that test reaches no MySQL server. ``FakeMySQL`` is a ``connect`` factory whose
 connections log every statement in the order it ran, on which cursor, and on
 which thread.
 
 The catalog cursor (the one ``conn.cursor()`` returns with no cursor class)
-answers ``verify_base_tables``' lookups from their parameters, never from their
-SQL text: a lookup with no parameters is the ``@@lower_case_table_names``
-probe; a lookup whose parameters are ``(schema or None, name)`` with ``name``
-in ``kinds`` is a relation lookup; any other parameterised lookup is the
-routine lookup. A test must name every relation its SQL reads in ``kinds``.
+also runs the runner's session setup. It sets the row ``fetchone`` returns from
+each statement's parameters, never from its SQL text: no parameters give
+``(lower_case_table_names,)``, the answer to the ``@@lower_case_table_names``
+probe; two parameters whose second is a name in ``kinds`` give that relation's
+``TABLE_TYPE``; any other parameters give the first stored routine whose name
+matches one of them ignoring case, or no row. Session setup statements never
+fetch their row. A test must name every relation its SQL reads in ``kinds``.
 """
 
 from __future__ import annotations
@@ -64,7 +66,6 @@ class _CatalogCursor:
     def __init__(self, conn: FakeConnection) -> None:
         self._conn = conn
         self._row: tuple | None = None
-        self.closed = False
 
     def execute(self, sql: str, params: Any = None) -> None:
         self._conn.log("catalog", sql, params)
@@ -73,8 +74,6 @@ class _CatalogCursor:
             self._row = (server.lower_case_table_names,)
         elif len(params) == 2 and params[1] in server.kinds:
             self._row = (server.kinds[params[1]],)
-        elif len(params) == 1 and isinstance(params[0], int):
-            self._row = None
         else:
             called = {str(name).lower() for name in params}
             matched = sorted(r for r in server.routines if r.lower() in called)
@@ -84,7 +83,7 @@ class _CatalogCursor:
         return self._row
 
     def close(self) -> None:
-        self.closed = True
+        pass
 
 
 class _QueryCursor:
@@ -107,13 +106,11 @@ class _QueryCursor:
 
 
 class FakeConnection:
-    def __init__(self, server: FakeMySQL, kwargs: Mapping[str, Any]) -> None:
+    def __init__(self, server: FakeMySQL) -> None:
         self.server = server
-        self.kwargs = dict(kwargs)
         self.connect_thread = threading.current_thread().name
         self.executed: list[Executed] = []
         self.query_cursors: list[_QueryCursor] = []
-        self.catalog_cursors: list[_CatalogCursor] = []
         self.committed = False
         self.closed = False
 
@@ -125,9 +122,7 @@ class FakeConnection:
 
     def cursor(self, cursor_class: type | None = None) -> Any:
         if cursor_class is None:
-            cursor = _CatalogCursor(self)
-            self.catalog_cursors.append(cursor)
-            return cursor
+            return _CatalogCursor(self)
         query = _QueryCursor(self, cursor_class.__name__)
         self.query_cursors.append(query)
         return query
@@ -162,7 +157,7 @@ class FakeMySQL:
         self.rows = [dict(row) for row in self.rows]
 
     def __call__(self, **kwargs: Any) -> FakeConnection:
-        conn = FakeConnection(self, kwargs)
+        conn = FakeConnection(self)
         self.connections.append(conn)
         return conn
 

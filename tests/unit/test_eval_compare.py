@@ -95,7 +95,6 @@ def test_sqlalchemy_dialect_name_mariadb_normalises() -> None:
 def test_unmapped_dialect_passes_through() -> None:
     """A dialect name sqlglot already recognises must pass through unchanged."""
     assert compare("SELECT 1", "select 1", dialect="mysql") is Status.PASS
-    assert compare("SELECT 1", "select 1", dialect="mysql") is Status.PASS
 
 
 def test_dialect_lookup_is_case_insensitive() -> None:
