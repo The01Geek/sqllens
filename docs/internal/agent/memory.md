@@ -228,6 +228,7 @@ Three Typer commands in [src/sqllens/cli.py](../../../src/sqllens/cli.py):
 sqllens import-memory PATH [--format json|csv] [--clear] [--dry-run] [--batch-size N] [-c CONFIG]
 sqllens export-memory PATH [--format json|csv] [-c CONFIG]
 sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
+                       [--rule-set NAME --user ID [--account ID]]
 ```
 
 `import-memory` exit codes: `2` for a config-load error (consistent with `serve`/`validate`), `1` for a bad `--format`, an unreadable file, an invalid bundle, a store/import failure, or any per-item import error in the report. `--clear` prompts for confirmation (`typer.confirm(..., abort=True)`) unless combined with `--dry-run`. If a `--clear` import fails *after* the store was constructed, the error message states the collection may now be empty/partial (the wipe already ran). Store/import errors carry the standard "embedding model downloads on first use (~80 MB); check persist_dir" hint. **The CLI commands work regardless of `allow_import`** — that flag only gates the MCP tool.
@@ -250,6 +251,8 @@ Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../.
 | `eval/golden.py` | Loads the golden file with the existing bundle parsers, retaining byte/item caps, the JSON nesting-depth limit, and schema validation. CSV uses `parse_csv(..., defang=False)` to preserve the question and expected SQL. |
 | `eval/compare.py` | Normalizes SQL using the configured dialect. `compare_sql` returns PASS/CHANGED or raises a side-specific parse diagnostic; `compare` returns ERROR for either parse failure. |
 | `eval/runner.py` | Resolves the persisted `default` profile into a cloned config, forces details on and query saving off, and builds a dedicated agent with `allow_memory_writes=False`. Missing SQL produces an ERROR diagnostic. Tests can inject `driver=`. An async `comparator=` accepts expected/actual SQL and can capture a database connection for row comparison without rewriting the runner. |
+
+**Rule sets.** With a rule-set file configured, every case runs under the identity `--rule-set`, `--user` and `--account` give (`run_verification(..., rule_set=, user_id=, account_id=)`). `--rule-set` and `--user` are required; an omitted or empty `--account` defaults to the file's only bound account and is required when the file binds more than one. Before the first case and before any LLM request, the run checks the identity with `select_rule_set` and runs the catalog check once on its own connection (5-second connect, 30-second read and write timeouts). Each refusal raises `VerificationIdentityError`, which the CLI prints with the option names and exits 1: a selection refusal shows its `Request refused: …` text and the values used (marking a defaulted account), a catalog failure names the mismatch or the error that stopped the check. Identity options with no rule-set file are refused the same way. The production driver then passes the identity as `metadata=` to each case's `query_database_impl_with_widgets` call. See [database-connectors/rule-sets.md](../database-connectors/rule-sets.md#verify-runs). <!-- canonical: database-connectors/rule-sets.md -->
 
 **Memory content and retrieval metadata stay unchanged.** The verifier disables saving and retrieval usage updates through these controls:
 

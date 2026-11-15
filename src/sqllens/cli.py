@@ -82,42 +82,6 @@ _SAFE_CONFIG_ERROR_TYPES = (
 )
 
 
-def _is_rule_set_file_error(exc: Exception) -> bool:
-    """Whether a config-load failure came from loading the configured rule-set file."""
-    from sqllens.rule_sets import RuleSetFileError
-
-    if isinstance(exc, RuleSetFileError):
-        return True
-    if not isinstance(exc, ValidationError):
-        return False
-    return any(
-        isinstance((error.get("ctx") or {}).get("error"), RuleSetFileError)
-        for error in exc.errors()
-    )
-
-
-def _rule_set_file_configured(config: Path | None) -> bool:
-    """Whether the env or TOML source names a rule-set file, read without validation.
-
-    For a configuration that failed to load. A file that cannot be read or
-    parsed as TOML gives ``False``.
-    """
-    if os.environ.get("SQLLENS_RULE_SETS__FILE"):
-        return True
-    try:
-        if config is None:
-            from sqllens.config import _resolved_toml_path
-
-            config = _resolved_toml_path()
-        if config is None:
-            return False
-        with config.open("rb") as source:
-            data = tomllib.load(source)
-        section = data.get("rule_sets")
-        return isinstance(section, dict) and bool(section.get("file"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-        return False
-
 
 def _format_config_error(exc: Exception) -> str:
     """Render a config-load exception for stderr without leaking secrets.
@@ -592,6 +556,30 @@ def verify_memory(
             "noise from LLM non-determinism is expected."
         ),
     ),
+    rule_set: str | None = typer.Option(
+        None,
+        "--rule-set",
+        help=(
+            "Rule set every case runs under. Used only with a \\[rule_sets] file, "
+            "where it is required."
+        ),
+    ),
+    account: str | None = typer.Option(
+        None,
+        "--account",
+        help=(
+            "Account ID every case runs under. Used only with a \\[rule_sets] file; "
+            "may be omitted when the file binds exactly one account, which is then used."
+        ),
+    ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help=(
+            "User ID every case runs under; row rules filter each case's rows for "
+            "this user. Used only with a \\[rule_sets] file, where it is required."
+        ),
+    ),
 ) -> None:
     """Verify the agent still produces expected SQL for a curated golden set.
 
@@ -606,6 +594,11 @@ def verify_memory(
     requests, plus the queries the agent runs against the configured
     database. The run disables memory saving and retrieval-counter updates.
 
+    With a \\[rule_sets] file, every case runs under the rule set, account and
+    user given by --rule-set, --account and --user, as a query_database
+    request with that identity would. The identity and the rule-set catalog
+    are checked before the first case; a refusal exits 1.
+
     Exits non-zero on any non-PASS case (or, with ``--fail-under``, when the
     PASS rate is below the threshold). Empty and all-non-PASS runs always
     exit non-zero, including with ``--fail-under 0``.
@@ -613,24 +606,14 @@ def verify_memory(
     import asyncio
 
     from sqllens.config import Config
-    from sqllens.eval import load_golden, run_verification
+    from sqllens.eval import VerificationIdentityError, load_golden, run_verification
     from sqllens.memory.io import VALID_FORMATS, BundleFormatError
-    from sqllens.rule_sets import VERIFY_MEMORY_UNSUPPORTED_MESSAGE
 
     try:
         cfg = Config.load(config)
     except Exception as e:
         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
-        if _is_rule_set_file_error(e) or _rule_set_file_configured(config):
-            # A configuration naming a rule-set file that fails to load still
-            # gets the unsupported message, beside the error naming the problem.
-            err_console.print(f"[red]Error:[/red] {escape(VERIFY_MEMORY_UNSUPPORTED_MESSAGE)}")
         raise typer.Exit(code=2) from e
-    # Checked before the --format and API-key checks, so a rule-set file that
-    # loads gets this message rather than an unrelated one.
-    if cfg.rule_sets.loaded is not None:
-        err_console.print(f"[red]Error:[/red] {escape(VERIFY_MEMORY_UNSUPPORTED_MESSAGE)}")
-        raise typer.Exit(code=1)
     if fmt not in VALID_FORMATS:
         err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
         raise typer.Exit(code=1)
@@ -657,8 +640,21 @@ def verify_memory(
         )
         raise typer.Exit(code=1)
 
+    # Pass only the options given: stand-ins for run_verification (tests,
+    # embedders) that predate the identity keywords must keep working.
+    identity = {
+        name: value
+        for name, value in (("rule_set", rule_set), ("user_id", user), ("account_id", account))
+        if value is not None
+    }
     try:
-        report = asyncio.run(run_verification(cfg, cases))
+        report = asyncio.run(run_verification(cfg, cases, **identity))
+    except VerificationIdentityError as e:
+        message = e.describe(
+            {"rule_set": "--rule-set", "account_id": "--account", "user_id": "--user"}
+        )
+        err_console.print(f"[red]Error:[/red] {escape(message)}")
+        raise typer.Exit(code=1) from e
     except Exception as e:
         err_console.print(
             f"[red]Verification run failed ({type(e).__name__}):[/red] {escape(str(e))}"

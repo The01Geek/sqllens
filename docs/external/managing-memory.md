@@ -138,6 +138,7 @@ Each reference question is a full live run of the assistant using the persisted 
 
 ```bash
 sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
+                       [--rule-set NAME --user ID [--account ID]]
 ```
 
 | Option | Effect |
@@ -145,6 +146,11 @@ sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
 | `--format` | `json` (default) or `csv`. The golden file uses the same shape as a memory bundle's question-and-answer pairs (the `sql_pairs` block in JSON, or a `question,sql` CSV), so any tool that can write a bundle can write a golden file. |
 | `--fail-under PCT` | Pass-rate percentage tolerance from 0 to 100. See the exit-code rules below; at least one case must PASS. |
 | `-c CONFIG` | Path to `sqllens.toml`. Falls back to the environment or `./sqllens.toml`. |
+| `--rule-set NAME` | Used only with a [rule-set file](rule-sets.md#verifying-memory-under-a-rule-set), where it is required: the rule set every case runs under. |
+| `--account ID` | Used only with a rule-set file: the account every case runs under. May be omitted when the file binds exactly one account, which is then used. |
+| `--user ID` | Used only with a rule-set file, where it is required: the user every case runs under. Row rules filter each case's rows for this user. |
+
+With a rule-set file configured, every case runs under the rule set, account and user these three options give, and the command checks that identity and the file's tables and columns before the first case. See [Verifying Memory Under a Rule Set](rule-sets.md#verifying-memory-under-a-rule-set). Without a rule-set file, giving any of the three options is an error.
 
 A golden file is structurally a memory bundle's question-and-answer block — the same 10 MiB, 10,000-item and JSON nesting limits apply, and the same blank-value and length rules are enforced. CSV golden values are preserved exactly; unlike memory import/export, verification does not add spreadsheet formula-protection prefixes. The free-form notes block, if present, is ignored: only question-and-answer pairs are reference cases.
 
