@@ -18,6 +18,7 @@ and secrets.
 from __future__ import annotations
 
 import contextvars
+import datetime
 import logging
 import os
 import re
@@ -299,6 +300,23 @@ class ProfilesConfig(BaseModel):
             "Write paths additionally refuse to run on an unauthenticated "
             "endpoint (auth.mode='none') unless auth.insecure acknowledges a "
             "closed network — same gate the memory-admin tools use."
+        ),
+    )
+
+
+class AccessRulesConfig(BaseModel):
+    """The read-only access-rules admin surface (``get_access_rules`` and its widget)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allow_admin_tools: bool = Field(
+        default=False,
+        description=(
+            "Expose the read-only get_access_rules MCP tool and the access-rules "
+            "widget, which list the loaded [[rls]] rules and rule sets. OFF by "
+            "default: any caller that passes the server's authentication can read "
+            "the listing, which reveals the schema and every role's scope. Turn it "
+            "on only on an instance end users' assistants cannot reach."
         ),
     )
 
@@ -827,6 +845,9 @@ class Config(BaseSettings):
     # Opt-in row-level-security predicates; empty disables the guard entirely.
     rls: list[RlsRule] = Field(default_factory=list)
     rule_sets: RuleSetsConfig = Field(default_factory=lambda: RuleSetsConfig())
+    access_rules: AccessRulesConfig = Field(default_factory=lambda: AccessRulesConfig())
+
+    _loaded_at: datetime.datetime | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _load_rule_sets(self) -> Config:
@@ -836,7 +857,15 @@ class Config(BaseSettings):
             self.rule_sets._loaded = load_rule_sets(
                 self.rule_sets.file, database_url=self.database.url
             )
+        self._loaded_at = datetime.datetime.now(datetime.UTC)
         return self
+
+    @property
+    def loaded_at(self) -> datetime.datetime:
+        """When this configuration, its rule-set file included, finished loading (UTC)."""
+        if self._loaded_at is None:
+            raise RuntimeError("the configuration was never validated, so it has no load time")
+        return self._loaded_at
 
     @classmethod
     def settings_customise_sources(

@@ -4,7 +4,7 @@ Guidance for AI coding assistants (Claude Code, Codex, and others) working in th
 
 ## Project overview
 
-**SQL Lens** is a standalone MCP server that exposes a natural-language SQL agent and a vector memory store. It connects MCP-aware AI assistants (Cursor, Claude Desktop, Windsurf, custom clients) to a single configured database. Two tools are always exposed (opt-in memory and profile admin tools are registered only when an operator enables them):
+**SQL Lens** is a standalone MCP server that exposes a natural-language SQL agent and a vector memory store. It connects MCP-aware AI assistants (Cursor, Claude Desktop, Windsurf, custom clients) to a single configured database. Two tools are always exposed (opt-in memory and profile admin tools, and the read-only access-rules admin tool `get_access_rules` with its widget, are registered only when an operator enables them):
 
 - `query_database(question)` — NL → SQL → executed → Markdown answer, plus ordered table/chart/text blocks that app-widget hosts render as an interactive table or ECharts chart.
 - `list_data_sources()` — describes the configured database.
@@ -41,6 +41,7 @@ src/sqllens/
 ├── profiles.py, runtime.py  # named per-request config profiles; request-local effective settings
 ├── conversation_store.py    # bounded, in-process multi-turn conversation store
 ├── rule_sets.py             # per-role rule-set file: model, loading, catalog check, selection
+├── access_rules.py          # read-only listing behind the get_access_rules admin tool
 ├── tools/                   # MCP tool implementations (thin wrappers over agent/)
 ├── agent/                   # NL-to-SQL agent — lifted code (vendored, see below)
 │   ├── factory.py           # build_agent / build_sql_runner — the only public seam
@@ -48,7 +49,8 @@ src/sqllens/
 ├── memory/                  # first-party memory import/export/admin over the Chroma store
 ├── eval/                    # golden-set accuracy regression guard (verify-memory)
 ├── installers/              # client wiring helpers (claude_desktop.py)
-├── ui/                      # packaged MCP App widget HTML (query results, memory/config admin)
+├── ui/                      # packaged MCP App widget HTML (query results, memory/config admin,
+│                            #   access-rules admin)
 ├── transport/               # ASGI layer
 │   └── http.py              # Streamable HTTP + auth middleware + path normalizer
 ├── connectors/              # Reserved for SQLAlchemy-backed adapters (Phase 4+)

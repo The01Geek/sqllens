@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import datetime
+import hashlib
 import json
 import logging
 import math
@@ -114,7 +115,11 @@ class GlobalSwitch(_Record):
 
 
 class Source(_Record):
-    """Provenance of a rule set. Validated, never sent to the model."""
+    """Provenance of a rule set.
+
+    Validated. ``query_database`` never sends it to the model;
+    ``get_access_rules`` returns it.
+    """
 
     confirmed_against_production: StrictBool
     role_id: RuleSetId | None = None
@@ -726,6 +731,8 @@ class LoadedRuleSets:
 
     path: Path
     file: RuleSetFile
+    # Lowercase hex SHA-256 of the bytes load_rule_sets parsed; "" when built without them.
+    sha256: str = ""
     catalog: CatalogConfirmation = field(default_factory=CatalogConfirmation)
     compiled: dict[str, dict[str, CompiledRule]] = field(default_factory=dict)
 
@@ -798,7 +805,13 @@ def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:
     compiled (named by its record path).
     """
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        # Translate line endings exactly as read_text did before the hash was
+        # added: tomllib rejects a bare CR, so parsing the raw text would stop a
+        # bare-CR file that loads today from loading.
+        text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        data = tomllib.loads(text)
     except OSError as exc:
         raise RuleSetFileError(
             f"rule-set file {path} could not be read: {exc.strerror or type(exc).__name__}"
@@ -824,7 +837,12 @@ def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:
             f"rule-set file {path}: binding.database {rule_set_file.binding.database!r} "
             "is not the database named in database.url"
         )
-    return LoadedRuleSets(path=path, file=rule_set_file, compiled=_compile_all(path, rule_set_file))
+    return LoadedRuleSets(
+        path=path,
+        file=rule_set_file,
+        sha256=digest,
+        compiled=_compile_all(path, rule_set_file),
+    )
 
 
 def _compile_all(path: Path, rule_set_file: RuleSetFile) -> dict[str, dict[str, CompiledRule]]:

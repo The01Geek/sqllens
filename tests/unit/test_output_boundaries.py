@@ -124,7 +124,9 @@ def test_widget_csv_defangs_both_headers_and_rows_before_quoting() -> None:
 
 
 @pytest.mark.skipif(NODE is None, reason="node required for widget behavior")
-@pytest.mark.parametrize("widget", ["query_results", "config_admin", "memory_admin"])
+@pytest.mark.parametrize(
+    "widget", ["query_results", "config_admin", "memory_admin", "access_rules"]
+)
 def test_host_theme_only_sets_string_color_custom_properties(widget: str) -> None:
     html = (UI / f"{widget}.html").read_text()
     function = re.search(r"function applyHostContext\(ctx\) \{.*?\n\}", html, re.S)

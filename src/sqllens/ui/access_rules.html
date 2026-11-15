@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!--
+  Read-only MCP App widget listing the access rules this server process loaded
+  (get_access_rules — see src/sqllens/server.py). It pulls its data on mount
+  through the App SDK's callServerTool and calls no other tool. Do not add a fetch, XHR,
+  WebSocket or <script src> to a server origin: every server call must go
+  through the host, and tests/unit/test_ui_widget.py asserts it. Do not add
+  editing controls: the rules are set at deploy time.
+
+  Every number and rule value arrives as {"type", "text"}; render the text,
+  never Number(text), or a large integer loses digits.
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Access rules</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: var(--color-background-primary, transparent);
+    --surface: var(--color-background-primary, #ffffff);
+    --fg: var(--color-text-primary, #1a1a1a);
+    --muted: var(--color-text-secondary, #6b7280);
+    --line: var(--color-border-primary, #d1d5db);
+    --row-alt: var(--color-background-secondary, rgba(127, 127, 127, 0.06));
+    --accent: var(--color-background-info, #2563eb);
+    --control-bg: var(--color-background-tertiary, rgba(127, 127, 127, 0.10));
+    --err-fg: var(--color-text-danger, #991b1b);
+    --err-bg: var(--color-background-danger, rgba(220, 38, 38, 0.12));
+    --err-line: var(--color-border-danger, #dc2626);
+    --ok-fg: var(--color-text-success, #166534);
+    --ok-bg: var(--color-background-success, rgba(22, 163, 74, 0.10));
+    --warn-fg: var(--color-text-warning, #92400e);
+    --warn-bg: var(--color-background-warning, rgba(217, 119, 6, 0.14));
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: var(--color-background-primary, #1e1e1e);
+      --fg: var(--color-text-primary, #e6e6e6);
+      --muted: var(--color-text-secondary, #a1a1aa);
+      --line: var(--color-border-primary, #3a3a40);
+    }
+  }
+  html, body {
+    margin: 0; padding: 0;
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+  }
+  .header { margin: 0 16px; padding: 12px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 12px; }
+  .header .k { color: var(--muted); }
+  .header .v { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .toolbar { padding: 12px 16px 0; }
+  .toolbar input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--fg); font: inherit; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; padding: 16px; }
+  .sidebar { border-right: 1px solid var(--line); padding-right: 16px; }
+  .sidebar h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .entry-list { list-style: none; margin: 0; padding: 0; }
+  .entry-list li { padding: 6px 8px; border-radius: 4px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .entry-list li:hover { background: var(--row-alt); }
+  .entry-list li.selected { background: var(--accent); color: white; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--control-bg); color: var(--muted); white-space: nowrap; }
+  .badge.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .badge.ok { background: var(--ok-bg); color: var(--ok-fg); }
+  .entry-list li.selected .badge { background: rgba(255, 255, 255, 0.25); color: white; }
+  .detail h2 { margin: 0 0 4px; font-size: 16px; }
+  .detail .subtitle { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+  .placeholder { color: var(--muted); padding: 24px; text-align: center; }
+  .card { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; background: var(--surface); }
+  .card h3 { margin: 0 0 6px; font-size: 13px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 12px; }
+  .kv .k { color: var(--muted); }
+  .val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+  .vt { font-size: 10px; color: var(--muted); margin-left: 3px; }
+  table.rls { border-collapse: collapse; width: 100%; font-size: 12px; }
+  table.rls th, table.rls td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  details.rule summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }
+  ul.tree { list-style: none; margin: 4px 0 0; padding-left: 14px; border-left: 1px solid var(--line); font-size: 12px; }
+  ul.tree li { margin: 3px 0; }
+  .kind { font-weight: 600; }
+  .banner { padding: 8px 12px; border-radius: 4px; margin: 12px 16px 0; font-size: 12px; display: none; }
+  .banner.show { display: block; }
+  .banner.err { background: var(--err-bg); color: var(--err-fg); border: 1px solid var(--err-line); }
+  @media (max-width: 560px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { border-right: none; border-bottom: 1px solid var(--line); padding-right: 0; padding-bottom: 12px; }
+  }
+</style>
+</head>
+<body>
+<div id="errbar" class="banner err"></div>
+<div id="header" class="header"></div>
+<div class="toolbar"><input id="search" type="search" placeholder="Search rule sets and tables by name" /></div>
+<div class="layout">
+  <aside class="sidebar">
+    <h2>Rules</h2>
+    <ul id="entries" class="entry-list"></ul>
+  </aside>
+  <section class="detail" id="detail">
+    <div class="placeholder">Loading…</div>
+  </section>
+</div>
+
+<script type="module">
+import { App } from "./vendor/app-with-deps.js";
+
+const app = new App({ name: "sqllens-access-rules", version: "1.0.0" }, {}, { autoResize: true });
+
+const state = { data: null, selected: null, search: "" };
+const FLAT = "__flat_rls__";
+
+// ───────── tool call layer ─────────
+async function callTool(name, args) {
+  let result;
+  try {
+    result = await app.callServerTool({ name, arguments: args });
+  } catch (err) {
+    return {
+      isError: true, data: null,
+      message: "Call to " + name + " failed before reaching the server: " +
+        (err && err.message ? err.message : String(err)),
+    };
+  }
+  const text =
+    (result && result.content && result.content[0] && result.content[0].text) || "";
+  let data = null;
+  try { data = JSON.parse(text); } catch (_e) { /* non-JSON message */ }
+  if (result && result.isError) {
+    let msg = text || "tool returned isError with no message";
+    if (data && typeof data === "object" && data.error) msg = String(data.error);
+    return { isError: true, data, message: msg };
+  }
+  if (!data || typeof data !== "object") {
+    return { isError: true, data: null, message: name + " returned a result that is not a JSON object" };
+  }
+  return { isError: false, data, message: null };
+}
+
+function showError(msg) {
+  const bar = document.getElementById("errbar");
+  bar.textContent = msg;
+  bar.classList.add("show");
+}
+
+// ───────── host theming ─────────
+function applyHostContext(ctx) {
+  if (!ctx) return;
+  if (ctx.theme === "dark" || ctx.theme === "light") {
+    document.documentElement.setAttribute("data-theme", ctx.theme);
+  }
+  const vars = ctx.styles && ctx.styles.variables;
+  if (vars && typeof vars === "object") {
+    for (const [k, v] of Object.entries(vars)) {
+      if (k.startsWith("--color-") && typeof v === "string") {
+        document.documentElement.style.setProperty(k, v);
+      }
+    }
+  }
+}
+function applyHostContextSafe() {
+  try { applyHostContext(app.getHostContext ? app.getHostContext() : null); }
+  catch (_e) { /* host did not provide context */ }
+}
+
+// ───────── value rendering ─────────
+function node_(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function isTyped(v) {
+  return v && typeof v === "object" && !Array.isArray(v) &&
+    typeof v.type === "string" && typeof v.text === "string" &&
+    Object.keys(v).length === 2;
+}
+
+// A typed value shows its exact text and its type; a list shows each member.
+function renderValue(v) {
+  const span = node_("span", "val");
+  if (v === null || v === undefined) { span.textContent = "—"; return span; }
+  if (Array.isArray(v)) {
+    span.append("[");
+    v.forEach((item, i) => { if (i) span.append(", "); span.append(renderValue(item)); });
+    span.append("]");
+    return span;
+  }
+  if (isTyped(v)) {
+    span.append(v.type === "str" ? JSON.stringify(v.text) : v.text);
+    span.append(node_("span", "vt", v.type));
+    return span;
+  }
+  if (typeof v === "object") { span.textContent = JSON.stringify(v); return span; }
+  span.textContent = String(v);
+  return span;
+}
+
+function kvGrid(pairs) {
+  const grid = node_("div", "kv");
+  for (const [k, v] of pairs) {
+    grid.append(node_("div", "k", k));
+    const cell = node_("div");
+    cell.append(v instanceof Node ? v : renderValue(v));
+    grid.append(cell);
+  }
+  return grid;
+}
+
+// Row-rule tree: one list item per node, every field the server sent.
+function renderRuleNode(node) {
+  const li = node_("li");
+  if (!node || typeof node !== "object") { li.append(renderValue(node)); return li; }
+  li.append(node_("span", "kind", String(node.kind || "node")));
+  const children = node_("ul", "tree");
+  for (const [key, val] of Object.entries(node)) {
+    if (key === "kind") continue;
+    if (key === "rules" && Array.isArray(val)) {
+      const item = node_("li", null, "rules:");
+      const sub = node_("ul", "tree");
+      for (const child of val) sub.append(renderRuleNode(child));
+      item.append(sub);
+      children.append(item);
+    } else if (key === "parent_rule" && val && typeof val === "object") {
+      const item = node_("li", null, "parent_rule:");
+      const sub = node_("ul", "tree");
+      sub.append(renderRuleNode(val));
+      item.append(sub);
+      children.append(item);
+    } else if (val && typeof val === "object" && !Array.isArray(val) && !isTyped(val)) {
+      const item = node_("li", null, key + ":");
+      item.append(kvGrid(Object.entries(val)));
+      children.append(item);
+    } else {
+      const item = node_("li", null, key + ": ");
+      item.append(renderValue(val));
+      children.append(item);
+    }
+  }
+  li.append(children);
+  return li;
+}
+
+// ───────── render ─────────
+function matches(name) {
+  return !state.search || String(name).toLowerCase().includes(state.search.toLowerCase());
+}
+
+function ruleSets() {
+  const f = state.data && state.data.rule_set_file;
+  return (f && f.rule_sets) || [];
+}
+
+function renderHeader() {
+  const h = document.getElementById("header");
+  h.textContent = "";
+  const d = state.data;
+  if (!d) return;
+  const add = (k, v) => { h.append(node_("div", "k", k)); const c = node_("div", "v"); c.append(v); h.append(c); };
+  add("Loaded at", d.loaded_at);
+  const f = d.rule_set_file;
+  if (f) {
+    add("Rule-set file", f.path);
+    add("SHA-256", f.sha256);
+    add("Binding", f.binding.database + " · accounts " + f.binding.account_ids.join(", "));
+    add("Metadata keys", "rule_set=" + f.metadata_keys.rule_set + ", account_id=" +
+      f.metadata_keys.account_id + ", user_id=" + f.metadata_keys.user_id);
+    const badge = node_("span", "badge " + (f.catalog_check_passed ? "ok" : "warn"),
+      f.catalog_check_passed ? "passed" : "not yet");
+    const cell = node_("span");
+    cell.append(badge);
+    if (!f.catalog_check_passed) cell.append(" — the next rule-set request runs the check");
+    add("Catalog check", cell);
+  } else {
+    add("Rule-set file", "none configured");
+  }
+}
+
+function renderEntries() {
+  const ul = document.getElementById("entries");
+  ul.textContent = "";
+  const entries = [{ key: FLAT, label: "Flat RLS", badge: String(state.data.flat_rls.length) }];
+  for (const rs of ruleSets()) {
+    entries.push({ key: rs.name, label: "Rule set " + rs.name, unconfirmed: rs.refused_unconfirmed, scope: rs.scope });
+  }
+  for (const e of entries) {
+    if (e.key !== FLAT && !matches(e.label) && !matches(e.scope)) {
+      const rs = ruleSets().find((x) => x.name === e.key);
+      if (!rs || !rs.tables.some((t) => matches(t.name))) continue;
+    }
+    const li = node_("li");
+    if (state.selected === e.key) li.classList.add("selected");
+    li.append(node_("span", null, e.label));
+    if (e.unconfirmed) li.append(node_("span", "badge warn", "unconfirmed"));
+    else if (e.badge !== undefined) li.append(node_("span", "badge", e.badge));
+    li.addEventListener("click", () => { state.selected = e.key; render(); });
+    ul.append(li);
+  }
+}
+
+function renderFlat(body) {
+  body.append(node_("h2", null, "Flat RLS"));
+  body.append(node_("p", "subtitle", "[[rls]] rules from the main configuration. No hash: they may come from sqllens.toml or SQLLENS_RLS."));
+  const rules = state.data.flat_rls.filter((r) => matches(r.table));
+  if (!rules.length) { body.append(node_("div", "placeholder", "No flat RLS rules match.")); return; }
+  const table = node_("table", "rls");
+  const head = node_("tr");
+  for (const c of ["table", "column", "operator", "value", "value_from_metadata"]) head.append(node_("th", null, c));
+  table.append(head);
+  for (const r of rules) {
+    const tr = node_("tr");
+    tr.append(node_("td", null, r.table), node_("td", null, r.column), node_("td", null, r.operator));
+    const v = node_("td"); v.append(renderValue(r.value)); tr.append(v);
+    tr.append(node_("td", null, r.value_from_metadata === null ? "—" : r.value_from_metadata));
+    table.append(tr);
+  }
+  body.append(table);
+}
+
+function renderRuleSet(body, rs) {
+  body.append(node_("h2", null, "Rule set " + rs.name));
+  const sub = node_("p", "subtitle", "scope: " + rs.scope);
+  if (rs.refused_unconfirmed) {
+    sub.append(" · ");
+    sub.append(node_("span", "badge warn", "unconfirmed — requests that select it are refused"));
+  }
+  body.append(sub);
+  const src = node_("div", "card");
+  src.append(node_("h3", null, "source"));
+  src.append(kvGrid(Object.entries(rs.source).map(([k, v]) => [k, sourceValue(v)])));
+  body.append(src);
+  const tables = rs.tables.filter((t) => matches(t.name));
+  if (!tables.length) body.append(node_("div", "placeholder", "No tables match."));
+  for (const t of tables) {
+    const card = node_("div", "card");
+    card.append(node_("h3", null, t.name));
+    card.append(kvGrid([
+      ["columns", node_("span", "val", t.columns.join(", "))],
+      ["predicate_columns", node_("span", "val", t.predicate_columns.length ? t.predicate_columns.join(", ") : "—")],
+    ]));
+    if (t.row_rule) {
+      const det = node_("details", "rule");
+      det.append(node_("summary", null, "row_rule"));
+      const tree = node_("ul", "tree");
+      tree.append(renderRuleNode(t.row_rule));
+      det.append(tree);
+      card.append(det);
+    } else {
+      card.append(node_("div", "subtitle", "no row_rule"));
+    }
+    body.append(card);
+  }
+}
+
+// Source booleans and strings arrive as plain JSON; numbers arrive typed.
+function sourceValue(v) {
+  if (typeof v === "boolean") return { type: "bool", text: v ? "true" : "false" };
+  if (typeof v === "string") return { type: "str", text: v };
+  if (Array.isArray(v)) {
+    // global_switches: [{name, value: <bool>}]
+    const span = node_("span", "val");
+    v.forEach((s, i) => {
+      if (i) span.append(", ");
+      span.append(String(s.name) + "=");
+      span.append(renderValue(sourceValue(s.value)));
+    });
+    return span;
+  }
+  return v;
+}
+
+function renderDetail() {
+  const body = document.getElementById("detail");
+  body.textContent = "";
+  if (state.data.empty) {
+    body.append(node_("div", "placeholder", "No access rules are loaded."));
+    return;
+  }
+  if (state.selected === FLAT) { renderFlat(body); return; }
+  const rs = ruleSets().find((x) => x.name === state.selected);
+  if (rs) renderRuleSet(body, rs);
+  else body.append(node_("div", "placeholder", "Select an entry."));
+}
+
+function render() {
+  renderHeader();
+  renderEntries();
+  renderDetail();
+}
+
+document.getElementById("search").addEventListener("input", (ev) => {
+  state.search = ev.target.value;
+  if (state.data) { renderEntries(); renderDetail(); }
+});
+
+async function load() {
+  const r = await callTool("get_access_rules", {});
+  if (r.isError) {
+    showError("get_access_rules: " + r.message);
+    const body = document.getElementById("detail");
+    body.textContent = "";
+    body.append(node_("div", "placeholder", "The access rules could not be loaded."));
+    return;
+  }
+  state.data = r.data;
+  const sets = ruleSets();
+  state.selected = state.data.flat_rls.length || !sets.length ? FLAT : sets[0].name;
+  render();
+}
+
+app.connect().then(async () => {
+  applyHostContextSafe();
+  await load();
+}).catch((err) => {
+  showError("Failed to connect to host: " + (err && err.message ? err.message : String(err)));
+});
+</script>
+</body>
+</html>

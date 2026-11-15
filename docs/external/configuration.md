@@ -292,6 +292,27 @@ As an environment variable: `SQLLENS_RULE_SETS__FILE=rule-sets.toml`. An unknown
 
 While a rule-set file is configured, every `query_database` request must name a rule set, an account and a user, the assistant saves nothing to memory, and `sqllens verify-memory` runs every case under the rule set, account and user given by its `--rule-set`, `--account` and `--user` options. Each request also writes one `rule-set audit:` line at info level, and each refusal one line at warning level. For the file format, the request fields, the refusal messages, the log lines and the limits, see [Per-role rule sets](rule-sets.md), the canonical definition of the file format.
 
+## Section: `[access_rules]`
+
+A read-only view of the access rules a running server loaded: its `[[rls]]` rules and, when a rule-set file is configured, that file's rule sets.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `allow_admin_tools` | Boolean | `false` | When `true`, SQL Lens registers the `get_access_rules` tool and the access-rules widget (`ui://sqllens/access-rules.html`). When `false`, neither is registered. |
+
+```toml
+[access_rules]
+allow_admin_tools = true
+```
+
+As an environment variable: `SQLLENS_ACCESS_RULES__ALLOW_ADMIN_TOOLS=true`. An unknown key inside `[access_rules]` makes the configuration fail to load.
+
+`get_access_rules` takes no arguments and changes nothing. It returns the rules the server process holds in memory: each `[[rls]]` rule, and for the rule-set file its path, the SHA-256 hash of the file's bytes as they were read at load, its binding and metadata key names, whether the catalog check has passed yet in this process, and each rule set with its `scope`, its `source` fields, whether requests that select it are refused because it is not confirmed, and its tables and row rules. It also returns the time the configuration was loaded. A change to the file on disk shows only after a restart. To check the deployed file against the committed one, compare the hash with `sha256sum` of the committed file. `[[rls]]` rules have no hash.
+
+The widget calls `get_access_rules` when it opens and has no controls that change a rule.
+
+The tool is marked for the widget only (`_meta.ui.visibility = ["app"]`), so a host that follows the MCP Apps specification keeps it out of the model's tool list. Nothing else limits who may call it: while the switch is on, any caller that passes the server's authentication can call it, and the result shows your schema and every role's scope. Turn it on only on an instance that end users' assistants cannot reach, as for the memory and profile administration tools.
+
 ## Top-level field: `config_version`
 
 A single top-level integer, `config_version`, defaults to `1`. It is accepted and validated but currently has no effect. It is reserved so future releases can detect and migrate older configuration files. You do not need to set it.

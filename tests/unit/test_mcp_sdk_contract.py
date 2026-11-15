@@ -40,7 +40,9 @@ _MEMORY_ADMIN = {
     "add_memories", "export_memories", "get_memory_stats",
 }
 _PROFILE_ADMIN = {"list_profiles", "get_profile", "upsert_profile", "delete_profile"}
+_ACCESS_RULES = {"get_access_rules"}
 _ARGUMENTS = {
+    "get_access_rules": set(),
     "query_database": {"question", "conversation_id", "profile"},
     "list_data_sources": set(),
     "import_memory": {"bundle_json"},
@@ -84,10 +86,12 @@ def _patch_impl(monkeypatch: pytest.MonkeyPatch, impl) -> None:
         ({"allow_import": True}, _ALWAYS | _IMPORT),
         ({"allow_admin_tools": True}, _ALWAYS | _MEMORY_ADMIN),
         ({"profiles_allow_admin_tools": True}, _ALWAYS | _PROFILE_ADMIN),
+        ({"access_rules_allow_admin_tools": False}, _ALWAYS),
+        ({"access_rules_allow_admin_tools": True}, _ALWAYS | _ACCESS_RULES),
         (
             {"allow_import": True, "allow_admin_tools": True,
-             "profiles_allow_admin_tools": True},
-            _ALWAYS | _IMPORT | _MEMORY_ADMIN | _PROFILE_ADMIN,
+             "profiles_allow_admin_tools": True, "access_rules_allow_admin_tools": True},
+            _ALWAYS | _IMPORT | _MEMORY_ADMIN | _PROFILE_ADMIN | _ACCESS_RULES,
         ),
     ],
 )
@@ -103,6 +107,17 @@ async def test_registered_tools_follow_switches(
         assert set(tool.input_schema.get("properties", {})) == _ARGUMENTS[tool.name]
     query = next(tool for tool in tools if tool.name == "query_database")
     assert query.meta == {"ui": {"resourceUri": _QUERY_WIDGET}}
+    for tool in tools:
+        if tool.name == "get_access_rules":
+            assert tool.meta == {"ui": {"visibility": ["app"]}}
+
+
+async def test_access_rules_resource_follows_switch(tmp_path: Path) -> None:
+    for on in (False, True):
+        mcp = build_server(_cfg(tmp_path, access_rules_allow_admin_tools=on))
+        async with Client(mcp) as client:
+            uris = {str(r.uri) for r in (await client.list_resources()).resources}
+        assert ("ui://sqllens/access-rules.html" in uris) is on
 
 
 async def test_widget_resources_listed_and_read(
@@ -110,10 +125,12 @@ async def test_widget_resources_listed_and_read(
 ) -> None:
     patch_fake_embeddings(monkeypatch)
     mcp = build_server(
-        _cfg(tmp_path, allow_admin_tools=True, profiles_allow_admin_tools=True)
+        _cfg(tmp_path, allow_admin_tools=True, profiles_allow_admin_tools=True,
+             access_rules_allow_admin_tools=True)
     )
     uris = {
         _QUERY_WIDGET, "ui://sqllens/memory-admin.html", "ui://sqllens/config-admin.html",
+        "ui://sqllens/access-rules.html",
     }
     async with Client(mcp) as client:
         listed = (await client.list_resources()).resources

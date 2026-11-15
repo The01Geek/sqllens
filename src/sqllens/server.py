@@ -73,6 +73,9 @@ _MEMORY_WIDGET_URI = "ui://sqllens/memory-admin.html"
 # cfg.profiles.allow_admin_tools alongside the four backing tools so a host
 # never advertises a widget whose backing tools are off.
 _CONFIG_WIDGET_URI = "ui://sqllens/config-admin.html"
+# Read-only access-rules widget, same self-driving shape; gated on
+# cfg.access_rules.allow_admin_tools together with get_access_rules.
+_ACCESS_RULES_WIDGET_URI = "ui://sqllens/access-rules.html"
 # Ordered typed-block data channel. The single structured-data channel for the
 # query result: a JSON array of discriminated blocks ({"type": "text", "text":
 # ...}, {"type": "table", ...table payload...}, {"type": "chart", ...chart
@@ -1078,6 +1081,40 @@ def build_server(cfg: Config) -> MCPServer:
                     "Failed to delete from the profile store; check the server logs."
                 ) from None
             return json.dumps({"deleted": True, "name": name})
+
+    # Opt-in, default OFF, read-only. No caller check beyond the server's
+    # authentication: visibility ["app"] only asks a host to keep the tool out
+    # of the model's tool list.
+    if cfg.access_rules.allow_admin_tools:
+        from sqllens.access_rules import access_rules_json
+
+        @_resource(
+            _ACCESS_RULES_WIDGET_URI,
+            mime_type="text/html;profile=mcp-app",
+            meta={"ui": {"prefersBorder": True}},
+        )
+        def access_rules_widget() -> str:
+            return load_widget_html("access_rules.html")
+
+        @_tool(structured_output=False, meta={"ui": {"visibility": ["app"]}})
+        async def get_access_rules() -> str | CallToolResult:
+            """List the row-level-security rules and rule sets this server process loaded.
+
+            Read-only. Returns JSON with ``loaded_at`` (when the configuration
+            holding these rules loaded, ISO 8601 UTC), ``flat_rls`` (each
+            ``[[rls]]`` rule), ``rule_set_file`` (path, SHA-256 of the bytes
+            read at load, binding, metadata key names, catalog-check state and
+            each rule set with its source, refusal state and tables), and
+            ``empty``. Every number and rule value is ``{"type", "text"}``.
+            Returns ``isError`` when ``rule_sets.file`` is set but was never
+            loaded.
+            """
+            # Built from the cfg the guards were built from; re-reading the
+            # files here could describe rules this process does not enforce.
+            try:
+                return access_rules_json(cfg)
+            except RuntimeError as exc:
+                return _json_error_result({"error": str(exc)})
 
     return mcp
 

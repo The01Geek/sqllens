@@ -21,6 +21,8 @@ fail loudly, not silently render a blank iframe):
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -409,3 +411,54 @@ def test_memory_admin_widget_clear_confirm_is_uppercase_token() -> None:
     assert 'confirmText !== "CLEAR"' in html
 
 
+
+
+# --- access-rules widget (#404) ------------------------------------------------
+
+
+def _access_rules_raw() -> str:
+    from importlib.resources import files
+    return files("sqllens.ui").joinpath("access_rules.html").read_text(encoding="utf-8")
+
+
+def test_access_rules_widget_inlines_app_sdk_only() -> None:
+    html = ui.load_widget_html("access_rules.html")
+    assert "./vendor/" not in html
+    assert "var App = " in html
+    assert "echarts" not in _access_rules_raw()
+
+
+def test_access_rules_widget_calls_only_get_access_rules_through_host() -> None:
+    raw = _access_rules_raw()
+    forbidden = ["fetch(", "XMLHttpRequest", "new WebSocket", "EventSource", "navigator.sendBeacon"]
+    assert [name for name in forbidden if name in raw] == []
+    assert 'src="http' not in raw and "src='http" not in raw
+    assert raw.count("app.callServerTool") == 1
+    assert re.findall(r'callTool\("([a-z_]+)"', raw) == ["get_access_rules"]
+
+
+def test_access_rules_widget_has_no_editing_controls() -> None:
+    raw = _access_rules_raw()
+    # The only input is the search box; no buttons, forms, selects or textareas.
+    assert re.findall(r"<input\b[^>]*>", raw) == [
+        '<input id="search" type="search" placeholder="Search rule sets and tables by name" />'
+    ]
+    for tag in ("<button", "<form", "<select", "<textarea"):
+        assert tag not in raw, tag
+    created = set(re.findall(r'(?:createElement|node_)\("([a-z0-9]+)"', raw))
+    assert not created & {"button", "input", "select", "textarea", "form"}, created
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node required for the syntax check")
+def test_access_rules_widget_inlined_module_parses() -> None:
+    # The inlined SDK bundle declares short top-level names in the same module
+    # scope; a widget helper reusing one is a SyntaxError that leaves the
+    # widget on its placeholder.
+    html = ui.load_widget_html("access_rules.html")
+    script = re.search(r'<script type="module">(.*)</script>', html, re.S)
+    assert script
+    result = subprocess.run(
+        [shutil.which("node"), "--check", "--input-type=module"],
+        input=script.group(1), capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
