@@ -14,7 +14,7 @@ New to the codebase? Start with [architecture/overview.md](architecture/overview
 
 | Page | What it covers | Who should read it |
 |---|---|---|
-| [mcp-server/tools.md](mcp-server/tools.md) | The tools MCP clients see: registration, the `query_database` agent loop, the ordered `sqllens/blocks` wire contract, every `_meta` side channel (executed SQL, memory hit/miss, agent trace, configured model), the result widget, the memory-administration tools, and the error/success contract. | Anyone changing a tool, a `_meta` channel, or the widget payload. |
+| [mcp-server/tools.md](mcp-server/tools.md) | The tools MCP clients see: registration, the `query_database` agent loop, the ordered `sqllens/blocks` wire contract, every `_meta` side channel (the agent's SQL, memory hit/miss, agent trace, configured model), the result widget, the memory-administration tools, and the error/success contract. | Anyone changing a tool, a `_meta` channel, or the widget payload. |
 | [mcp-server/transport.md](mcp-server/transport.md) | How requests reach `build_server`: stdio versus Streamable HTTP dispatch, the auth middleware, and the path normalizer. | Anyone changing how the server is reached or exposed. |
 
 ## Agent

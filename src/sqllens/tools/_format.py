@@ -234,7 +234,7 @@ def components_to_blocks(
       ``is_introspection_query`` under ``dialect``) clears an earlier error
       within the same turn,
       so the recovered answer reaches the caller.
-    - **Last-wins for executed SQL and memory hit/miss.** ``query_info`` is
+    - **Last-wins for the captured SQL and memory hit/miss.** ``query_info`` is
       built from the *last* ``run_sql`` STATUS_CARD's ``metadata["sql"]``;
       ``memory_info`` is built from the *last* ``search_saved_correct_tool_uses``
       STATUS_CARD's ``metadata["memory_search"]``. The cards stream twice per
