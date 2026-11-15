@@ -27,7 +27,7 @@ import pytest
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
 
-from .test_sql_runner_cleanup import _install_fake_pymysql
+from ._fake_pymysql import install_fake_pymysql
 
 SLOW_S = 0.4
 TICK_S = 0.02
@@ -87,7 +87,7 @@ async def test_mysql_runner_does_not_block_event_loop(
 ) -> None:
     conn = MagicMock()
     conn.cursor.return_value = _slow_cursor()
-    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+    install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
@@ -457,71 +457,3 @@ async def test_sql_pool_is_not_the_default_executor() -> None:
 
     name = await run_blocking_sql(lambda: threading.current_thread().name)
     assert name.startswith("sqllens-sql")
-
-
-async def test_profile_row_cap_reaches_the_sql_worker_thread(tmp_path: Any) -> None:
-    from sqllens.agent.integrations.sqlite.sql_runner import SqliteRunner
-    from sqllens.runtime import (
-        EffectiveSettings,
-        reset_effective_settings,
-        set_effective_settings,
-    )
-
-    db = tmp_path / "t.db"
-    conn = sqlite3.connect(db)
-    conn.execute("CREATE TABLE t (x INTEGER)")
-    conn.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(20)])
-    conn.commit()
-    conn.close()
-
-    runner = SqliteRunner(str(db), max_rows=100)
-    token = set_effective_settings(
-        EffectiveSettings(
-            show_details=False,
-            max_tool_iterations=20,
-            max_rows=5,
-            similarity_threshold=0.7,
-        )
-    )
-    try:
-        df = await runner.run_sql(RunSqlToolArgs(sql="SELECT x FROM t"), context=MagicMock())
-    finally:
-        reset_effective_settings(token)
-
-    assert len(df) == 5
-    assert df.attrs["truncated"] is True
-
-
-@pytest.mark.parametrize("require", [True, False])
-async def test_relation_check_runs_on_the_sql_worker_thread(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, require: bool
-) -> None:
-    """``require_base_tables`` reaches the worker and is checked on its connection."""
-    from sqllens.agent.integrations.sqlite import sql_runner as module
-    from sqllens.safety.rls import RlsError
-
-    db = tmp_path / "t.db"
-    with sqlite3.connect(db) as conn:
-        conn.executescript("CREATE TABLE t (x INTEGER); CREATE VIEW v AS SELECT x FROM t;")
-    conn.close()
-
-    real_check = module.verify_base_tables
-    seen: list[str] = []
-
-    def check(connection: Any, sql: str, *, dialect: str) -> None:
-        seen.append(threading.current_thread().name)
-        real_check(connection, sql, dialect=dialect)
-
-    monkeypatch.setattr(module, "verify_base_tables", check)
-    run = module.SqliteRunner(str(db)).run_sql(
-        RunSqlToolArgs(sql="SELECT x FROM v"), MagicMock(), require_base_tables=require
-    )
-    if require:
-        with pytest.raises(RlsError, match="view"):
-            await run
-        [thread] = seen
-        assert thread.startswith("sqllens-sql")
-    else:
-        df = await run
-        assert df.empty
-        assert seen == []

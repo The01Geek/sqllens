@@ -23,7 +23,7 @@ from sqllens.safety import (
 from sqllens.safety.relations import verify_base_tables
 from sqllens.safety.rls import apply_rls
 
-from .test_sql_runner_cleanup import _install_fake_pymysql
+from ._fake_pymysql import install_fake_pymysql
 
 _RULE = RlsRule(table="orders", column="tenant_id", value="alpha")
 
@@ -336,7 +336,7 @@ def _refusing_check(calls):
 @pytest.mark.parametrize("require", [True, False])
 async def test_mysql_runner_checks_relations_on_its_connection(monkeypatch, require) -> None:
     conns, connect = _fresh_connections()
-    _install_fake_pymysql(monkeypatch, connect)
+    install_fake_pymysql(monkeypatch, connect)
     from sqllens.agent.integrations.mysql import sql_runner
 
     calls: list = []
@@ -573,7 +573,7 @@ def _catalog_connections(catalog: _FakeCatalog):
 async def test_mysql_runner_refuses_database_routine_before_executing(monkeypatch) -> None:
     catalog = _FakeCatalog(routines={"all_orders"})
     conns, connect = _catalog_connections(catalog)
-    _install_fake_pymysql(monkeypatch, connect)
+    install_fake_pymysql(monkeypatch, connect)
     from sqllens.agent.integrations.mysql import sql_runner
 
     runner = sql_runner.MySQLRunner(

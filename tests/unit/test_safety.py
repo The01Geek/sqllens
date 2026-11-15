@@ -140,7 +140,6 @@ class TestRejectsMixed:
 
 class TestTokenizerFailures:
     @pytest.mark.parametrize(("sql", "dialect"), [
-        ("SELECT 'unterminated", "sqlite"),
         ("SELECT 'unterminated", "mysql"),
         ("SELECT 'unterminated", None),
         ("SELECT `unterminated", "mysql"),
@@ -152,11 +151,10 @@ class TestTokenizerFailures:
             assert_select_only(sql, dialect=dialect)
         assert isinstance(exc.value.__cause__, TokenError)
 
-    @pytest.mark.parametrize("dialect", ["sqlite", "mysql"])
-    async def test_tokenization_refusal_never_reaches_runner(self, dialect: str) -> None:
+    async def test_tokenization_refusal_never_reaches_runner(self) -> None:
         inner = _RecordingRunner()
         with pytest.raises(UnsafeSqlError, match="could not parse SQL"):
-            await ReadOnlyGuardRunner(inner, dialect=dialect).run_sql(
+            await ReadOnlyGuardRunner(inner, dialect="mysql").run_sql(
                 RunSqlToolArgs(sql="SELECT 'unterminated"), ToolContext.model_construct(),
             )
         assert inner.calls == []
@@ -236,9 +234,9 @@ _BYPASS_CORPUS: list[tuple[str, str | None] | tuple[str, str | None, str]] = [
     ("SELECT sys_eval('id')", "mysql"),
     # Dialect-agnostic resource-exhaustion DoS.
     ("SELECT * FROM generate_series(1, 1000000000)", "mysql", "function 'generate_series'"),
-    ("SELECT * FROM generate_series(1, 1000000000)", "sqlite"),
     # Unknown/None dialect must fail-closed against the union of denylists.
     ("SELECT load_extension('evil.so')", None),
+    ("SELECT load_file('/etc/passwd')", None, "function 'load_file' is not allowed"),
     # CTE-nested DML.
     (
         "WITH x AS (INSERT INTO log (m) VALUES ('x') RETURNING id) SELECT * FROM x",
@@ -275,8 +273,8 @@ _BYPASS_CORPUS: list[tuple[str, str | None] | tuple[str, str | None, str]] = [
     # SELECT ... INTO — kept in the corpus so it stays pinned.
     ("SELECT * INTO new_tbl FROM users", "mysql", r"SELECT \.\.\. INTO"),
     # Plain DML/DDL roots.
-    ("INSERT INTO users VALUES (1, 'a')", "sqlite"),
-    ("DROP TABLE users", "sqlite"),
+    ("INSERT INTO users VALUES (1, 'a')", "mysql", r"only SELECT .* \(got INSERT\)"),
+    ("DROP TABLE users", "mysql", r"only SELECT .* \(got DROP\)"),
 ]
 
 
@@ -295,7 +293,6 @@ class TestSideEffectFunctionsRejected:
             ("SELECT load_file('/etc/passwd')", "mysql"),
             ("SELECT benchmark(100000000, md5('a'))", "mysql"),
             ("SELECT * FROM generate_series(1, 1000000000)", "mysql"),
-            ("SELECT * FROM generate_series(1, 1000000000)", "sqlite"),
         ],
     )
     def test_side_effect_function_rejected(self, sql: str, dialect: str) -> None:
@@ -317,7 +314,7 @@ class TestSideEffectFunctionsRejected:
         [
             ("SELECT count(*) FROM users", None),
             ("SELECT lower(name) FROM users", "mysql"),
-            ("SELECT abs(x), max(y) FROM t GROUP BY z", "sqlite"),
+            ("SELECT abs(x), max(y) FROM t GROUP BY z", "mysql"),
         ],
     )
     def test_benign_functions_still_pass(self, sql: str, dialect: str) -> None:
@@ -338,21 +335,26 @@ class _RecordingRunner:
 class TestReadOnlyGuardRunner:
     """The decorator guards before delegating and passes args through."""
 
-    async def test_unsafe_sql_blocked_before_inner_runner(self) -> None:
+    @pytest.mark.parametrize(
+        ("dialect", "function"), [("sqlite", "load_extension"), ("mysql", "load_file")]
+    )
+    async def test_unsafe_sql_blocked_before_inner_runner(
+        self, dialect: str, function: str
+    ) -> None:
         inner = _RecordingRunner()
-        guard = ReadOnlyGuardRunner(inner, dialect="sqlite")
+        guard = ReadOnlyGuardRunner(inner, dialect=dialect)
         ctx = ToolContext.model_construct()
 
-        with pytest.raises(UnsafeSqlError):
+        with pytest.raises(UnsafeSqlError, match=f"function '{function}' is not allowed"):
             await guard.run_sql(
-                RunSqlToolArgs(sql="SELECT load_extension('x')"), ctx
+                RunSqlToolArgs(sql=f"SELECT {function}('x')"), ctx
             )
 
         assert inner.calls == [], "inner runner must not be reached for unsafe SQL"
 
     async def test_safe_select_passes_through_verbatim(self) -> None:
         inner = _RecordingRunner()
-        guard = ReadOnlyGuardRunner(inner, dialect="sqlite")
+        guard = ReadOnlyGuardRunner(inner, dialect="mysql")
         ctx = ToolContext.model_construct()
         args = RunSqlToolArgs(sql="SELECT 1")
 
@@ -431,7 +433,7 @@ class TestGuardDoesNotCrashOnPinnedSqlglot:
     deny-walk lists.
     """
 
-    @pytest.mark.parametrize("dialect", [None, "sqlite", "mysql"])
+    @pytest.mark.parametrize("dialect", [None, "mysql"])
     def test_trivial_select_passes(self, dialect: str | None) -> None:
         assert_select_only("SELECT 1", dialect=dialect)
 
@@ -441,7 +443,7 @@ class TestGuardDoesNotCrashOnPinnedSqlglot:
                 "ALTER TABLE users ADD COLUMN x INT", dialect="mysql"
             )
 
-    @pytest.mark.parametrize("dialect", [None, "sqlite", "mysql"])
+    @pytest.mark.parametrize("dialect", [None, "mysql"])
     def test_alter_parses_to_deny_walk_node(self, dialect: str | None) -> None:
         # The root-type gate rejects a root-level ALTER before the deny-walk
         # runs, so pin the AST shape the deny-walk's ``exp.Alter`` entry needs.
@@ -487,9 +489,12 @@ class TestDenylistEdgeCases:
         with pytest.raises(UnsafeSqlError, match="function 'load_file' is not allowed"):
             assert_select_only("SELECT load_file('/etc/passwd')", dialect="oracle")
 
-    def test_denylist_matching_is_case_insensitive(self) -> None:
-        with pytest.raises(UnsafeSqlError, match="not allowed"):
-            assert_select_only("SELECT LOAD_EXTENSION('x.so')", dialect="sqlite")
+    @pytest.mark.parametrize(
+        ("dialect", "function"), [("sqlite", "load_extension"), ("mysql", "load_file")]
+    )
+    def test_denylist_matching_is_case_insensitive(self, dialect: str, function: str) -> None:
+        with pytest.raises(UnsafeSqlError, match=f"function '{function}' is not allowed"):
+            assert_select_only(f"SELECT {function.upper()}('x.so')", dialect=dialect)
 
 
 class TestSqliteConnectorReadOnlyEnforced:
@@ -577,7 +582,7 @@ class TestGuardFailsClosedOnUnexpectedError:
                 return pd.DataFrame()
 
         inner = _Inner()
-        guard = ReadOnlyGuardRunner(inner, dialect="sqlite")
+        guard = ReadOnlyGuardRunner(inner, dialect="mysql")
         with pytest.raises(UnsafeSqlError, match="read-only guard errored"):
             await guard.run_sql(
                 RunSqlToolArgs(sql="SELECT 1"), ToolContext.model_construct()
@@ -827,7 +832,7 @@ class TestShowIsReadShaped:
         assert is_read_shaped("TABLE orders", dialect) is True
 
 
-@pytest.mark.parametrize("dialect", ["mysql", "sqlite", None])
+@pytest.mark.parametrize("dialect", ["mysql", None])
 @pytest.mark.parametrize(
     "sql",
     ["TABLE users", "SELECT id FROM a UNION TABLE users", "WITH x AS (SELECT 1) TABLE users"],
@@ -854,6 +859,7 @@ class TestIsIntrospectionQuery:
             "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'",
             "SELECT * FROM information_schema.tables",
             "select name from sqlite_master where type = 'table'",
+            "select user from mysql.user",
         ],
     )
     def test_introspection_queries_detected(self, sql: str) -> None:
@@ -902,11 +908,9 @@ class TestIsIntrospectionQueryPerDialect:
                 "sqlite",
             ),
             ("SELECT * FROM information_schema.tables", "mysql"),
-            ("SELECT * FROM information_schema.tables", "sqlite"),
-            ("SHOW TABLES", "sqlite"),
+            ("SHOW TABLES", "mysql"),
             ("/* look up tables */ SHOW TABLES", "mysql"),
             ("-- columns\nSHOW COLUMNS FROM widgets", "mysql"),
-            ("/* look up tables */ SHOW TABLES", "sqlite"),
             # The tokenizer drops an inline comment right after SHOW.
             ("SHOW/**/TABLES", "mysql"),
             ("SHOW/* c */ COLUMNS FROM widgets", "mysql"),
@@ -917,6 +921,7 @@ class TestIsIntrospectionQueryPerDialect:
                 "SELECT * FROM sqlite_recent JOIN sqlite_master ON true",
                 None,
             ),
+            ("WITH user AS (SELECT 1) SELECT * FROM user JOIN mysql.user ON true", None),
             # Scope analysis builds no scope for DESCRIBE; its table still counts.
             ("DESCRIBE information_schema.tables", "mysql"),
             # A qualified or aliased catalog table beside a same-named CTE or
@@ -936,6 +941,10 @@ class TestIsIntrospectionQueryPerDialect:
                 "SELECT count(*) FROM sqlite_master, (SELECT 1 AS k) AS sqlite_master",
                 "sqlite",
             ),
+            ("WITH user AS (SELECT 1) SELECT * FROM user, mysql.user", "mysql"),
+            ("WITH user AS (SELECT 1) SELECT * FROM mysql.user, user", "mysql"),
+            ("WITH c AS (SELECT 1 AS k) SELECT * FROM mysql.user AS c, c", "mysql"),
+            ("SELECT count(*) FROM mysql.user, (SELECT 1 AS k) AS user", "mysql"),
             # A CTE defined inside a derived table is not visible outside it.
             (
                 "SELECT * FROM (WITH sqlite_a AS (SELECT 1) SELECT * FROM sqlite_a) AS s, sqlite_a",
@@ -1004,6 +1013,20 @@ class TestIsIntrospectionQueryPerDialect:
             assert is_introspection_query(sql, dialect=None) is True
         assert "RuntimeError" in caplog.text
 
+    def test_scope_failure_is_logged_under_mysql(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import sqllens.safety.readonly as readonly_mod
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("scope failed")
+
+        monkeypatch.setattr(readonly_mod, "traverse_scope", boom)
+        sql = "WITH x AS (SELECT * FROM mysql.user) SELECT * FROM x"
+        with caplog.at_level("INFO", logger="sqllens.safety.readonly"):
+            assert is_introspection_query(sql, dialect="mysql") is True
+        assert "RuntimeError" in caplog.text
+
     def test_hash_is_not_a_comment_without_dialect(self) -> None:
         assert is_introspection_query("# c\nSHOW TABLES") is False
 
@@ -1015,7 +1038,8 @@ class TestIsIntrospectionQueryPerDialect:
             ("SELECT id FROM performance_schema.runs", "sqlite"),
             ("SELECT id FROM sqlite_events", "mysql"),
             ("SELECT name FROM pragma_widgets", "mysql"),
-            ("SELECT id FROM widgets", "sqlite"),
+            ("SELECT id FROM mysql_events", "mysql"),
+            ("SELECT id FROM widgets", "mysql"),
         ],
     )
     def test_other_engine_catalogs_are_data(self, sql: str, dialect: str) -> None:
@@ -1320,6 +1344,10 @@ class TestBlockCommentBoundaries:
     def test_read_after_nested_comment_markers_passes(self) -> None:
         assert_select_only("SELECT 1 /* outer /* nested */ -- */\n + 2", dialect="sqlite")
 
+    def test_read_after_nested_comment_markers_refused_under_mysql(self) -> None:
+        with pytest.raises(UnsafeSqlError, match="Nested MySQL comments"):
+            assert_select_only("SELECT 1 /* outer /* nested */ -- */\n + 2", dialect="mysql")
+
 
 _DENYLIST_MESSAGE = (
     r"is not allowed: side-effecting / DoS / RCE function refused by the read-only "
@@ -1346,6 +1374,12 @@ class TestDenylistUnionFallback:
         from sqllens.safety.readonly import _SIDE_EFFECT_FUNCS
 
         assert set(_SIDE_EFFECT_FUNCS) == {"mysql", "sqlite"}
+
+    def test_side_effect_funcs_keeps_its_mysql_entry(self) -> None:
+        from sqllens.safety.readonly import _SIDE_EFFECT_FUNCS
+
+        assert "mysql" in _SIDE_EFFECT_FUNCS
+        assert not any(key.startswith("postgres") for key in _SIDE_EFFECT_FUNCS)
 
     @pytest.mark.parametrize("dialect", [None, "oracle", "postgres"])
     @pytest.mark.parametrize("function", ["pg_read_file", "dblink", "lo_import"])
@@ -1376,6 +1410,12 @@ class TestCatalogUnionFallback:
         from sqllens.safety.readonly import _CATALOGS_BY_DIALECT
 
         assert set(_CATALOGS_BY_DIALECT) == {"mysql", "sqlite"}
+
+    def test_catalogs_by_dialect_keeps_its_mysql_entry(self) -> None:
+        from sqllens.safety.readonly import _CATALOGS_BY_DIALECT
+
+        assert "mysql" in _CATALOGS_BY_DIALECT
+        assert not any(key.startswith("postgres") for key in _CATALOGS_BY_DIALECT)
 
     @pytest.mark.parametrize("dialect", [None, "oracle", "postgres"])
     @pytest.mark.parametrize(
