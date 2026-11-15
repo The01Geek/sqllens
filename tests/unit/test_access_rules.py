@@ -172,10 +172,18 @@ async def test_rule_set_file_listing(tmp_path: Path) -> None:
     assert (confirmed["name"], draft["name"]) == ("2", "3")
     assert confirmed["refused_unconfirmed"] is False
     assert draft["refused_unconfirmed"] is True
-    assert draft["source"] == {"confirmed_against_production": False}
-    expected_source = dict(FULL_SOURCE)
-    expected_source["permission_list_version"] = {"type": "int", "text": str(BIG)}
-    assert confirmed["source"] == expected_source
+    assert draft["source"] == {"confirmed_against_production": {"type": "bool", "text": "false"}}
+    assert confirmed["source"] == {
+        "confirmed_against_production": {"type": "bool", "text": "true"},
+        "role_id": {"type": "str", "text": "2"},
+        "role_name": {"type": "str", "text": "Sales rep"},
+        "role_copy": {"type": "str", "text": "Sees own customers"},
+        "permission_list_version": {"type": "int", "text": str(BIG)},
+        "global_switches": [{"name": "exports", "value": {"type": "bool", "text": "false"}}],
+        "permission_fingerprint": {"type": "str", "text": FULL_SOURCE["permission_fingerprint"]},
+        "application_commit": {"type": "str", "text": FULL_SOURCE["application_commit"]},
+        "generated_on": {"type": "str", "text": "2026-11-01"},
+    }
     tables = {t["name"]: t for t in confirmed["tables"]}
     assert tables["customers"]["columns"] == ["id", "name", "region_id"]
     assert tables["customers"]["predicate_columns"] == ["sales_rep_id"]

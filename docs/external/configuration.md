@@ -311,7 +311,7 @@ As an environment variable: `SQLLENS_ACCESS_RULES__ALLOW_ADMIN_TOOLS=true`. An u
 
 The widget calls `get_access_rules` when it opens and has no controls that change a rule.
 
-The tool is marked for the widget only (`_meta.ui.visibility = ["app"]`), so a host that follows the MCP Apps specification keeps it out of the model's tool list. Nothing else limits who may call it: while the switch is on, any caller that passes the server's authentication can call it, and the result shows your schema and every role's scope. Turn it on only on an instance that end users' assistants cannot reach, as for the memory and profile administration tools.
+The tool is marked for the widget only (`_meta.ui.visibility = ["app"]`), so a host that follows the MCP Apps specification keeps it out of the model's tool list. Nothing else limits who may call it: while the switch is on, any caller that passes the server's authentication can call it, and the result shows your schema and every role's scope. Turn it on only on an instance that end users' assistants cannot reach, the same advice as for the memory administration tools in [Section: `[memory]`](#section-memory).
 
 ## Top-level field: `config_version`
 

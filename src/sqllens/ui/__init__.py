@@ -56,7 +56,7 @@ _ECHARTS_SCRIPT_TAG = '<script src="./vendor/echarts.min.js"></script>'
 _MARKDOWN_IT_SCRIPT_TAG = '<script src="./vendor/markdown-it.min.js"></script>'
 
 # The ext-apps bundle ends with one ESM export block ``export { ... eI as App };``
-# from which we extract the local identifier for ``App``. Used by both widgets.
+# from which we extract the local identifier for ``App``. Used by every widget.
 _BUNDLE_EXPORT_RE = re.compile(r"export\s*\{([^}]*)\}\s*;?\s*$")
 _APP_ALIAS_RE = re.compile(r"(\w+)\s+as\s+App\b")
 

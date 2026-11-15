@@ -352,21 +352,16 @@ function renderRuleSet(body, rs) {
   }
 }
 
-// Source booleans and strings arrive as plain JSON; numbers arrive typed.
+// global_switches is [{name, value: <typed bool>}]; every other source value is typed.
 function sourceValue(v) {
-  if (typeof v === "boolean") return { type: "bool", text: v ? "true" : "false" };
-  if (typeof v === "string") return { type: "str", text: v };
-  if (Array.isArray(v)) {
-    // global_switches: [{name, value: <bool>}]
-    const span = node_("span", "val");
-    v.forEach((s, i) => {
-      if (i) span.append(", ");
-      span.append(String(s.name) + "=");
-      span.append(renderValue(sourceValue(s.value)));
-    });
-    return span;
-  }
-  return v;
+  if (!Array.isArray(v)) return v;
+  const span = node_("span", "val");
+  v.forEach((s, i) => {
+    if (i) span.append(", ");
+    span.append(String(s.name) + "=");
+    span.append(renderValue(s.value));
+  });
+  return span;
 }
 
 function renderDetail() {

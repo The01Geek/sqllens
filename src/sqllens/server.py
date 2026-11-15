@@ -1107,7 +1107,7 @@ def build_server(cfg: Config) -> MCPServer:
             each rule set with its source, refusal state and tables), and
             ``empty``. Every number and rule value is ``{"type", "text"}``.
             Returns ``isError`` when ``rule_sets.file`` is set but was never
-            loaded.
+            loaded, or when the configuration was never validated.
             """
             # Built from the cfg the guards were built from; re-reading the
             # files here could describe rules this process does not enforce.

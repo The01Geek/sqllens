@@ -82,12 +82,22 @@ def _flat_rule(rule: RlsRule) -> dict[str, Any]:
     }
 
 
+def _source(rule_set: RuleSet) -> dict[str, Any]:
+    """The source fields the file sets, each value typed; a global switch keeps its name plain."""
+    out: dict[str, Any] = {}
+    for key, value in rule_set.source.model_dump(mode="python", exclude_unset=True).items():
+        if key == "global_switches" and value is not None:
+            out[key] = [{"name": s["name"], "value": typed_value(s["value"])} for s in value]
+        else:
+            out[key] = typed_value(value)
+    return out
+
+
 def _rule_set(rule_set: RuleSet) -> dict[str, Any]:
     return {
         "name": rule_set.name,
         "scope": rule_set.scope,
-        # exclude_unset: only the source fields the file sets.
-        "source": _encode_numbers(rule_set.source.model_dump(mode="python", exclude_unset=True)),
+        "source": _source(rule_set),
         "refused_unconfirmed": not rule_set.confirmed,
         "tables": [
             {
@@ -131,8 +141,8 @@ def _rule_set_file(loaded: LoadedRuleSets) -> dict[str, Any]:
 def access_rules_listing(cfg: Config) -> dict[str, Any]:
     """The listing for ``cfg``.
 
-    Raises ``RuntimeError`` (from ``cfg.rule_sets.loaded``) when
-    ``rule_sets.file`` is set but the file was never loaded.
+    Raises ``RuntimeError`` when ``rule_sets.file`` is set but the file was
+    never loaded, or when ``cfg`` was never validated (no load time).
     """
     loaded = cfg.rule_sets.loaded
     payload: dict[str, Any] = {
