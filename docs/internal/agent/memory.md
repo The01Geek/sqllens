@@ -258,7 +258,7 @@ Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../.
 - The cloned config forces `memory.save_queries=False` and `memory.save_text_memories=False`, so the config itself agrees with the agent.
 - The verify agent is never the process-wide cached agent from `tools/_agent.py`. That singleton is keyed on whichever `Config` built it first and may carry both save tools. The runner neither reads nor populates it.
 
-The verifier uses the persisted `default` profile's similarity threshold and limits, capped by the configured row and iteration limits. It overrides `show_details` to retain executed SQL without changing the caller's config or the stored profile. It does not select named profiles.
+The verifier uses the persisted `default` profile's similarity threshold and limits, capped by the configured row and iteration limits. It overrides `show_details` to retain the SQL the agent wrote (never the note line a rewriting guard adds to the outgoing answer) without changing the caller's config or the stored profile. It does not select named profiles.
 
 **Cost.** Each golden case is a full live agent run with no shared conversation. That means typically several billed LLM requests (roughly one per agent-loop iteration; `agent.max_tool_iterations` caps the loop), plus the SQL the agent executes against the configured database through the same guarded runner stack `build_agent` gives `serve`. The first case also pays the lazy ChromaDB open and embedding-model load, because the verify agent is not warmed the way `serve` warms the singleton.
 
