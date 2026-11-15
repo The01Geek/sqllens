@@ -246,7 +246,7 @@ sqllens verify-memory golden.json --rule-set 2 --account 5 --user 7
 
 **Checks before the first case.** After the configuration, `--format`, API-key and golden-file checks, and before any case runs or any request goes to your language-model provider, the command:
 
-1. checks the identity exactly as a `query_database` request is checked, so every request refusal above applies, `rule set not confirmed` included;
+1. checks the identity with the same selection a `query_database` request goes through, so `no such rule set`, `account not bound`, `user ID invalid` and `rule set not confirmed` apply (a missing `--rule-set` is reported as a missing option instead of `rule-set key missing`);
 2. checks once, on its own MySQL connection (5 seconds to connect, 30 seconds per read or write), the existence and type check the server runs at startup (see [Writing the Rule-Set File](#writing-the-rule-set-file)): every table and column the file names exists as written, and each compared column has a type its `value_type` accepts. When it passes, no case repeats it.
 
 A run refused here exits 1 with one error. A refused identity prints the `Request refused: …` message with the rule set, account and user the run used, and says when the account was the file's only bound one, for example `Request refused: rule set not confirmed (--rule-set '3', --account '5' (the file's only bound account), --user '7')`. A failed catalog check names the table or column that does not match, or the error that stopped the check. A missing option is named, and so is a missing `--account` when the file binds more than one account.

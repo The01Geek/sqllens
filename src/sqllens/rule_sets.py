@@ -1210,12 +1210,12 @@ def _check_catalog_blocking(url: str, loaded: LoadedRuleSets) -> None:
         check_catalog(connection, loaded)
 
 
-async def ensure_catalog_confirmed(url: str, loaded: LoadedRuleSets) -> None:
-    """Run the existence check unless it already passed once; raise ``RuleSetRequestError``.
+async def confirm_catalog(url: str, loaded: LoadedRuleSets) -> None:
+    """Run the existence check unless it already passed once, on its own connection.
 
-    The cause (a mismatched table or column, or the error that stopped the
-    check) is logged at WARNING; the raised message names no table or column.
-    A failed check runs again on the next call.
+    Raises ``RuleSetCatalogError`` naming each mismatch, or the exception that
+    stopped the check; a pass marks the catalog confirmed. A failed check runs
+    again on the next call.
     """
     state = loaded.catalog
     if state.confirmed:
@@ -1225,16 +1225,25 @@ async def ensure_catalog_confirmed(url: str, loaded: LoadedRuleSets) -> None:
             return
         from sqllens.agent.integrations.sql_threads import run_blocking_sql
 
-        try:
-            await run_blocking_sql(_check_catalog_blocking, url, loaded)
-        except RuleSetCatalogError as exc:
-            logger.warning("rule-set catalog check failed: %s", exc)
-            raise RuleSetRequestError(REFUSED_CATALOG_UNCONFIRMED) from exc
-        except Exception as exc:
-            logger.warning(
-                "rule-set catalog check could not run (%s); refusing the request",
-                type(exc).__name__,
-                exc_info=True,
-            )
-            raise RuleSetRequestError(REFUSED_CATALOG_UNCONFIRMED) from exc
+        await run_blocking_sql(_check_catalog_blocking, url, loaded)
         state.confirmed = True
+
+
+async def ensure_catalog_confirmed(url: str, loaded: LoadedRuleSets) -> None:
+    """:func:`confirm_catalog` for a request; raise ``RuleSetRequestError`` on failure.
+
+    The cause (a mismatched table or column, or the error that stopped the
+    check) is logged at WARNING; the raised message names no table or column.
+    """
+    try:
+        await confirm_catalog(url, loaded)
+    except RuleSetCatalogError as exc:
+        logger.warning("rule-set catalog check failed: %s", exc)
+        raise RuleSetRequestError(REFUSED_CATALOG_UNCONFIRMED) from exc
+    except Exception as exc:
+        logger.warning(
+            "rule-set catalog check could not run (%s); refusing the request",
+            type(exc).__name__,
+            exc_info=True,
+        )
+        raise RuleSetRequestError(REFUSED_CATALOG_UNCONFIRMED) from exc

@@ -640,7 +640,8 @@ def verify_memory(
         )
         raise typer.Exit(code=1)
 
-    # Only the options given are passed, so a run with none keeps today's call.
+    # Pass only the options given: stand-ins for run_verification (tests,
+    # embedders) that predate the identity keywords must keep working.
     identity = {
         name: value
         for name, value in (("rule_set", rule_set), ("user_id", user), ("account_id", account))

@@ -213,11 +213,10 @@ async def _verification_metadata(
     keys = loaded.file.metadata
     metadata = {keys.rule_set: rule_set, keys.account_id: account_id, keys.user_id: user_id}
 
-    from sqllens.agent.integrations.sql_threads import run_blocking_sql
     from sqllens.rule_sets import (
         RuleSetCatalogError,
         RuleSetRequestError,
-        _check_catalog_blocking,
+        confirm_catalog,
         select_rule_set,
     )
 
@@ -226,7 +225,7 @@ async def _verification_metadata(
     except RuleSetRequestError as exc:
         raise VerificationIdentityError("refused", detail=str(exc), **identity) from exc
     try:
-        await run_blocking_sql(_check_catalog_blocking, cfg.database.url, loaded)
+        await confirm_catalog(cfg.database.url, loaded)
     except RuleSetCatalogError as exc:
         raise VerificationIdentityError("catalog", detail=str(exc), **identity) from exc
     except Exception as exc:
