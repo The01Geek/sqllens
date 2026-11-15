@@ -705,3 +705,27 @@ async def test_verify_checks_the_catalog_before_the_first_case(
     )
     assert report.passed == 1
     assert cfg.rule_sets.loaded is not None and cfg.rule_sets.loaded.catalog.confirmed
+
+
+async def test_a_flat_rls_rule_on_another_meta_key_still_blocks_verify_cases(
+    database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify sends only the three identity keys, so this rule's table stays blocked."""
+    from sqllens.eval import GoldenCase, Status, run_verification
+    from tests.unit._rule_set_fixtures import rule_set_config
+
+    sqls = ["SELECT o.id FROM rr_orders o", "SELECT c.id FROM rr_customers c"]
+    _verify_agent_llm(monkeypatch, sqls)
+    cfg = rule_set_config(
+        tmp_path, row_rule_document(_db_name(database), "rr_"), url=database,
+        rls=[RlsRule(table="rr_orders", column="customer_id", operator="=",
+                     value_from_metadata="tenant")],
+    )
+    report = await run_verification(
+        cfg, [GoldenCase(f"q{n}", sql) for n, sql in enumerate(sqls)],
+        rule_set="2", account_id="5", user_id="7",
+    )
+    blocked, other = report.results
+    assert blocked.status is Status.ERROR
+    assert "row-level security could not be applied" in (blocked.error or "")
+    assert other.status is Status.PASS, other
