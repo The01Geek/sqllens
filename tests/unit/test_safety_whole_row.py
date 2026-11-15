@@ -21,6 +21,7 @@ from pydantic import SecretStr
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
 from sqllens.agent.factory import build_agent
+from sqllens.agent.integrations.mysql import MySQLRunner
 from sqllens.agent.integrations.sqlite import SqliteRunner
 from sqllens.agent.tools.run_sql import RunSqlTool
 from sqllens.config import (
@@ -46,7 +47,10 @@ from sqllens.safety import (
     whole_row,
 )
 
-DIALECTS = ["mysql", "sqlite", None]
+from ._fake_pymysql import FakeMySQL, mysql_runner
+
+_MYSQL_URL = "mysql+pymysql://u@db.invalid/shop"
+DIALECTS = ["mysql", None]
 
 # (sql, the star the guard refuses; the refusal itself names none)
 REFUSED = [
@@ -161,6 +165,8 @@ def test_allowed_shapes(sql: str, dialect: str | None) -> None:
         # Documented limit: a table whose name has the dialect's catalog
         # prefix counts as a catalog, and with no dialect every prefix counts.
         ("SELECT * FROM sqlite_stuff", None),
+        # Likewise, with no dialect a table in MySQL's catalog schemas counts.
+        ("SELECT * FROM mysql.users", None),
     ],
 )
 def test_allowed_dialect_specific_shapes(sql: str, dialect: str | None) -> None:
@@ -175,6 +181,8 @@ def test_allowed_dialect_specific_shapes(sql: str, dialect: str | None) -> None:
         ("SELECT * FROM shop.users", "mysql"),
         # Under mysql, sqlite_ is not a catalog prefix.
         ("SELECT * FROM sqlite_users_backup", "mysql"),
+        # A name merely starting with a MySQL catalog schema's name is no catalog.
+        ("SELECT * FROM sys_users", "mysql"),
         # UNNEST is a table-valued function too, whatever its argument.
         ("SELECT * FROM UNNEST(ARRAY[1, 2]) AS t(x)", "mysql"),
         ("SELECT t.* FROM UNNEST(ARRAY[1, 2]) AS t(x)", "mysql"),
@@ -374,27 +382,25 @@ class _NoopFileSystem:
         return None
 
 
-def _users_db(tmp_path: Path) -> str:
-    path = tmp_path / "people.db"
-    with sqlite3.connect(path) as conn:
-        conn.execute("CREATE TABLE users (id INTEGER, name TEXT, password_hash TEXT)")
-        conn.execute("INSERT INTO users VALUES (1, 'Ada', 'x1'), (2, 'Lin', 'x2')")
-    return str(path)
-
-
-async def test_run_sql_returns_the_refusal_as_a_tool_error(tmp_path: Path) -> None:
-    runner = WholeRowSelectGuardRunner(SqliteRunner(_users_db(tmp_path)), dialect="sqlite")
-    tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+async def test_run_sql_returns_the_refusal_as_a_tool_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = FakeMySQL(rows=[{"id": 1, "name": "Ada"}, {"id": 2, "name": "Lin"}])
+    server.install(monkeypatch)
+    runner = WholeRowSelectGuardRunner(mysql_runner(), dialect="mysql")
+    tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="mysql")
 
     refused = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT * FROM users"))
     assert refused.success is False
     assert refused.result_for_llm.startswith("Error executing query: refusing to execute query:")
     assert "selects every column" in refused.result_for_llm
     assert "password_hash" not in refused.result_for_llm
+    assert server.connections == []
 
     answered = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT id, name FROM users"))
     assert answered.success is True
     assert answered.metadata["columns"] == ["id", "name"]
+    assert server.only_connection.statements()[-1] == ("SELECT id, name FROM users", None)
 
 
 # --- Config and factory wiring ---------------------------------------------
@@ -402,7 +408,7 @@ async def test_run_sql_returns_the_refusal_as_a_tool_error(tmp_path: Path) -> No
 
 def _config(tmp_path: Path, **database: Any) -> Config:
     return Config(
-        database=DatabaseConfig(url="sqlite:///:memory:", **database),
+        database=DatabaseConfig(url=_MYSQL_URL, **database),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
         auth=AuthConfig(mode="none"),
@@ -425,7 +431,7 @@ def _stack(runner: object) -> list[type]:
 
 # Runners that rewrite or run SQL. A decorator that only post-processes result
 # values may sit above the guard; none of these may.
-_SQL_RUNNERS = (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner, SqliteRunner)
+_SQL_RUNNERS = (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner, MySQLRunner)
 
 
 def _guard_position(stack: list[type]) -> int:
@@ -438,7 +444,7 @@ def _guard_position(stack: list[type]) -> int:
 
 
 def test_setting_defaults_on() -> None:
-    assert DatabaseConfig(url="sqlite:///:memory:").refuse_whole_row_selects is True
+    assert DatabaseConfig(url=_MYSQL_URL).refuse_whole_row_selects is True
 
 
 @pytest.mark.parametrize("read_only", [True, False])
@@ -449,10 +455,10 @@ def test_guard_wraps_every_sql_runner_by_default(tmp_path: Path, read_only: bool
     guard = runner
     for _ in range(position):
         guard = guard._inner  # type: ignore[attr-defined]
-    assert guard._dialect == "sqlite"  # type: ignore[attr-defined]
+    assert guard._dialect == "mysql"  # type: ignore[attr-defined]
     beneath = [t for t in stack[position + 1 :] if issubclass(t, _SQL_RUNNERS)]
     assert beneath[0] is (ReadOnlyGuardRunner if read_only else RowCapRunner)
-    assert beneath[-1] is SqliteRunner
+    assert beneath[-1] is MySQLRunner
 
 
 def test_guard_wraps_row_level_security(tmp_path: Path) -> None:
@@ -465,7 +471,7 @@ def test_guard_wraps_row_level_security(tmp_path: Path) -> None:
 
 
 def test_relation_check_unwraps_the_guard() -> None:
-    engine = SqliteRunner(":memory:")
+    engine = mysql_runner()
     wrapped = WholeRowSelectGuardRunner(RowCapRunner(engine, max_rows=10))
     assert _relation_check_executor(wrapped) is engine
 
@@ -484,7 +490,7 @@ def test_setting_loads_from_toml_and_env(tmp_path: Path, monkeypatch) -> None:
         textwrap.dedent(
             """\
             [database]
-            url = "sqlite:///./demo.db"
+            url = "mysql+pymysql://u@db.invalid/shop"
             refuse_whole_row_selects = false
 
             [llm]
@@ -495,3 +501,26 @@ def test_setting_loads_from_toml_and_env(tmp_path: Path, monkeypatch) -> None:
     assert Config.load(path).database.refuse_whole_row_selects is False
     monkeypatch.setenv("SQLLENS_DATABASE__REFUSE_WHOLE_ROW_SELECTS", "true")
     assert Config.load(path).database.refuse_whole_row_selects is True
+
+
+def _users_db(tmp_path: Path) -> str:
+    path = tmp_path / "people.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE users (id INTEGER, name TEXT, password_hash TEXT)")
+        conn.execute("INSERT INTO users VALUES (1, 'Ada', 'x1'), (2, 'Lin', 'x2')")
+    return str(path)
+
+
+async def test_run_sql_returns_the_refusal_as_a_tool_error_on_sqlite(tmp_path: Path) -> None:
+    runner = WholeRowSelectGuardRunner(SqliteRunner(_users_db(tmp_path)), dialect="sqlite")
+    tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+
+    refused = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT * FROM users"))
+    assert refused.success is False
+    assert refused.result_for_llm.startswith("Error executing query: refusing to execute query:")
+    assert "selects every column" in refused.result_for_llm
+    assert "password_hash" not in refused.result_for_llm
+
+    answered = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT id, name FROM users"))
+    assert answered.success is True
+    assert answered.metadata["columns"] == ["id", "name"]

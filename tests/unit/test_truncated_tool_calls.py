@@ -50,7 +50,7 @@ def test_llm_max_tokens_default_is_well_above_framework_fallback() -> None:
 def test_llm_max_tokens_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     from sqllens.config import Config
 
-    monkeypatch.setenv("SQLLENS_DATABASE__URL", "sqlite:///:memory:")
+    monkeypatch.setenv("SQLLENS_DATABASE__URL", "mysql+pymysql://u@db.invalid/shop")
     monkeypatch.setenv("SQLLENS_LLM__MAX_TOKENS", "20000")
     assert Config().llm.max_tokens == 20000
 

@@ -12,7 +12,7 @@ import sqlglot
 
 from sqllens.safety.readonly import uses_table_shorthand
 
-DIALECTS = ["mysql", "sqlite", None]
+DIALECTS = ["mysql", None]
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)

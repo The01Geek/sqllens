@@ -3,8 +3,8 @@
 
 """End-to-end Streamable HTTP transport tests.
 
-Each test launches a real uvicorn server bound to a random port, pointed at
-the bundled SQLite Chinook DB. We connect with the ``mcp`` SDK client to
+Each test launches a real uvicorn server bound to a random port, configured
+for a MySQL database it never connects to. We connect with the ``mcp`` SDK client to
 exercise the full JSON-RPC + SSE wire protocol, plus a few raw httpx calls
 for the auth and path-normalization edge cases.
 """
@@ -119,7 +119,7 @@ class TestNoAuth:
                     "query_database",
                 ]
 
-    async def test_list_data_sources_returns_chinook(self, make_server) -> None:
+    async def test_list_data_sources_returns_configured_database(self, make_server) -> None:
         handle = make_server(AuthConfig(mode="none"))
         async with streamable_http_client(handle.mcp_url) as (read, write):
             async with ClientSession(read, write) as session:
@@ -130,8 +130,8 @@ class TestNoAuth:
                 body = "".join(
                     getattr(block, "text", "") for block in result.content
                 )
-                assert "chinook-test" in body
-                assert "sqlite" in body
+                assert "shop-test" in body
+                assert "mysql" in body
                 assert "read-only" in body
 
     async def test_widget_resource_read_through_auth(self, make_server) -> None:

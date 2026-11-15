@@ -24,7 +24,7 @@ def _config(tmp_path: Path) -> Path:
     cfg.write_text(
         f"""
 [database]
-url = "sqlite:///:memory:"
+url = "mysql+pymysql://u@db.invalid/shop"
 name = "primary"
 
 [llm]
@@ -263,7 +263,7 @@ def test_missing_api_key_rejected(tmp_path: Path) -> None:
     cfg_path.write_text(
         f"""
 [database]
-url = "sqlite:///:memory:"
+url = "mysql+pymysql://u@db.invalid/shop"
 name = "primary"
 
 [memory]
