@@ -46,8 +46,22 @@ A file whose tables hold no `row_rule` compiles nothing and loads and serves exa
 ## Startup signals
 
 - `sqllens serve` and `sqllens validate` warn once for each set whose `source.confirmed_against_production` is not `true`; requests that select it are refused.
-- `sqllens verify-memory` refuses to run while a rule-set file is configured, printing `VERIFY_MEMORY_UNSUPPORTED_MESSAGE`, and `run_verification` raises `ValueError` with the same message before any case runs. When the configuration loads, the command checks `cfg.rule_sets.loaded` before the `--format` and API-key checks, so a configured rule-set file always draws this message rather than an unrelated one, and exits 1. When the configuration fails to load, it prints the configuration error and exits 2, adding this message when the failure came from the rule-set file (`_is_rule_set_file_error`) or when the environment or the TOML file names a rule-set file (`_rule_set_file_configured`, which reads the TOML without validation and answers `False` for a file it cannot read or parse).
+- `sqllens verify-memory` runs under one identity; see [Verify runs](#verify-runs). A configuration that fails to load prints only the configuration error and exits 2.
 - `probe_database` runs `check_catalog` on its MySQL connection. See [setup/preflight.md](../setup/preflight.md). <!-- canonical: setup/preflight.md -->
+
+## Verify runs
+
+`run_verification` (`src/sqllens/eval/runner.py`) takes `rule_set`, `user_id` and `account_id`, each a string or `None`; the `sqllens verify-memory` options `--rule-set`, `--user` and `--account` feed them, and the CLI passes only the options given. `_verification_metadata` runs before `verification_config`, `build_agent` and any case, and raises `VerificationIdentityError` (a `ValueError`) with a `kind`:
+
+- `no_rule_set_file`: no rule-set file is configured and any identity value is not `None`, an empty string included.
+- `missing`: `rule_set` or `user_id` is `None` or empty; `missing` names each.
+- `account_required`: `account_id` is `None` or empty and `binding.account_ids` lists more than one ID. With exactly one, that ID is used and `account_defaulted` is set.
+- `refused`: `select_rule_set`, called once on a dict holding the three values under `loaded.file.metadata`'s key names, raised; `detail` is its `Request refused: …` message.
+- `catalog`: `confirm_catalog` raised `RuleSetCatalogError` (`detail` names each mismatch) or any other exception (`detail` names its type and message). `confirm_catalog` is the locked, run-once core of `ensure_catalog_confirmed`: it runs `_check_catalog_blocking` (the request-time connection: 5-second connect, 30-second read and write timeouts) through `run_blocking_sql` unless the catalog is already confirmed, and a pass sets `loaded.catalog.confirmed`, so the wrapper does not run the check again for any case. `ensure_catalog_confirmed` maps its failures to `REFUSED_CATALOG_UNCONFIRMED` with a WARNING log line; the verify run keeps the cause.
+
+The `refused` and `catalog` errors carry the values used. `describe(labels)` renders the message with each field named by `labels`; `str()` uses neutral names, and the CLI passes the option names, prints `Error: <message>` and exits 1. These checks run after the CLI's configuration, `--format`, API-key and golden-file checks. A refusal here writes no log line, since the wrapper never runs. With no rule-set file and no identity value the run is unchanged.
+
+The production driver passes the dict as `metadata=` to every `query_database_impl_with_widgets` call, so selection, the guard, row rules (with the selection's user ID) and the audit line apply per case as for an MCP request. A `driver=` given to `run_verification` receives no metadata, but the checks still run. The CLI configures no logging handler, so the INFO audit line is not displayed.
 
 ## Per-request selection
 

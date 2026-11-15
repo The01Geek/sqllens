@@ -13,13 +13,19 @@ The runner accepts an async comparator for alternative comparison strategies.
 
 from sqllens.eval.compare import Status, compare, normalize_sql
 from sqllens.eval.golden import GoldenCase, load_golden
-from sqllens.eval.runner import CaseResult, RunReport, run_verification
+from sqllens.eval.runner import (
+    CaseResult,
+    RunReport,
+    VerificationIdentityError,
+    run_verification,
+)
 
 __all__ = [
     "CaseResult",
     "GoldenCase",
     "RunReport",
     "Status",
+    "VerificationIdentityError",
     "compare",
     "load_golden",
     "normalize_sql",
