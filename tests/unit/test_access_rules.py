@@ -331,3 +331,68 @@ async def test_widget_parse_keeps_large_integers_exact(tmp_path: Path) -> None:
         [NODE, "-e", script], input=text, capture_output=True, text=True, check=True
     )
     assert json.loads(out.stdout) == [str(BIG)] * 3
+
+
+# A minimal DOM: enough for the widget's value and row-rule renderers, whose
+# textContent is the text a user sees.
+_DOM_SHIM = """
+class Node {
+  constructor(tag) { this.tag = tag; this.className = ""; this.children = []; }
+  set textContent(t) { this.children = [String(t)]; }
+  get textContent() {
+    return this.children.map(c => typeof c === "string" ? c : c.textContent).join("");
+  }
+  append(...items) { for (const i of items) this.children.push(i); }
+}
+const document = { createElement: tag => new Node(tag) };
+"""
+
+
+def _widget_renderers() -> str:
+    html = (Path(__file__).parents[2] / "src/sqllens/ui/access_rules.html").read_text()
+    start = html.index("function node_(")
+    end = html.index("// ───────── render ─────────")
+    return html[start:end]
+
+
+@pytest.mark.skipif(NODE is None, reason="node required for widget behavior")
+async def test_widget_renders_each_value_with_its_type(tmp_path: Path) -> None:
+    rls = [
+        RlsRule(table="orders", column="a", value=float("inf")),
+        RlsRule(table="orders", column="b", value="inf"),
+        RlsRule(table="orders", column="c", value=BIG),
+        RlsRule(table="orders", column="d", value=1.0),
+        RlsRule(table="orders", column="e", operator="in", value=[1, 2.5, "x", True]),
+        RlsRule(table="orders", column="f", value=float("nan")),
+    ]
+    cfg = _config(tmp_path, rule_file=write_rule_set_file(tmp_path, _all_kinds_document()),
+                  rls=rls)
+    _, text = await _call(cfg)
+    script = (
+        _DOM_SHIM
+        + _widget_renderers()
+        + "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));"
+        "const s=d.rule_set_file.rule_sets[0];"
+        "const t=s.tables.find(t=>t.name==='orders');"
+        "console.log(JSON.stringify({"
+        "flat:d.flat_rls.map(r=>renderValue(r.value).textContent),"
+        "tree:renderRuleNode(t.row_rule).textContent}));"
+    )
+    out = subprocess.run(
+        [NODE, "-e", script], input=text, capture_output=True, text=True, check=True
+    )
+    shown = json.loads(out.stdout)
+    assert shown["flat"] == [
+        "inffloat",
+        '"inf"str',
+        f"{BIG}int",
+        "1.0float",
+        '[1int, 2.5float, "x"str, truebool]',
+        "nanfloat",
+    ]
+    tree = shown["tree"]
+    for kind in ("all_of", "inherit", "compare", "is_null", "is_not_null"):
+        assert kind in tree
+    assert "parent_rule:" in tree
+    assert f"value: {BIG}int" in tree
+    assert 'value: ["open"str, "inf"str]' in tree
