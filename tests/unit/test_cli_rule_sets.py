@@ -398,8 +398,11 @@ def test_a_rule_set_file_that_fails_to_load_prints_only_the_config_error(
 
 
 def test_help_describes_the_identity_options() -> None:
+    import re
+
     result = runner.invoke(app, ["verify-memory", "--help"], env={"COLUMNS": "200"})
-    text = _unwrapped(result.output)
+    # CI forces colour, so styling codes split option names.
+    text = _unwrapped(re.sub(r"\x1b\[[0-9;]*m", "", result.output))
     for option in ("--rule-set", "--account", "--user"):
         assert option in text
     assert text.count("Used only with a [rule_sets] file") == 3
