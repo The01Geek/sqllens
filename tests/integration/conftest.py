@@ -36,7 +36,7 @@ from sqllens.config import (
 )
 from sqllens.transport.http import build_asgi_app
 
-# An unresolvable host: a test that reached a real connect would fail.
+# An unresolvable host: a real connect to it fails the same way on every machine.
 MYSQL_URL = "mysql+pymysql://u@db.invalid/shop"
 
 

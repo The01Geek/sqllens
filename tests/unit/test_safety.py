@@ -1013,8 +1013,12 @@ class TestIsIntrospectionQueryPerDialect:
             assert is_introspection_query(sql, dialect=None) is True
         assert "RuntimeError" in caplog.text
 
-    def test_scope_failure_is_logged_under_mysql(
-        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    @pytest.mark.parametrize("dialect", [None, "mysql"])
+    def test_scope_failure_is_logged_for_a_mysql_catalog(
+        self,
+        dialect: str | None,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         import sqllens.safety.readonly as readonly_mod
 
@@ -1024,7 +1028,7 @@ class TestIsIntrospectionQueryPerDialect:
         monkeypatch.setattr(readonly_mod, "traverse_scope", boom)
         sql = "WITH x AS (SELECT * FROM mysql.user) SELECT * FROM x"
         with caplog.at_level("INFO", logger="sqllens.safety.readonly"):
-            assert is_introspection_query(sql, dialect="mysql") is True
+            assert is_introspection_query(sql, dialect=dialect) is True
         assert "RuntimeError" in caplog.text
 
     def test_hash_is_not_a_comment_without_dialect(self) -> None:
@@ -1097,7 +1101,13 @@ class TestIsIntrospectionQueryPerDialect:
 
     @pytest.mark.parametrize(
         "sql",
-        ["SELECT name FROM pragma_table_info('widgets')", "SELECT name FROM pragma_table_list"],
+        [
+            "SELECT name FROM pragma_table_info('widgets')",
+            "SELECT name FROM pragma_table_list",
+            # The MySQL counterpart: a table in the mysql schema, a MySQL entry
+            # of the same no-dialect catalog union.
+            "SELECT name FROM mysql.func",
+        ],
     )
     def test_no_dialect_counts_pragma_functions(self, sql: str) -> None:
         assert is_introspection_query(sql) is True

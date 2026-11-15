@@ -14,8 +14,8 @@ each statement's parameters, never from its SQL text: no parameters give
 ``(lower_case_table_names,)``, the answer to the ``@@lower_case_table_names``
 probe; two parameters whose second is a name in ``kinds`` give that relation's
 ``TABLE_TYPE``; any other parameters give the first stored routine whose name
-matches one of them ignoring case, or no row. Session setup statements never
-fetch their row. A test must name every relation its SQL reads in ``kinds``.
+matches one of them ignoring case, or no row. A test must name every relation
+its SQL reads in ``kinds``.
 """
 
 from __future__ import annotations

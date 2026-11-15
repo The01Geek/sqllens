@@ -159,9 +159,9 @@ async def test_rls_query_shapes_return_scoped_rows(mysql_url, shape, expected) -
     async def execute(sql: str) -> None:
         await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
 
-    await execute(f"CREATE TABLE {orders} (id INTEGER, tenant_id TEXT)")
-    await execute(f"CREATE TABLE {public} (id INTEGER)")
     try:
+        await execute(f"CREATE TABLE {orders} (id INTEGER, tenant_id TEXT)")
+        await execute(f"CREATE TABLE {public} (id INTEGER)")
         await execute(f"INSERT INTO {orders} VALUES (1, 'alpha'), (2, 'beta')")
         await execute(f"INSERT INTO {public} VALUES (1), (2)")
         guard = RlsGuardRunner(

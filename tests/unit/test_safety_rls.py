@@ -516,7 +516,7 @@ class TestApplyRlsDynamicFailSecure:
 
     @pytest.mark.parametrize("bad", [None, {"a": 1}, b"bytes", ["nested"]])
     def test_wrong_typed_dynamic_value_blocks(self, bad: object) -> None:
-        with pytest.raises(RlsError):
+        with pytest.raises(RlsError, match="unusable or suspicious value"):
             apply_rls(
                 "SELECT id FROM orders",
                 [_rule(value_from_metadata="tenant_id")],
