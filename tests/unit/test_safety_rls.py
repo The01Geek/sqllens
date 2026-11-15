@@ -42,6 +42,8 @@ from sqllens.safety import (
 )
 from sqllens.safety.readonly import assert_select_only
 
+_MYSQL_URL = "mysql+pymysql://u@db.invalid/shop"
+
 
 def _rule(**kw: object) -> RlsRule:
     base: dict[str, object] = {"table": "orders", "column": "tenant_id"}
@@ -133,7 +135,7 @@ class TestRlsRuleValidation:
         validate`` does), not deferred to query time."""
         with pytest.raises(ValidationError):
             Config(
-                database=DatabaseConfig(url="sqlite:///:memory:"),
+                database=DatabaseConfig(url=_MYSQL_URL),
                 llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
                 memory=MemoryConfig(persist_dir=tmp_path),
                 auth=AuthConfig(mode="none"),
@@ -144,7 +146,7 @@ class TestRlsRuleValidation:
 # ─────────────────────────── engine: static rules ───────────────────────────
 
 
-def _assert_filtered_and_readonly(sql: str, dialect: str = "sqlite") -> None:
+def _assert_filtered_and_readonly(sql: str, dialect: str = "mysql") -> None:
     assert_select_only(sql, dialect=dialect)
 
 
@@ -156,7 +158,7 @@ class TestApplyRlsStatic:
         out = apply_rls(
             "SELECT id FROM orders",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert "tenant_id" in out and "'acme'" in out
         _assert_filtered_and_readonly(out)
@@ -165,7 +167,7 @@ class TestApplyRlsStatic:
         out = apply_rls(
             "SELECT id FROM orders WHERE total > 100",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert "total" in out and "100" in out
         assert "tenant_id" in out
@@ -176,7 +178,7 @@ class TestApplyRlsStatic:
         out = apply_rls(
             "SELECT o.id FROM orders o JOIN customers c ON o.cust = c.id",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         # Predicate must be qualified by the table's alias, not bare.
         assert "o.tenant_id" in out.replace('"', "")
@@ -186,7 +188,7 @@ class TestApplyRlsStatic:
         out = apply_rls(
             "SELECT * FROM (SELECT id FROM orders) sub",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert "tenant_id" in out
         _assert_filtered_and_readonly(out)
@@ -195,7 +197,7 @@ class TestApplyRlsStatic:
         out = apply_rls(
             "WITH scoped AS (SELECT id FROM orders) SELECT * FROM scoped",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         # Exactly one predicate: inside the CTE body. The outer `FROM scoped`
         # references the CTE alias (not a base table) and must NOT be filtered.
@@ -206,7 +208,7 @@ class TestApplyRlsStatic:
         out = apply_rls(
             "SELECT id FROM orders UNION SELECT id FROM orders",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert out.count("tenant_id") == 2
         _assert_filtered_and_readonly(out)
@@ -228,8 +230,8 @@ class TestApplyRlsStatic:
             "SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
         ),
         (
-            # SQLite names an unaliased result column after the call's text.
-            "sqlite",
+            # MySQL names an unaliased result column after the call's text.
+            "mysql",
             "SELECT printf('%s', name) FROM orders",
             "SELECT printf('%s', name) FROM orders WHERE orders.tenant_id = 'acme'",
         ),
@@ -247,7 +249,7 @@ class TestApplyRlsStatic:
         out = apply_rls(
             "SELECT * FROM customers",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert "tenant_id" not in out
 
@@ -255,7 +257,7 @@ class TestApplyRlsStatic:
         out = apply_rls(
             "SELECT id FROM orders",
             [_rule(value=["a", "b"], operator="in")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert "IN" in out.upper() and "'a'" in out and "'b'" in out
         _assert_filtered_and_readonly(out)
@@ -264,7 +266,7 @@ class TestApplyRlsStatic:
         out = apply_rls(
             "SELECT id FROM orders",
             [_rule(column="region_id", value=7)],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert "region_id" in out and "7" in out
         _assert_filtered_and_readonly(out)
@@ -288,7 +290,7 @@ class TestApplyRlsScopeCoverage:
         out = apply_rls(
             "WITH orders AS (SELECT id FROM orders) SELECT * FROM orders",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         # Exactly one predicate: inside the CTE body (the real base table).
         # The outer `FROM orders` is the CTE reference and must not be filtered.
@@ -300,7 +302,7 @@ class TestApplyRlsScopeCoverage:
             "WITH RECURSIVE orders AS (SELECT id FROM orders) "
             "SELECT * FROM orders",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert out.count("tenant_id") == 1
         _assert_filtered_and_readonly(out)
@@ -309,7 +311,7 @@ class TestApplyRlsScopeCoverage:
         out = apply_rls(
             "SELECT * FROM customers WHERE id IN (SELECT cust FROM orders)",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert out.count("tenant_id") == 1
         _assert_filtered_and_readonly(out)
@@ -318,7 +320,7 @@ class TestApplyRlsScopeCoverage:
         out = apply_rls(
             "SELECT * FROM orders, customers",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert "tenant_id" in out
         _assert_filtered_and_readonly(out)
@@ -327,7 +329,7 @@ class TestApplyRlsScopeCoverage:
         out = apply_rls(
             "SELECT * FROM public.orders",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert "tenant_id" in out
         _assert_filtered_and_readonly(out)
@@ -336,7 +338,7 @@ class TestApplyRlsScopeCoverage:
         out = apply_rls(
             "SELECT * FROM (orders)",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         assert "tenant_id" in out
         _assert_filtered_and_readonly(out)
@@ -349,7 +351,7 @@ class TestApplyRlsScopeCoverage:
             apply_rls(
                 "SELECT * FROM (orders) o",
                 [_rule(value="acme")],
-                dialect="sqlite",
+                dialect="mysql",
             )
 
     def test_table_command_blocks_fail_secure(self) -> None:
@@ -361,7 +363,7 @@ class TestApplyRlsScopeCoverage:
             with pytest.raises(RlsError, match="unquoted TABLE keyword"):
                 apply_rls(stmt, [_rule(value="acme")], dialect="mysql")
 
-    @pytest.mark.parametrize("dialect", ["sqlite", "mysql"])
+    @pytest.mark.parametrize("dialect", ["mysql"])
     def test_table_subquery_blocks_fail_secure(self, dialect: str) -> None:
         # `(TABLE orders) sub` parses differently across sqlglot versions
         # (a Table named ``TABLE`` before 30.30, a SELECT from 30.30); the
@@ -386,7 +388,7 @@ class TestApplyRlsScopeCoverage:
             "WITH RECURSIVE orders AS (SELECT 1 AS id UNION "
             "SELECT id FROM orders) SELECT * FROM orders"
         )
-        out = apply_rls(sql, [_rule(value="acme")], dialect="sqlite")
+        out = apply_rls(sql, [_rule(value="acme")], dialect="mysql")
         assert "tenant_id" not in out
         _assert_filtered_and_readonly(out)
 
@@ -398,7 +400,7 @@ class TestApplyRlsScopeCoverage:
             "SELECT o.id FROM orders o JOIN tree t ON o.parent = t.id) "
             "SELECT * FROM tree"
         )
-        out = apply_rls(sql, [_rule(value="acme")], dialect="sqlite")
+        out = apply_rls(sql, [_rule(value="acme")], dialect="mysql")
         assert out.count("tenant_id") == 2
         _assert_filtered_and_readonly(out)
 
@@ -420,7 +422,7 @@ class TestApplyRlsScopeCoverage:
         # classify the real base read as a CTE reference (a fail-open). The
         # rewrite must scan sources by value, not by key, so the renamed base
         # source is still injected.
-        out = apply_rls(sql, [_rule(value="acme")], dialect="sqlite")
+        out = apply_rls(sql, [_rule(value="acme")], dialect="mysql")
         assert "tenant_id" in out
         _assert_filtered_and_readonly(out)
 
@@ -429,7 +431,7 @@ class TestApplyRlsScopeCoverage:
             "WITH scoped AS (SELECT id FROM orders) "
             "SELECT * FROM scoped JOIN orders ON scoped.id = orders.id",
             [_rule(value="acme")],
-            dialect="sqlite",
+            dialect="mysql",
         )
         # One predicate in the CTE body, one for the real base-table join.
         assert out.count("tenant_id") == 2
@@ -444,7 +446,7 @@ class TestApplyRlsDynamicFailSecure:
         out = apply_rls(
             "SELECT id FROM orders",
             [_rule(value_from_metadata="tenant_id")],
-            dialect="sqlite",
+            dialect="mysql",
             metadata={"tenant_id": "acme"},
         )
         assert "'acme'" in out
@@ -455,7 +457,7 @@ class TestApplyRlsDynamicFailSecure:
             apply_rls(
                 "SELECT id FROM orders",
                 [_rule(value_from_metadata="tenant_id")],
-                dialect="sqlite",
+                dialect="mysql",
                 metadata={},
             )
 
@@ -468,7 +470,7 @@ class TestApplyRlsDynamicFailSecure:
             apply_rls(
                 "SELECT id FROM orders",
                 [_rule(value_from_metadata="tenant_id")],
-                dialect="sqlite",
+                dialect="mysql",
                 metadata={"tenant_id": bad},
             )
 
@@ -481,7 +483,7 @@ class TestApplyRlsDynamicFailSecure:
             apply_rls(
                 "SELECT id FROM orders",
                 [_rule(value_from_metadata="tids", operator="in")],
-                dialect="sqlite",
+                dialect="mysql",
                 metadata={"tids": ["acme", bad]},
             )
 
@@ -495,7 +497,7 @@ class TestApplyRlsDynamicFailSecure:
             apply_rls(
                 "SELECT id FROM orders",
                 [_rule(value_from_metadata="tenant_id")],
-                dialect="sqlite",
+                dialect="mysql",
                 metadata={"tenant_id": bad},
             )
 
@@ -508,7 +510,7 @@ class TestApplyRlsDynamicFailSecure:
             apply_rls(
                 "SELECT id FROM orders",
                 [_rule(value_from_metadata="tids", operator="in")],
-                dialect="sqlite",
+                dialect="mysql",
                 metadata={"tids": ["acme", bad]},
             )
 
@@ -518,7 +520,7 @@ class TestApplyRlsDynamicFailSecure:
             apply_rls(
                 "SELECT id FROM orders",
                 [_rule(value_from_metadata="tenant_id")],
-                dialect="sqlite",
+                dialect="mysql",
                 metadata={"tenant_id": bad},
             )
 
@@ -527,7 +529,7 @@ class TestApplyRlsDynamicFailSecure:
             apply_rls(
                 "SELECT id FROM orders",
                 [_rule(value_from_metadata="tids", operator="in")],
-                dialect="sqlite",
+                dialect="mysql",
                 metadata={"tids": "not-a-list"},
             )
 
@@ -535,14 +537,13 @@ class TestApplyRlsDynamicFailSecure:
         out = apply_rls(
             "SELECT id FROM orders",
             [_rule(value_from_metadata="tids", operator="in")],
-            dialect="sqlite",
+            dialect="mysql",
             metadata={"tids": ["a", "b"]},
         )
         assert "IN" in out.upper() and "'a'" in out
         _assert_filtered_and_readonly(out)
 
     @pytest.mark.parametrize(("sql", "dialect"), [
-        ("SELECT 'unterminated", "sqlite"),
         ("SELECT 'unterminated", "mysql"),
         ("SELECT 'unterminated", None),
         ("SELECT `unterminated", "mysql"),
@@ -559,7 +560,7 @@ class TestApplyRlsDynamicFailSecure:
             apply_rls(
                 "SELECT FROM WHERE ((",
                 [_rule(value="acme")],
-                dialect="sqlite",
+                dialect="mysql",
             )
 
     def test_multiple_statements_blocks(self) -> None:
@@ -567,7 +568,7 @@ class TestApplyRlsDynamicFailSecure:
             apply_rls(
                 "SELECT 1; SELECT 2",
                 [_rule(value="acme")],
-                dialect="sqlite",
+                dialect="mysql",
             )
 
 
@@ -594,7 +595,7 @@ class TestRlsGuardRunner:
     @pytest.mark.asyncio
     async def test_tokenization_failure_blocks_with_parse_diagnostic(self) -> None:
         inner = _RecordingRunner()
-        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="sqlite")
+        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="mysql")
         with pytest.raises(RlsError, match="could not parse SQL"):
             await guard.run_sql(RunSqlToolArgs(sql="SELECT 'unterminated"), _ctx())
         assert inner.calls == []
@@ -602,7 +603,7 @@ class TestRlsGuardRunner:
     @pytest.mark.asyncio
     async def test_rewritten_sql_reaches_inner_runner(self) -> None:
         inner = _RecordingRunner()
-        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="sqlite")
+        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="mysql")
         await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM orders"), _ctx())
         assert len(inner.calls) == 1
         assert "tenant_id" in inner.calls[0].sql
@@ -611,7 +612,7 @@ class TestRlsGuardRunner:
     async def test_missing_dynamic_value_blocks_before_inner(self) -> None:
         inner = _RecordingRunner()
         guard = RlsGuardRunner(
-            inner, [_rule(value_from_metadata="tenant_id")], dialect="sqlite"
+            inner, [_rule(value_from_metadata="tenant_id")], dialect="mysql"
         )
         with pytest.raises(RlsError, match="refusing to execute"):
             await guard.run_sql(
@@ -623,7 +624,7 @@ class TestRlsGuardRunner:
     async def test_dynamic_value_from_context_metadata(self) -> None:
         inner = _RecordingRunner()
         guard = RlsGuardRunner(
-            inner, [_rule(value_from_metadata="tenant_id")], dialect="sqlite"
+            inner, [_rule(value_from_metadata="tenant_id")], dialect="mysql"
         )
         await guard.run_sql(
             RunSqlToolArgs(sql="SELECT id FROM orders"),
@@ -634,7 +635,7 @@ class TestRlsGuardRunner:
     @pytest.mark.asyncio
     async def test_unexpected_error_fails_closed(self, monkeypatch) -> None:
         inner = _RecordingRunner()
-        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="sqlite")
+        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="mysql")
 
         def _boom(*a: object, **k: object) -> str:
             raise RuntimeError("kaboom")
@@ -648,7 +649,7 @@ class TestRlsGuardRunner:
     async def test_static_rule_works_with_empty_metadata(self) -> None:
         """Static rules need no per-request channel — enforced on stdio too."""
         inner = _RecordingRunner()
-        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="sqlite")
+        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="mysql")
         await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM orders"), _ctx())
         assert "'acme'" in inner.calls[0].sql
 
@@ -659,7 +660,7 @@ class TestRlsGuardRunner:
 def _cfg(tmp_path: Path, rls: list[RlsRule]) -> Config:
     return Config(
         # The whole-row select guard wraps RLS; test_safety_whole_row.py pins that.
-        database=DatabaseConfig(url="sqlite:///:memory:", refuse_whole_row_selects=False),
+        database=DatabaseConfig(url=_MYSQL_URL, refuse_whole_row_selects=False),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
         auth=AuthConfig(mode="none"),
