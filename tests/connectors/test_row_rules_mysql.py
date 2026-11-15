@@ -581,3 +581,151 @@ async def test_the_deepest_chain_of_a_real_scale_file_runs(database: str, tmp_pa
     finally:
         reset_rule_set_selection(token)
     assert _ids(frame) == {1}
+
+
+# --- verify-memory under a rule set (issue #376) -----------------------------------------
+
+
+def _verify_agent_llm(monkeypatch: pytest.MonkeyPatch, sqls: list[str]) -> None:
+    """Make ``build_agent`` use a scripted model: one ``run_sql`` call per case, then an answer.
+
+    Also swaps the Chroma memory for a stub, so no embedding model is downloaded.
+    """
+    from sqllens.agent.core.llm import LlmResponse, LlmService, LlmStreamChunk
+    from sqllens.agent.core.tool import ToolCall
+    from tests.unit._agent_stubs import StubAgentMemory
+
+    pending = iter(sqls)
+
+    class ScriptedLlm(LlmService):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        def _next(self) -> LlmResponse:
+            self.calls += 1
+            if self.calls % 2:
+                sql = next(pending)
+                return LlmResponse(
+                    tool_calls=[ToolCall(id=f"c{self.calls}", name="run_sql",
+                                         arguments={"sql": sql})],
+                    finish_reason="tool_use",
+                )
+            return LlmResponse(content="done", finish_reason="end_turn")
+
+        async def send_request(self, request: Any) -> LlmResponse:
+            return self._next()
+
+        async def stream_request(self, request: Any):
+            resp = self._next()
+            yield LlmStreamChunk(
+                content=resp.content, tool_calls=resp.tool_calls,
+                finish_reason=resp.finish_reason,
+            )
+
+        async def validate_tools(self, tools: list[Any]) -> list[str]:
+            return []
+
+    monkeypatch.setattr("sqllens.agent.factory.AnthropicLlmService", ScriptedLlm)
+    monkeypatch.setattr(
+        "sqllens.agent.factory.ChromaAgentMemory", lambda *a, **kw: StubAgentMemory()
+    )
+
+
+def _verify_config(tmp_path: Path, url: str, document: dict[str, Any] | None = None):
+    from tests.unit._rule_set_fixtures import rule_set_config
+
+    return rule_set_config(
+        tmp_path, document or row_rule_document(_db_name(url), "rr_"), url=url
+    )
+
+
+async def test_verify_cases_run_under_the_rule_set_and_its_row_rules(
+    database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqllens.eval import GoldenCase, Status, run_verification
+    from sqllens.tools import query_database as qd_module
+
+    sqls = [
+        "SELECT c.id FROM rr_customers c",
+        "SELECT u.id FROM rr_unlisted u",
+    ]
+    _verify_agent_llm(monkeypatch, sqls)
+    real = qd_module.query_database_impl_with_widgets
+    returned: list[tuple[str, list[dict]]] = []
+
+    async def spy(cfg: Any, question: str, **kwargs: Any):
+        result = await real(cfg, question, **kwargs)
+        returned.append((result[0], result[1]))
+        return result
+
+    monkeypatch.setattr(qd_module, "query_database_impl_with_widgets", spy)
+    cfg = _verify_config(tmp_path, database)
+
+    report = await run_verification(
+        cfg, [GoldenCase(f"q{n}", sql) for n, sql in enumerate(sqls)],
+        rule_set="2", account_id="5", user_id="7",
+    )
+
+    listed, unlisted = report.results
+    assert listed.status is Status.PASS, listed
+    rows = [row for block in returned[0][1] if block.get("type") == "table"
+            for row in block["rows"]]
+    assert sorted(int(row[0] if isinstance(row, list) else row["id"]) for row in rows) == [1, 2]
+    assert unlisted.status is Status.ERROR
+    assert "the query reads a table the rule set does not list" in (unlisted.error or "")
+    assert len(returned) == 1
+
+
+async def test_verify_checks_the_catalog_before_the_first_case(
+    database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqllens.eval import GoldenCase, VerificationIdentityError, run_verification
+
+    _verify_agent_llm(monkeypatch, ["SELECT c.id FROM rr_customers c"])
+    built: list[object] = []
+    monkeypatch.setattr("sqllens.agent.factory.build_agent",
+                        lambda *a, **kw: built.append(a) or pytest.fail("agent built"))
+    document = _with_link(row_rule_document(_db_name(database), "rr_"), link_user_column="gone")
+    cfg = _verify_config(tmp_path, database, document)
+    with pytest.raises(VerificationIdentityError) as info:
+        await run_verification(
+            cfg, [GoldenCase("q", "SELECT 1")], rule_set="2", account_id="5", user_id="7"
+        )
+    assert info.value.kind == "catalog"
+    assert "column rr_customer_reps.gone does not exist" in str(info.value)
+    assert cfg.rule_sets.loaded is not None and not cfg.rule_sets.loaded.catalog.confirmed
+    assert built == []
+
+    cfg = _verify_config(tmp_path, database)
+    monkeypatch.undo()
+    _verify_agent_llm(monkeypatch, ["SELECT c.id FROM rr_customers c"])
+    report = await run_verification(
+        cfg, [GoldenCase("q", "SELECT c.id FROM rr_customers c")],
+        rule_set="2", account_id="5", user_id="7",
+    )
+    assert report.passed == 1
+    assert cfg.rule_sets.loaded is not None and cfg.rule_sets.loaded.catalog.confirmed
+
+
+async def test_a_flat_rls_rule_on_another_meta_key_still_blocks_verify_cases(
+    database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify sends only the three identity keys, so this rule's table stays blocked."""
+    from sqllens.eval import GoldenCase, Status, run_verification
+    from tests.unit._rule_set_fixtures import rule_set_config
+
+    sqls = ["SELECT o.id FROM rr_orders o", "SELECT c.id FROM rr_customers c"]
+    _verify_agent_llm(monkeypatch, sqls)
+    cfg = rule_set_config(
+        tmp_path, row_rule_document(_db_name(database), "rr_"), url=database,
+        rls=[RlsRule(table="rr_orders", column="customer_id", operator="=",
+                     value_from_metadata="tenant")],
+    )
+    report = await run_verification(
+        cfg, [GoldenCase(f"q{n}", sql) for n, sql in enumerate(sqls)],
+        rule_set="2", account_id="5", user_id="7",
+    )
+    blocked, other = report.results
+    assert blocked.status is Status.ERROR
+    assert "row-level security could not be applied" in (blocked.error or "")
+    assert other.status is Status.PASS, other

@@ -228,6 +228,7 @@ Three Typer commands in [src/sqllens/cli.py](../../../src/sqllens/cli.py):
 sqllens import-memory PATH [--format json|csv] [--clear] [--dry-run] [--batch-size N] [-c CONFIG]
 sqllens export-memory PATH [--format json|csv] [-c CONFIG]
 sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
+                       [--rule-set NAME --user ID [--account ID]]
 ```
 
 `import-memory` exit codes: `2` for a config-load error (consistent with `serve`/`validate`), `1` for a bad `--format`, an unreadable file, an invalid bundle, a store/import failure, or any per-item import error in the report. `--clear` prompts for confirmation (`typer.confirm(..., abort=True)`) unless combined with `--dry-run`. If a `--clear` import fails *after* the store was constructed, the error message states the collection may now be empty/partial (the wipe already ran). Store/import errors carry the standard "embedding model downloads on first use (~80 MB); check persist_dir" hint. **The CLI commands work regardless of `allow_import`** — that flag only gates the MCP tool.
@@ -251,6 +252,8 @@ Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../.
 | `eval/compare.py` | Normalizes SQL using the configured dialect. `compare_sql` returns PASS/CHANGED or raises a side-specific parse diagnostic; `compare` returns ERROR for either parse failure. |
 | `eval/runner.py` | Resolves the persisted `default` profile into a cloned config, forces details on and query saving off, and builds a dedicated agent with `allow_memory_writes=False`. Missing SQL produces an ERROR diagnostic. Tests can inject `driver=`. An async `comparator=` accepts expected/actual SQL and can capture a database connection for row comparison without rewriting the runner. |
 
+**Rule sets.** With a rule-set file configured, every case runs under the identity `--rule-set`, `--user` and `--account` give (`run_verification(..., rule_set=, user_id=, account_id=)`). `--rule-set` and `--user` are required; an omitted or empty `--account` defaults to the file's only bound account and is required when the file binds more than one. Before the first case and before any LLM request, the run checks the identity with `select_rule_set` and runs the catalog check once on its own connection (5-second connect, 30-second read and write timeouts). Each refusal raises `VerificationIdentityError`, which the CLI prints with the option names and exits 1: a selection refusal shows its `Request refused: …` text and the values used (marking a defaulted account), a catalog failure names the mismatch or the error that stopped the check. Identity options with no rule-set file are refused the same way. The production driver then passes the identity as `metadata=` to each case's `query_database_impl_with_widgets` call. See [database-connectors/rule-sets.md](../database-connectors/rule-sets.md#verify-runs). <!-- canonical: database-connectors/rule-sets.md -->
+
 **Memory content and retrieval metadata stay unchanged.** The verifier disables saving and retrieval usage updates through these controls:
 
 - `build_agent(..., allow_memory_writes=False)` ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py)) skips registering both `save_question_tool_args` and `save_text_memory`, whatever `cfg.memory` says. The default system prompt switches its save guidance on tool presence, so that guidance drops out too. Any config gate on a save tool must be ANDed with this flag.
@@ -258,7 +261,7 @@ Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../.
 - The cloned config forces `memory.save_queries=False` and `memory.save_text_memories=False`, so the config itself agrees with the agent.
 - The verify agent is never the process-wide cached agent from `tools/_agent.py`. That singleton is keyed on whichever `Config` built it first and may carry both save tools. The runner neither reads nor populates it.
 
-The verifier uses the persisted `default` profile's similarity threshold and limits, capped by the configured row and iteration limits. It overrides `show_details` to retain executed SQL without changing the caller's config or the stored profile. It does not select named profiles.
+The verifier uses the persisted `default` profile's similarity threshold and limits, capped by the configured row and iteration limits. It overrides `show_details` to retain the SQL the agent wrote (never the note line a rewriting guard adds to the outgoing answer) without changing the caller's config or the stored profile. It does not select named profiles.
 
 **Cost.** Each golden case is a full live agent run with no shared conversation. That means typically several billed LLM requests (roughly one per agent-loop iteration; `agent.max_tool_iterations` caps the loop), plus the SQL the agent executes against the configured database through the same guarded runner stack `build_agent` gives `serve`. The first case also pays the lazy ChromaDB open and embedding-model load, because the verify agent is not warmed the way `serve` warms the singleton.
 
