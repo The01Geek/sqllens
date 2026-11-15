@@ -1,0 +1,437 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "agent": "prflow:requesting-code-review",
+   "severity": "suggestion",
+   "description": "The query_database tool description in server.py breaks the note line across three indented lines, so MCP clients see it with line breaks and indentation rather than as the exact single line the answer emits.",
+   "defect_signature": {
+    "file": "src/sqllens/server.py",
+    "line_range": [
+     458,
+     460
+    ],
+    "kind": "style"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [
+  {
+   "agent": "prflow:code-reviewer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 3 (>= 2)"
+  },
+  {
+   "agent": "prflow:pr-test-analyzer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 3 (>= 2)"
+  }
+ ],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (one Suggestion below the threshold)\nThe PR is ready to merge: all 43 checklist items passed, all 13 acceptance criteria are met, and the only finding is a minor wording issue below the `important` threshold.\nRule applied: rule 6 — a finding below the threshold remains → APPROVE with notes\n\n## Code Review Findings\n### 🟡 Suggestion / Minor (1)\n<details><summary>1 item</summary>\n\n1. `src/sqllens/server.py` lines 458-460: the `query_database` tool description breaks the note line across three indented lines. MCP clients see it with line breaks and indentation, not as the exact single line the answer emits, so a client reading the description cannot match the line exactly. Criterion 12 only asks that the description say the SQL starts with the note line, so no criterion is missed. (raised by 1/4 agents)\n\n</details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant; 17 changed files.\n- Phase 0 working tree: skipped (head-override PR mode).\n- Review prompt extension: PROMPT-EXTENSION-STATUS content-present; requesting-code-review extension: content-present.\n- Verdict severity threshold: important.\n- CI evidence for the reviewed head: none held (no in-environment suite result for this head).\n- Phase 3 roster: prflow:code-reviewer and prflow:pr-test-analyzer excluded (first-only, iteration 3); all four selected reviewers returned results.\n- Normalized (wording-only): 0\n- Verified: 43 passed, 0 failed, 0 inconclusive (21 reused, 22 fresh).\n- Re-verification: none.\n- prior-report: none\n- Checklist: 43 passed, 0 failed, 0 inconclusive\n- <details><summary>✅ Passed items (43 of 43)</summary>\n\n  - VC-1: tools.md states the fenced block is sized from the emitted text (note line plus SQL) on a rewriting-guard server [docs/internal/mcp-server/tools.md]\n  - VC-2: tools.md asserts that MySQL reads the note line as a comment so a consumer running the outgoing text runs the model's statement [docs/internal/mcp-server/tools.md]\n  - VC-3: tools.md says the Markdown rail appends the SQL block whenever query_info carries a non-empty sql [docs/internal/mcp-server/tools.md]\n  - VC-4: tools.md says sqllens verify-memory compares query_info sql with golden SQL through sqlglot, which keeps comments [docs/internal/mcp-server/tools.md]\n  - VC-5: memory.md states the verifier overrides show_details to retain the SQL the agent wrote, never the note line [docs/internal/agent/memory.md]\n  - VC-6: tools.md states that with show_details on every successful answer that ran SQL carries the SQL on two rails [docs/internal/mcp-server/tools.md]\n  - VC-7: The components_to_blocks docstring says query_info is built from the last run_sql STATUS_CARD's metadata['sql'] (last-wins for the captured SQL) [src/sqllens/tools/_format.py]\n  - VC-8: The server.py header comment says the SQL reaches users via the fenced block _append_sql_block appends in tools/query_database.py and the widget does not render sqllens/query [src/sqllens/server.py]\n  - VC-11: The _append_sql_block fence is sized from the backtick runs in the emitted text (including the note line), so a SQL containing backticks still closes correctly under as_written [src/sqllens/tools/query_database.py:563]\n  - VC-12: The **note line** is exactly `-- SQL Lens applies this server's access rules to queries before running them, so the query that ran can differ from this text.` The outgoing SQL described in the criteria below, `docs/external/rule-sets.md`, `docs/external/configuration.md` and `docs/internal/mcp-server/tools.md` each carry it verbatim. [docs/external/rule-sets.md]\n  - VC-13: On a server whose config loads a rule-set file, and on a server with at least one `[[rls]]` rule and no rule-set file, for a successful `query_database` answer that ran SQL with `show_details` on, the Markdown that `query_database_impl_with_widgets` returns ends with `**Query as written:**` followed by a fenced `sql` block whose first line is the note line and whose remaining lines are the model's SQL exactly. The tool result's text content carries that Markdown unchanged, followed only by the conversation-ID footer when `agent.show_conversation_footer` is on. [src/sqllens/tools/query_database.py:543]\n  - VC-19: In the same two cases, `_meta[\"sqllens/query\"]` has `sql` equal to the note line, a newline and the model's SQL, and `\"as_written\": true`. Its `query_type` is computed from the model's SQL without the note line, and its `row_count` is the number of rows the query returned, both as before the change. [src/sqllens/tools/query_database.py:529]\n  - VC-24: On a server with no rule-set file and no `[[rls]]` rules, the Markdown answer and `_meta[\"sqllens/query\"]` are byte-for-byte what they are before the change: the `**Executed SQL:**` heading, no note line and no `as_written` key. [src/sqllens/tools/query_database.py:538]\n  - VC-27: On a server with a rule-set file or at least one `[[rls]]` rule, an answer with `show_details` off carries no SQL block, no note line and no `sqllens/query` key, and a failed turn's error result carries no `sqllens/query` key. [src/sqllens/server.py]\n  - VC-30: On a server with a rule-set file or at least one `[[rls]]` rule, the `query_info` that `query_database_impl_with_widgets` returns, and the `query_info` on an `AgentRunError` it raises, hold the model's SQL with no note line, so `sqllens verify-memory` on a flat-RLS server compares the same SQL as before the change. [src/sqllens/tools/query_database.py:529]\n  - VC-31: Under a rule set whose queried table has a row rule, and under an `[[rls]]` rule on a table the query reads, neither the Markdown answer nor `_meta[\"sqllens/query\"]` contains the SQL text the guard passed to the runner beneath it, and neither contains the predicate the guard added. [tests/unit/test_query_as_written.py]\n  - VC-38: The change leaves `_meta[\"sqllens/agent_trace\"]` unchanged: a `run_sql` step's `arguments.sql` is the model's SQL with no note line. [src/sqllens/server.py]\n  - VC-39: `docs/external/rule-sets.md`'s Limits bullet about `show_details` states that the SQL appears under `**Query as written:**`, starts with the note line, carries `as_written: true` in `sqllens/query`, and is the SQL the model wrote before the guard's rewrite, not the SQL MySQL ran. [docs/external/rule-sets.md]\n  - VC-40: `docs/external/configuration.md`'s `show_details` row states that on a server with a rule-set file or `[[rls]]` rules the heading is `**Query as written:**`, the SQL starts with the note line, and `sqllens/query` carries `as_written: true`. The row no longer calls the shown SQL \"the SQL the agent executed\" or \"the executed SQL\"; it calls it the SQL the agent wrote. [docs/external/configuration.md]\n  - VC-41: `docs/internal/mcp-server/tools.md`'s Executed SQL channel section states the behavior on a server with a rule-set file or `[[rls]]` rules, documents `as_written` and the note line as parts of the outgoing `_meta[\"sqllens/query\"]` value only, and states that the `query_info` dict `query_database_impl_with_widgets` returns keeps its documented `{\"sql\", \"query_type\", \"row_count\"?}` shape with the model's SQL and no note line. [docs/internal/mcp-server/tools.md]\n  - VC-42: The `query_database` MCP tool description in `src/sqllens/server.py` states that on a server with a rule-set file or `[[rls]]` rules the SQL is the query as written and starts with the note line, and it no longer says the result widget renders the SQL. [src/sqllens/server.py]\n  - VC-43: After the change, no line that `git grep -n -i -P 'executed[ _-]?sql' -- src docs/internal docs/external ':!docs/external/release-notes.md'` finds calls the SQL in the Markdown block, in `_meta[\"sqllens/query\"].sql` or in the `query_info` that `query_database_impl_with_widgets` returns \"the executed SQL\" or the SQL that ran, unless the line limits that to servers with no rule-set file and no `[[rls]]` rules. Lines that only name the removed in-widget \"Executed SQL\" panel, the `run_sql` status card, or `docs/internal/mcp-server/tools.md`'s \"Executed SQL channel\" section and its anchor are not such lines and may stay as they are. [docs/internal/mcp-server/tools.md]\n  - VC-9: row-level-security.md states that with show_details on, a server with [[rls]] rules shows the pre-rewrite SQL under **Query as written:** with a first note line, and sqllens/query carries the same text and as_written: true [docs/external/row-level-security.md:125]\n  - VC-28: The changelog fragment states the answer shows the SQL under **Query as written:** starting with the note line, sqllens/query carries the same text in sql plus as_written: true, and a server with neither rule-set file nor [[rls]] rules keeps the **Executed SQL:** heading and unchanged metadata [changelog.d/405.fixed.md:6]\n  - VC-29: The changelog fragment is named after the PR number with a valid category so scripts/changelog.py prepare consumes it [changelog.d/405.fixed.md]\n  - VC-32: index.md describes the tools.md side channel as carrying the agent's SQL, matching tools.md's renamed description [docs/internal/index.md:17]\n  - VC-33: The query_results.html header comment states the widget does not render the SQL and that, with show_details on, the SQL reaches users via the Markdown SQL block in the text answer while _meta['sqllens/query'] stays attached on the CallToolResult. [src/sqllens/ui/query_results.html]\n  - VC-34: The config_admin.html show_details help says the knob surfaces the SQL the agent wrote and the agent trace. [src/sqllens/ui/config_admin.html]\n  - VC-35: The server.py comment above _QUERY_META_KEY says the sqllens/query value is {sql, query_type, row_count?} plus as_written under a rewriting guard, present only when show_details is on and SQL ran. [src/sqllens/server.py]\n  - VC-36: The agent_memory.py comment says the memory hit/miss STATUS_CARD uses the same metadata seam components_to_blocks reads for the run_sql card's SQL. [src/sqllens/agent/tools/agent_memory.py]\n  - VC-37: test_failed_turn_under_a_rewriting_guard reuses agent.guard for a second _GuardedAgent with fail=True; the second turn's error result is expected to carry is_error and no sqllens/query key under show_conversation_footer=False. [tests/unit/test_query_as_written.py]\n  - VC-10: The run_sql status card's metadata[\"sql\"] and agent trace arguments.sql hold the SQL the model wrote, not the guard-rewritten SQL [docs/internal/agent/factory.md]\n  - VC-14: has_rewriting_guard returns True exactly in the cases where build_agent wires a rewriting guard: cfg.rule_sets.loaded is not None, or cfg.rls is non-empty. [src/sqllens/tools/query_database.py:516]\n  - VC-15: cfg.rls is a list (empty when no [[rls]] rules) and cfg.rule_sets.loaded is None when no rule-set file is configured, so bool(cfg.rls) and the None check distinguish the cases. [src/sqllens/tools/query_database.py:522]\n  - VC-16: outgoing_query_info never mutates query_info; it returns a new dict with the note-prefixed sql and as_written True when as_written and sql are truthy, otherwise the original dict. [src/sqllens/tools/query_database.py:529]\n  - VC-17: server.py applies outgoing_query_info only to the _meta['sqllens/query'] value; the query_info returned by query_database_impl_with_widgets (and on AgentRunError) carries no note line, and the error path attaches no sqllens/query key. [src/sqllens/server.py:521]\n  - VC-18: The server.py tool description states that on a rule-set or [[rls]] server the heading is **Query as written:**, the SQL starts with the note line text, and sqllens/query carries as_written true; the note text it quotes must equal AS_WRITTEN_NOTE_LINE. [src/sqllens/server.py]\n  - VC-20: config-loading.md states show_details surfaces the SQL the agent wrote, labelled the query as written with a note line on a server with a rule-set file or [[rls]] rules, both in the Markdown and in _meta['sqllens/query']. [docs/internal/setup/config-loading.md]\n  - VC-21: config.py show_details description says SQL is labelled the query as written with a rule-set file or [[rls]] rules because access rules change it before it runs. [src/sqllens/config.py:529]\n  - VC-22: _GuardedAgent emits run_sql cards and a STATUS_CARD with metadata {'sql': ...} shaped like the real agent's run_sql tool output, so components_to_blocks builds query_info and agent_trace as it would in production. [tests/unit/test_query_as_written.py:352]\n  - VC-23: _Recorder.run_sql matches the SqlRunner.run_sql signature (args, context, require_base_tables keyword) that RuleSetGuardRunner and RlsGuardRunner call. [tests/unit/test_query_as_written.py:344]\n  - VC-25: build_server(cfg)._tool_manager.get_tool('query_database').fn and the _Ctx stub with request_context.meta match the mcp 2.x MCPServer API the handler uses, and the result exposes .meta, .content and .is_error. [tests/unit/test_query_as_written.py:434]\n  - VC-26: The test asserts the note line changes nothing MySQL runs, by comparing sqlglot output with comments stripped. [tests/unit/test_query_as_written.py:462]\n\n  </details>\n- Reviewed against issue #403 — criteria from the workpad; scope unchanged.\n- Finding rejected lines not counted: no Finding rejected line.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] The **note line** is exactly `-- SQL Lens applies this server's access rules to queries before running them, so the query that ran can differ from this text.` The outgoing SQL described in the criteria below, `docs/external/rule-sets.md`, `docs/external/configuration.md` and `docs/internal/mcp-server/tools.md` each carry it verbatim.\n- [ ] On a server whose config loads a rule-set file, and on a server with at least one `[[rls]]` rule and no rule-set file, for a successful `query_database` answer that ran SQL with `show_details` on, the Markdown that `query_database_impl_with_widgets` returns ends with `**Query as written:**` followed by a fenced `sql` block whose first line is the note line and whose remaining lines are the model's SQL exactly. The tool result's text content carries that Markdown unchanged, followed only by the conversation-ID footer when `agent.show_conversation_footer` is on.\n- [ ] In the same two cases, `_meta[\"sqllens/query\"]` has `sql` equal to the note line, a newline and the model's SQL, and `\"as_written\": true`. Its `query_type` is computed from the model's SQL without the note line, and its `row_count` is the number of rows the query returned, both as before the change.\n- [ ] On a server with no rule-set file and no `[[rls]]` rules, the Markdown answer and `_meta[\"sqllens/query\"]` are byte-for-byte what they are before the change: the `**Executed SQL:**` heading, no note line and no `as_written` key.\n- [ ] On a server with a rule-set file or at least one `[[rls]]` rule, an answer with `show_details` off carries no SQL block, no note line and no `sqllens/query` key, and a failed turn's error result carries no `sqllens/query` key.\n- [ ] On a server with a rule-set file or at least one `[[rls]]` rule, the `query_info` that `query_database_impl_with_widgets` returns, and the `query_info` on an `AgentRunError` it raises, hold the model's SQL with no note line, so `sqllens verify-memory` on a flat-RLS server compares the same SQL as before the change.\n- [ ] Under a rule set whose queried table has a row rule, and under an `[[rls]]` rule on a table the query reads, neither the Markdown answer nor `_meta[\"sqllens/query\"]` contains the SQL text the guard passed to the runner beneath it, and neither contains the predicate the guard added.\n- [ ] The change leaves `_meta[\"sqllens/agent_trace\"]` unchanged: a `run_sql` step's `arguments.sql` is the model's SQL with no note line.\n- [ ] `docs/external/rule-sets.md`'s Limits bullet about `show_details` states that the SQL appears under `**Query as written:**`, starts with the note line, carries `as_written: true` in `sqllens/query`, and is the SQL the model wrote before the guard's rewrite, not the SQL MySQL ran.\n- [ ] `docs/external/configuration.md`'s `show_details` row states that on a server with a rule-set file or `[[rls]]` rules the heading is `**Query as written:**`, the SQL starts with the note line, and `sqllens/query` carries `as_written: true`. The row no longer calls the shown SQL \"the SQL the agent executed\" or \"the executed SQL\"; it calls it the SQL the agent wrote.\n- [ ] `docs/internal/mcp-server/tools.md`'s Executed SQL channel section states the behavior on a server with a rule-set file or `[[rls]]` rules, documents `as_written` and the note line as parts of the outgoing `_meta[\"sqllens/query\"]` value only, and states that the `query_info` dict `query_database_impl_with_widgets` returns keeps its documented `{\"sql\", \"query_type\", \"row_count\"?}` shape with the model's SQL and no note line.\n- [ ] The `query_database` MCP tool description in `src/sqllens/server.py` states that on a server with a rule-set file or `[[rls]]` rules the SQL is the query as written and starts with the note line, and it no longer says the result widget renders the SQL.\n- [ ] After the change, no line that `git grep -n -i -P 'executed[ _-]?sql' -- src docs/internal docs/external ':!docs/external/release-notes.md'` finds calls the SQL in the Markdown block, in `_meta[\"sqllens/query\"].sql` or in the `query_info` that `query_database_impl_with_widgets` returns \"the executed SQL\" or the SQL that ran, unless the line limits that to servers with no rule-set file and no `[[rls]]` rules. Lines that only name the removed in-widget \"Executed SQL\" panel, the `run_sql` status card, or `docs/internal/mcp-server/tools.md`'s \"Executed SQL channel\" section and its anchor are not such lines and may stay as they are.",
+ "diff_produced_at_head": "d36834c87c1db881fefdf18603f4367c93a9563b",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "api_contract:tools.md:fence-sized-emitted-text",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "absolute_claim:tools.md:note-line-mysql-comment",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "api_contract:tools.md:markdown-rail-nonempty-sql",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "api_contract:tools.md:verify-memory-sqlglot-comments",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:memory.md:verifier-no-note-line",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:tools.md:every-answer-ran-sql",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:_format.py:last-wins-captured-sql",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:server.py:widget-header-comment",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "api_contract:query_database.py:fence-sizing:563",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-12",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-13",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-27",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-30",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-31",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-38",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-39",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-40",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-41",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-12",
+   "id": "VC-42",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-13",
+   "id": "VC-43",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "api_contract:row-level-security.md:rls-query-as-written",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "api_contract:405.fixed.md:changelog-behavior",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "api_contract:repo:changelog-fragment-name",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "api_contract:index.md:meta-channel-list:17",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "api_contract:query_results.html:widget-no-sql-render",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "api_contract:config_admin.html:show-details-help",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "api_contract:server.py:query-meta-comment",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "api_contract:agent_memory.py:status-card-seam",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-37",
+   "claim_signature": "test_mock_alignment:test_query_as_written.py:failed-turn-error-meta",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "data_format_assumption:factory.md:run-sql-card-model-sql",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "dependency_interaction:query_database.py:rewriting-guard-condition:516",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "data_format_assumption:query_database.py:rls-loaded-defaults:522",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:query_database.py:outgoing-query-info-no-mutation:529",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:server.py:query-meta-as-written:521",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:server.py:docstring-note-line",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "api_contract:config-loading.md:show-details-as-written",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "api_contract:config.py:show-details-description:529",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "test_mock_alignment:test_query_as_written.py:guarded-agent-cards:352",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "test_mock_alignment:test_query_as_written.py:recorder-signature:344",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "test_mock_alignment:test_query_as_written.py:tool-manager-call:434",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "absolute_claim:test_query_as_written.py:note-changes-nothing:462",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  }
+ ]
+}

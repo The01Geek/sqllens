@@ -1,0 +1,54 @@
+[
+  {
+    "criterion": 1,
+    "text": "The **note line** is exactly `-- SQL Lens applies this server's access rules to queries before running them, so the query that ran can differ from this text.` The outgoing SQL described in the criteria below, `docs/external/rule-sets.md`, `docs/external/configuration.md` and `docs/internal/mcp-server/tools.md` each carry it verbatim."
+  },
+  {
+    "criterion": 2,
+    "text": "On a server whose config loads a rule-set file, and on a server with at least one `[[rls]]` rule and no rule-set file, for a successful `query_database` answer that ran SQL with `show_details` on, the Markdown that `query_database_impl_with_widgets` returns ends with `**Query as written:**` followed by a fenced `sql` block whose first line is the note line and whose remaining lines are the model's SQL exactly. The tool result's text content carries that Markdown unchanged, followed only by the conversation-ID footer when `agent.show_conversation_footer` is on."
+  },
+  {
+    "criterion": 3,
+    "text": "In the same two cases, `_meta[\"sqllens/query\"]` has `sql` equal to the note line, a newline and the model's SQL, and `\"as_written\": true`. Its `query_type` is computed from the model's SQL without the note line, and its `row_count` is the number of rows the query returned, both as before the change."
+  },
+  {
+    "criterion": 4,
+    "text": "On a server with no rule-set file and no `[[rls]]` rules, the Markdown answer and `_meta[\"sqllens/query\"]` are byte-for-byte what they are before the change: the `**Executed SQL:**` heading, no note line and no `as_written` key."
+  },
+  {
+    "criterion": 5,
+    "text": "On a server with a rule-set file or at least one `[[rls]]` rule, an answer with `show_details` off carries no SQL block, no note line and no `sqllens/query` key, and a failed turn's error result carries no `sqllens/query` key."
+  },
+  {
+    "criterion": 6,
+    "text": "On a server with a rule-set file or at least one `[[rls]]` rule, the `query_info` that `query_database_impl_with_widgets` returns, and the `query_info` on an `AgentRunError` it raises, hold the model's SQL with no note line, so `sqllens verify-memory` on a flat-RLS server compares the same SQL as before the change."
+  },
+  {
+    "criterion": 7,
+    "text": "Under a rule set whose queried table has a row rule, and under an `[[rls]]` rule on a table the query reads, neither the Markdown answer nor `_meta[\"sqllens/query\"]` contains the SQL text the guard passed to the runner beneath it, and neither contains the predicate the guard added."
+  },
+  {
+    "criterion": 8,
+    "text": "The change leaves `_meta[\"sqllens/agent_trace\"]` unchanged: a `run_sql` step's `arguments.sql` is the model's SQL with no note line."
+  },
+  {
+    "criterion": 9,
+    "text": "`docs/external/rule-sets.md`'s Limits bullet about `show_details` states that the SQL appears under `**Query as written:**`, starts with the note line, carries `as_written: true` in `sqllens/query`, and is the SQL the model wrote before the guard's rewrite, not the SQL MySQL ran."
+  },
+  {
+    "criterion": 10,
+    "text": "`docs/external/configuration.md`'s `show_details` row states that on a server with a rule-set file or `[[rls]]` rules the heading is `**Query as written:**`, the SQL starts with the note line, and `sqllens/query` carries `as_written: true`. The row no longer calls the shown SQL \"the SQL the agent executed\" or \"the executed SQL\"; it calls it the SQL the agent wrote."
+  },
+  {
+    "criterion": 11,
+    "text": "`docs/internal/mcp-server/tools.md`'s Executed SQL channel section states the behavior on a server with a rule-set file or `[[rls]]` rules, documents `as_written` and the note line as parts of the outgoing `_meta[\"sqllens/query\"]` value only, and states that the `query_info` dict `query_database_impl_with_widgets` returns keeps its documented `{\"sql\", \"query_type\", \"row_count\"?}` shape with the model's SQL and no note line."
+  },
+  {
+    "criterion": 12,
+    "text": "The `query_database` MCP tool description in `src/sqllens/server.py` states that on a server with a rule-set file or `[[rls]]` rules the SQL is the query as written and starts with the note line, and it no longer says the result widget renders the SQL."
+  },
+  {
+    "criterion": 13,
+    "text": "After the change, no line that `git grep -n -i -P 'executed[ _-]?sql' -- src docs/internal docs/external ':!docs/external/release-notes.md'` finds calls the SQL in the Markdown block, in `_meta[\"sqllens/query\"].sql` or in the `query_info` that `query_database_impl_with_widgets` returns \"the executed SQL\" or the SQL that ran, unless the line limits that to servers with no rule-set file and no `[[rls]]` rules. Lines that only name the removed in-widget \"Executed SQL\" panel, the `run_sql` status card, or `docs/internal/mcp-server/tools.md`'s \"Executed SQL channel\" section and its anchor are not such lines and may stay as they are."
+  }
+]

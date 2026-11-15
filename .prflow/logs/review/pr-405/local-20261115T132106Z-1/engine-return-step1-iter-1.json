@@ -1,0 +1,454 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "outgoing_query_info returns the caller's own dict when no guard applies; internal and outgoing query shapes are both plain dicts, so the outgoing-only invariant rests on convention.",
+   "defect_signature": {
+    "file": "src/sqllens/tools/query_database.py",
+    "line_range": [
+     529,
+     540
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  },
+  {
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "has_rewriting_guard mirrors factory.py wiring conditions rather than asking which guards were wired; the Markdown and metadata labels are decided at two call sites.",
+   "defect_signature": {
+    "file": "src/sqllens/tools/query_database.py",
+    "line_range": [
+     516,
+     523
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [
+  "VC-8",
+  "VC-9"
+ ],
+ "criterion_exempt": [],
+ "verdict": "REJECT",
+ "report": "## Verdict: REJECT (two Important checklist failures: absolute \"never shown\" claims in the external docs)\n\nThe PR is not ready to merge: two doc lines it adds say the rewritten SQL is never shown, but a database error can still quote fragments of the rewritten statement back to the client.\n\nRule applied: rule 1 — a checklist FAIL at or above the threshold → REJECT\n\n## Code Review Findings\n\n### 🟠 Important / Major\n\n- VC-8: FAIL (important) — The rewritten SQL is never shown to the client on any rail (Markdown, sqllens/query, agent trace, error results) [docs/external/row-level-security.md]\n\n  <details><summary>Evidence</summary>\n\n  docs/external/row-level-security.md:125 says 'The rewritten statement is never shown to the client.' The success-path SQL rails use the as-written SQL (query_database.py:525-562 _as_written_sql / outgoing_query_info). The error rails do not. RlsGuardRunner.run_sql (safety/__init__.py:195-234) passes the rewritten SQL to the inner runner. The MySQL runner (agent/integrations/mysql/sql_runner.py) has no except that sanitizes, and its docstring line 98 says pymysql.Error propagates. run_sql.py:211-226 then builds 'Error executing query: {str(e)}' into result_for_llm, the error NotificationComponent message and ToolResult.error. _format.py:384-387 returns that card description as error_message, which becomes the 'SQL execution error: ' client error (query_database.py:936). _format.py:712-715 and 755-756 put the same text verbatim in the agent trace step error and terminal_error. _format.py:721-725 states these are deliberately not scrubbed. MySQL server errors such as 'You have an error in your SQL syntax ... near ...' and 'Unknown column ...' quote fragments of the executed (rewritten) statement. Because the executed statement is the rewritten one, those fragments can include the injected predicate, so the rewritten SQL text can reach the client through error results and the agent trace. Counterexample input: an [[rls]] query that passes the guard but fails at MySQL. The absolute claim 'never shown' is therefore false for error results and trace. Caveat: I did not run MySQL, so the exact error text is from known driver behavior, not from a run.\n\n  </details>\n\n- VC-9: FAIL (important) — The rewritten SQL under a rule set is never shown [docs/external/rule-sets.md]\n\n  <details><summary>Evidence</summary>\n\n  docs/external/rule-sets.md:300 says 'The rewritten SQL is never shown' (absolute). The show_details block does use the as-written SQL (query_database.py:940), but the rewritten SQL can still reach the client/agent through a database error. RuleSetGuardRunner passes the rewritten SQL to the inner runner (rule_sets.py:894-896). RefusalRedactingRunner only redacts UnsafeSqlError/RlsError and its docstring says 'Database errors pass through unchanged' (rule_sets.py:983-1016). mysql/sql_runner.py comments (lines 178-180) say the primary query error reaches the LLM intact. agent/tools/run_sql.py:211-225 turns the exception into 'Error executing query: {str(e)}' as result_for_llm, a UI component and error=str(e). agent/integrations/sql_threads.py:37-38 itself notes the exception message 'can quote the SQL'. A MySQL syntax error ('near ...') or an unknown-table error on a rewritten derived table or link table therefore shows rewritten SQL fragments or link-table names. Query_database.py:934-936 then raises 'SQL execution error: {answer}' to the caller. So 'never' is not true for DB error text. I did not run MySQL; this rests on reading the pass-through path.\n\n  </details>\n\n### 🟡 Suggestion / Minor (3)\n\n<details><summary>3 items</summary>\n\n1. `outgoing_query_info` in src/sqllens/tools/query_database.py returns the caller's own dict when no guard applies, and the internal and outgoing query shapes are both plain dicts, so the outgoing-only invariant rests on convention (raised by 1/6 agents)\n2. `has_rewriting_guard` in src/sqllens/tools/query_database.py mirrors factory.py's wiring conditions instead of asking which guards were wired, and the Markdown and metadata labels are decided at two call sites (raised by 1/6 agents)\n\n- VC-19: FAIL (suggestion) — The query_database docstring says the default profile keeps show_details off so the SQL block is suppressed. [src/sqllens/server.py]\n\n  <details><summary>Evidence</summary>\n\n  server.py:461-462 docstring says the default profile keeps show_details off so the SQL block is suppressed. profiles.py:301-310 resolve_effective_settings: with no profile, name=default; the default profile (or an empty Profile()) has show_details=None, which inherits cfg.agent.show_details. With cfg.agent.show_details=true and no profile selected, show_details resolves true, and query_database.py:899-906 then attaches SQL/trace. The default profile can also set show_details=true explicitly. So the docstring is false in that case; the same docstring (server.py:446) says default 'falls back to base config'. The line is unchanged context in the diff (diff.patch:275-276), not added by the PR.\n\n  </details>\n\n</details>\n\n### ℹ️ Informational — Deferred (1)\n\n<details><summary>1 item</summary>\n\n- VC-6: INCONCLUSIVE (suggestion) — sqllens verify-memory compares the agent's SQL with golden SQL through sqlglot, and sqlglot keeps comments (so a note line would change the comparison) [docs/internal/mcp-server/tools.md]\n\n  <details><summary>Evidence</summary>\n\n  Repo half verified: src/sqllens/eval/runner.py:152 calls compare_sql(expected, actual, dialect=...), and src/sqllens/eval/compare.py:39-72 normalizes both sides via sqlglot.parse(...) then statement.sql(dialect=..., normalize=True, pretty=False) and compares strings. Nothing in compare.py strips comments or passes comments=False, so whether a note line changes the comparison depends solely on sqlglot's parser/generator keeping comments. No dependency_sources were supplied and sqlglot source is not in the views, so that library behavior could not be read. Missing evidence: sqlglot's parser comment attachment and Generator comments default (not read). No test in the repo's compare tests exercises comments either.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant, 17 changed files.\n- Phase 0 working tree: skipped in pr mode.\n- Review prompt extension: content-present. requesting-code-review extension: content-present.\n- CI evidence: none held for this head.\n- Normalized (wording-only): 0\n- prior-report: none\n- Finding rejected lines not counted (no Finding rejected line) — exempt.\n\n- Checklist: 35 passed, 3 failed, 1 inconclusive\n- <details><summary>✅ Passed items (35 of 39)</summary>\n\n  - VC-1: has_rewriting_guard in src/sqllens/tools/query_database.py is `cfg.rule_sets.loaded is not None or bool(cfg.rls)`, matching the two conditions under which build_agent wires RuleSetGuardRunner or RlsGuardRunner [docs/internal/mcp-server/tools.md]\n  - VC-2: server.py sets _meta[\"sqllens/query\"] = outgoing_query_info(query_info, as_written=has_rewriting_guard(cfg)), which returns query_info itself with no rewriting guard [docs/internal/mcp-server/tools.md]\n  - VC-3: outgoing_query_info returns a copy whose sql is note line + newline + model SQL, adds as_written: true, and leaves query_type and row_count unchanged (query_type computed from SQL without the note line) [docs/internal/mcp-server/tools.md]\n  - VC-4: _append_sql_block appends the SQL block whenever query_info carries a non-empty sql, uses **Query as written:** plus the note line under a rewriting guard, and sizes the fence from the emitted text [docs/internal/mcp-server/tools.md]\n  - VC-5: The query_info returned by query_database_impl_with_widgets and AgentRunError.query_info keep the model's SQL with no note line and no as_written key [docs/internal/mcp-server/tools.md]\n  - VC-7: MySQL treats the note line (`-- ` followed by a space) as a comment, so running the outgoing text runs the model's statement [docs/internal/mcp-server/tools.md]\n  - VC-10: The run_sql status card's metadata[\"sql\"] and agent trace arguments.sql hold the SQL the model wrote, not the guard-rewritten SQL [docs/internal/agent/factory.md]\n  - VC-11: The verify-memory runner overrides show_details and retains the model SQL without the note line [docs/internal/agent/memory.md]\n  - VC-12: tests/unit/test_query_as_written.py exists and pins the rewriting-guard behavior described in the section [docs/internal/mcp-server/tools.md]\n  - VC-13: With show_details on, the sqllens/query entry and Markdown SQL appear only for a successful answer that ran SQL [docs/internal/mcp-server/tools.md]\n  - VC-14: has_rewriting_guard returns True exactly in the cases where build_agent wires a rewriting guard: cfg.rule_sets.loaded is not None, or cfg.rls is non-empty. [src/sqllens/tools/query_database.py:516]\n  - VC-15: cfg.rls is a list (empty when no [[rls]] rules) and cfg.rule_sets.loaded is None when no rule-set file is configured, so bool(cfg.rls) and the None check distinguish the cases. [src/sqllens/tools/query_database.py:522]\n  - VC-16: outgoing_query_info never mutates query_info; it returns a new dict with the note-prefixed sql and as_written True when as_written and sql are truthy, otherwise the original dict. [src/sqllens/tools/query_database.py:529]\n  - VC-17: server.py applies outgoing_query_info only to the _meta['sqllens/query'] value; the query_info returned by query_database_impl_with_widgets (and on AgentRunError) carries no note line, and the error path attaches no sqllens/query key. [src/sqllens/server.py:521]\n  - VC-18: The server.py tool description states that on a rule-set or [[rls]] server the heading is **Query as written:**, the SQL starts with the note line text, and sqllens/query carries as_written true; the note text it quotes must equal AS_WRITTEN_NOTE_LINE. [src/sqllens/server.py]\n  - VC-20: config-loading.md states show_details surfaces the SQL the agent wrote, labelled the query as written with a note line on a server with a rule-set file or [[rls]] rules, both in the Markdown and in _meta['sqllens/query']. [docs/internal/setup/config-loading.md]\n  - VC-21: config.py show_details description says SQL is labelled the query as written with a rule-set file or [[rls]] rules because access rules change it before it runs. [src/sqllens/config.py:529]\n  - VC-22: _GuardedAgent emits run_sql cards and a STATUS_CARD with metadata {'sql': ...} shaped like the real agent's run_sql tool output, so components_to_blocks builds query_info and agent_trace as it would in production. [tests/unit/test_query_as_written.py:352]\n  - VC-23: _Recorder.run_sql matches the SqlRunner.run_sql signature (args, context, require_base_tables keyword) that RuleSetGuardRunner and RlsGuardRunner call. [tests/unit/test_query_as_written.py:344]\n  - VC-24: Patching rule_sets._check_catalog_blocking is enough to bypass the catalog check the turn performs for a loaded rule-set file. [tests/unit/test_query_as_written.py:337]\n  - VC-25: build_server(cfg)._tool_manager.get_tool('query_database').fn and the _Ctx stub with request_context.meta match the mcp 2.x MCPServer API the handler uses, and the result exposes .meta, .content and .is_error. [tests/unit/test_query_as_written.py:434]\n  - VC-26: The test asserts the note line changes nothing MySQL runs, by comparing sqlglot output with comments stripped. [tests/unit/test_query_as_written.py:462]\n  - VC-27: The **note line** is exactly `-- SQL Lens applies this server's access rules to queries before running them, so the query that ran can differ from this text.` The outgoing SQL described in the criteria below, `docs/external/rule-sets.md`, `docs/external/configuration.md` and `docs/internal/mcp-server/tools.md` each carry it verbatim. [docs/external/rule-sets.md]\n  - VC-28: On a server whose config loads a rule-set file, and on a server with at least one `[[rls]]` rule and no rule-set file, for a successful `query_database` answer that ran SQL with `show_details` on, the Markdown that `query_database_impl_with_widgets` returns ends with `**Query as written:**` followed by a fenced `sql` block whose first line is the note line and whose remaining lines are the model's SQL exactly. The tool result's text content carries that Markdown unchanged, followed only by the conversation-ID footer when `agent.show_conversation_footer` is on. [src/sqllens/tools/query_database.py:940]\n  - VC-29: In the same two cases, `_meta[\"sqllens/query\"]` has `sql` equal to the note line, a newline and the model's SQL, and `\"as_written\": true`. Its `query_type` is computed from the model's SQL without the note line, and its `row_count` is the number of rows the query returned, both as before the change. [src/sqllens/server.py:521]\n  - VC-30: On a server with no rule-set file and no `[[rls]]` rules, the Markdown answer and `_meta[\"sqllens/query\"]` are byte-for-byte what they are before the change: the `**Executed SQL:**` heading, no note line and no `as_written` key. [src/sqllens/tools/query_database.py:516-562]\n  - VC-31: On a server with a rule-set file or at least one `[[rls]]` rule, an answer with `show_details` off carries no SQL block, no note line and no `sqllens/query` key, and a failed turn's error result carries no `sqllens/query` key. [src/sqllens/tools/query_database.py:899-941]\n  - VC-32: On a server with a rule-set file or at least one `[[rls]]` rule, the `query_info` that `query_database_impl_with_widgets` returns, and the `query_info` on an `AgentRunError` it raises, hold the model's SQL with no note line, so `sqllens verify-memory` on a flat-RLS server compares the same SQL as before the change. [src/sqllens/tools/query_database.py:873-941]\n  - VC-33: Under a rule set whose queried table has a row rule, and under an `[[rls]]` rule on a table the query reads, neither the Markdown answer nor `_meta[\"sqllens/query\"]` contains the SQL text the guard passed to the runner beneath it, and neither contains the predicate the guard added. [src/sqllens/tools/query_database.py:516-560]\n  - VC-34: The change leaves `_meta[\"sqllens/agent_trace\"]` unchanged: a `run_sql` step's `arguments.sql` is the model's SQL with no note line. [src/sqllens/tools/query_database.py:510-568]\n  - VC-35: `docs/external/rule-sets.md`'s Limits bullet about `show_details` states that the SQL appears under `**Query as written:**`, starts with the note line, carries `as_written: true` in `sqllens/query`, and is the SQL the model wrote before the guard's rewrite, not the SQL MySQL ran. [docs/external/rule-sets.md]\n  - VC-36: `docs/external/configuration.md`'s `show_details` row states that on a server with a rule-set file or `[[rls]]` rules the heading is `**Query as written:**`, the SQL starts with the note line, and `sqllens/query` carries `as_written: true`. The row no longer calls the shown SQL \"the SQL the agent executed\" or \"the executed SQL\"; it calls it the SQL the agent wrote. [docs/external/configuration.md]\n  - VC-37: `docs/internal/mcp-server/tools.md`'s Executed SQL channel section states the behavior on a server with a rule-set file or `[[rls]]` rules, documents `as_written` and the note line as parts of the outgoing `_meta[\"sqllens/query\"]` value only, and states that the `query_info` dict `query_database_impl_with_widgets` returns keeps its documented `{\"sql\", \"query_type\", \"row_count\"?}` shape with the model's SQL and no note line. [docs/internal/mcp-server/tools.md]\n  - VC-38: The `query_database` MCP tool description in `src/sqllens/server.py` states that on a server with a rule-set file or `[[rls]]` rules the SQL is the query as written and starts with the note line, and it no longer says the result widget renders the SQL. [src/sqllens/server.py]\n  - VC-39: After the change, no line that `git grep -n -i -P 'executed[ _-]?sql' -- src docs/internal docs/external ':!docs/external/release-notes.md'` finds calls the SQL in the Markdown block, in `_meta[\"sqllens/query\"].sql` or in the `query_info` that `query_database_impl_with_widgets` returns \"the executed SQL\" or the SQL that ran, unless the line limits that to servers with no rule-set file and no `[[rls]]` rules. Lines that only name the removed in-widget \"Executed SQL\" panel, the `run_sql` status card, or `docs/internal/mcp-server/tools.md`'s \"Executed SQL channel\" section and its anchor are not such lines and may stay as they are. [docs/internal/mcp-server/tools.md]\n\n  </details>\n- Reviewed against issue #403 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] The **note line** is exactly `-- SQL Lens applies this server's access rules to queries before running them, so the query that ran can differ from this text.` The outgoing SQL described in the criteria below, `docs/external/rule-sets.md`, `docs/external/configuration.md` and `docs/internal/mcp-server/tools.md` each carry it verbatim.\n- [ ] On a server whose config loads a rule-set file, and on a server with at least one `[[rls]]` rule and no rule-set file, for a successful `query_database` answer that ran SQL with `show_details` on, the Markdown that `query_database_impl_with_widgets` returns ends with `**Query as written:**` followed by a fenced `sql` block whose first line is the note line and whose remaining lines are the model's SQL exactly. The tool result's text content carries that Markdown unchanged, followed only by the conversation-ID footer when `agent.show_conversation_footer` is on.\n- [ ] In the same two cases, `_meta[\"sqllens/query\"]` has `sql` equal to the note line, a newline and the model's SQL, and `\"as_written\": true`. Its `query_type` is computed from the model's SQL without the note line, and its `row_count` is the number of rows the query returned, both as before the change.\n- [ ] On a server with no rule-set file and no `[[rls]]` rules, the Markdown answer and `_meta[\"sqllens/query\"]` are byte-for-byte what they are before the change: the `**Executed SQL:**` heading, no note line and no `as_written` key.\n- [ ] On a server with a rule-set file or at least one `[[rls]]` rule, an answer with `show_details` off carries no SQL block, no note line and no `sqllens/query` key, and a failed turn's error result carries no `sqllens/query` key.\n- [ ] On a server with a rule-set file or at least one `[[rls]]` rule, the `query_info` that `query_database_impl_with_widgets` returns, and the `query_info` on an `AgentRunError` it raises, hold the model's SQL with no note line, so `sqllens verify-memory` on a flat-RLS server compares the same SQL as before the change.\n- [ ] Under a rule set whose queried table has a row rule, and under an `[[rls]]` rule on a table the query reads, neither the Markdown answer nor `_meta[\"sqllens/query\"]` contains the SQL text the guard passed to the runner beneath it, and neither contains the predicate the guard added.\n- [ ] The change leaves `_meta[\"sqllens/agent_trace\"]` unchanged: a `run_sql` step's `arguments.sql` is the model's SQL with no note line.\n- [ ] `docs/external/rule-sets.md`'s Limits bullet about `show_details` states that the SQL appears under `**Query as written:**`, starts with the note line, carries `as_written: true` in `sqllens/query`, and is the SQL the model wrote before the guard's rewrite, not the SQL MySQL ran.\n- [ ] `docs/external/configuration.md`'s `show_details` row states that on a server with a rule-set file or `[[rls]]` rules the heading is `**Query as written:**`, the SQL starts with the note line, and `sqllens/query` carries `as_written: true`. The row no longer calls the shown SQL \"the SQL the agent executed\" or \"the executed SQL\"; it calls it the SQL the agent wrote.\n- [ ] `docs/internal/mcp-server/tools.md`'s Executed SQL channel section states the behavior on a server with a rule-set file or `[[rls]]` rules, documents `as_written` and the note line as parts of the outgoing `_meta[\"sqllens/query\"]` value only, and states that the `query_info` dict `query_database_impl_with_widgets` returns keeps its documented `{\"sql\", \"query_type\", \"row_count\"?}` shape with the model's SQL and no note line.\n- [ ] The `query_database` MCP tool description in `src/sqllens/server.py` states that on a server with a rule-set file or `[[rls]]` rules the SQL is the query as written and starts with the note line, and it no longer says the result widget renders the SQL.\n- [ ] After the change, no line that `git grep -n -i -P 'executed[ _-]?sql' -- src docs/internal docs/external ':!docs/external/release-notes.md'` finds calls the SQL in the Markdown block, in `_meta[\"sqllens/query\"].sql` or in the `query_info` that `query_database_impl_with_widgets` returns \"the executed SQL\" or the SQL that ran, unless the line limits that to servers with no rule-set file and no `[[rls]]` rules. Lines that only name the removed in-widget \"Executed SQL\" panel, the `run_sql` status card, or `docs/internal/mcp-server/tools.md`'s \"Executed SQL channel\" section and its anchor are not such lines and may stay as they are.",
+ "diff_produced_at_head": "6a3810fea395f1dbd398ddd2f5cedced26e4af45",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "api_contract:tools.md:rewriting-guard-predicate",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "api_contract:tools.md:outgoing-query-info-call",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "data_format_assumption:tools.md:outgoing-copy-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "api_contract:tools.md:append-sql-block-condition",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:tools.md:internal-query-info-unchanged",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "category": "dependency_interaction",
+   "claim": "sqllens verify-memory compares the agent's SQL with golden SQL through sqlglot, and sqlglot keeps comments (so a note line would change the comparison)",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "`sqllens verify-memory` runs on flat-RLS servers and compares that SQL with golden SQL through sqlglot, which keeps comments.",
+   "source_file": "docs/internal/mcp-server/tools.md",
+   "verify_against": "src/sqllens/eval/",
+   "verify_hint": "Check the SQL comparison function in src/sqllens/eval/ and whether it strips comments before comparing",
+   "claim_signature": "dependency_interaction:tools.md:verify-memory-sqlglot-comments",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-6"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Repo half verified: src/sqllens/eval/runner.py:152 calls compare_sql(expected, actual, dialect=...), and src/sqllens/eval/compare.py:39-72 normalizes both sides via sqlglot.parse(...) then statement.sql(dialect=..., normalize=True, pretty=False) and compares strings. Nothing in compare.py strips comments or passes comments=False, so whether a note line changes the comparison depends solely on sqlglot's parser/generator keeping comments. No dependency_sources were supplied and sqlglot source is not in the views, so that library behavior could not be read. Missing evidence: sqlglot's parser comment attachment and Generator comments default (not read). No test in the repo's compare tests exercises comments either.",
+   "file_checked": "src/sqllens/eval/compare.py:39-72",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "dependency_interaction:tools.md:note-line-mysql-comment",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "category": "absolute_claim",
+   "claim": "The rewritten SQL is never shown to the client on any rail (Markdown, sqllens/query, agent trace, error results)",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "The rewritten statement is never shown to the client.",
+   "source_file": "docs/external/row-level-security.md",
+   "verify_against": "src/sqllens/safety/rls.py, src/sqllens/tools/_format.py, src/sqllens/tools/query_database.py",
+   "verify_hint": "Trace an [[rls]] query whose RlsGuardRunner rewrite fails at MySQL: does the error message, run_sql card metadata or agent trace error carry the rewritten SQL?",
+   "claim_signature": "absolute_claim:row-level-security.md:rewritten-never-shown",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-8"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "docs/external/row-level-security.md:125 says 'The rewritten statement is never shown to the client.' The success-path SQL rails use the as-written SQL (query_database.py:525-562 _as_written_sql / outgoing_query_info). The error rails do not. RlsGuardRunner.run_sql (safety/__init__.py:195-234) passes the rewritten SQL to the inner runner. The MySQL runner (agent/integrations/mysql/sql_runner.py) has no except that sanitizes, and its docstring line 98 says pymysql.Error propagates. run_sql.py:211-226 then builds 'Error executing query: {str(e)}' into result_for_llm, the error NotificationComponent message and ToolResult.error. _format.py:384-387 returns that card description as error_message, which becomes the 'SQL execution error: ' client error (query_database.py:936). _format.py:712-715 and 755-756 put the same text verbatim in the agent trace step error and terminal_error. _format.py:721-725 states these are deliberately not scrubbed. MySQL server errors such as 'You have an error in your SQL syntax ... near ...' and 'Unknown column ...' quote fragments of the executed (rewritten) statement. Because the executed statement is the rewritten one, those fragments can include the injected predicate, so the rewritten SQL text can reach the client through error results and the agent trace. Counterexample input: an [[rls]] query that passes the guard but fails at MySQL. The absolute claim 'never shown' is therefore false for error results and trace. Caveat: I did not run MySQL, so the exact error text is from known driver behavior, not from a run.",
+   "file_checked": "src/sqllens/agent/tools/run_sql.py:211-226",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-9",
+   "category": "absolute_claim",
+   "claim": "The rewritten SQL under a rule set is never shown",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "The rewritten SQL is never shown: it can hold the user ID, the compiled row rules and the names of link tables the role cannot query.",
+   "source_file": "docs/external/rule-sets.md",
+   "verify_against": "src/sqllens/safety/rule_sets.py, src/sqllens/tools/query_database.py",
+   "verify_hint": "Trace a rule-set query whose rewritten SQL errors at MySQL; check whether the runner error text or RefusalRedactingRunner output reaching the client or agent trace includes the rewritten SQL",
+   "claim_signature": "absolute_claim:rule-sets.md:rewritten-never-shown",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-9"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "docs/external/rule-sets.md:300 says 'The rewritten SQL is never shown' (absolute). The show_details block does use the as-written SQL (query_database.py:940), but the rewritten SQL can still reach the client/agent through a database error. RuleSetGuardRunner passes the rewritten SQL to the inner runner (rule_sets.py:894-896). RefusalRedactingRunner only redacts UnsafeSqlError/RlsError and its docstring says 'Database errors pass through unchanged' (rule_sets.py:983-1016). mysql/sql_runner.py comments (lines 178-180) say the primary query error reaches the LLM intact. agent/tools/run_sql.py:211-225 turns the exception into 'Error executing query: {str(e)}' as result_for_llm, a UI component and error=str(e). agent/integrations/sql_threads.py:37-38 itself notes the exception message 'can quote the SQL'. A MySQL syntax error ('near ...') or an unknown-table error on a rewritten derived table or link table therefore shows rewritten SQL fragments or link-table names. Query_database.py:934-936 then raises 'SQL execution error: {answer}' to the caller. So 'never' is not true for DB error text. I did not run MySQL; this rests on reading the pass-through path.",
+   "file_checked": "src/sqllens/safety/rule_sets.py:983-1016",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "data_format_assumption:factory.md:run-sql-card-model-sql",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "api_contract:memory.md:verify-no-note-line",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "test_mock_alignment:tools.md:pinned-by-test",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "api_contract:tools.md:sql-only-when-ran",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "dependency_interaction:query_database.py:rewriting-guard-condition:516",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "data_format_assumption:query_database.py:rls-loaded-defaults:522",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:query_database.py:outgoing-query-info-no-mutation:529",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:server.py:query-meta-as-written:521",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:server.py:docstring-note-line",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "category": "absolute_claim",
+   "claim": "The query_database docstring says the default profile keeps show_details off so the SQL block is suppressed.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "the default\n        profile keeps ``show_details`` off so the SQL block is suppressed.",
+   "source_file": "src/sqllens/server.py",
+   "verify_against": "AgentRuntimeConfig.show_details default and profile resolution in profiles.py/runtime.py",
+   "verify_hint": "Trace a request with no profile selected when cfg.agent.show_details=true: does the default profile still suppress the block?",
+   "claim_signature": "absolute_claim:server.py:default-profile-suppresses-sql",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-10"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "server.py:461-462 docstring says the default profile keeps show_details off so the SQL block is suppressed. profiles.py:301-310 resolve_effective_settings: with no profile, name=default; the default profile (or an empty Profile()) has show_details=None, which inherits cfg.agent.show_details. With cfg.agent.show_details=true and no profile selected, show_details resolves true, and query_database.py:899-906 then attaches SQL/trace. The default profile can also set show_details=true explicitly. So the docstring is false in that case; the same docstring (server.py:446) says default 'falls back to base config'. The line is unchanged context in the diff (diff.patch:275-276), not added by the PR.",
+   "file_checked": "src/sqllens/profiles.py:301-310",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "api_contract:config-loading.md:show-details-as-written",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "api_contract:config.py:show-details-description:529",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "test_mock_alignment:test_query_as_written.py:guarded-agent-cards:352",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "test_mock_alignment:test_query_as_written.py:recorder-signature:344",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "test_mock_alignment:test_query_as_written.py:catalog-patch:337",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "test_mock_alignment:test_query_as_written.py:tool-manager-call:434",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "absolute_claim:test_query_as_written.py:note-changes-nothing:462",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-27",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-28",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-29",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-30",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-31",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-32",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-33",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-34",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-35",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-36",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-37",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-12",
+   "id": "VC-38",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-13",
+   "id": "VC-39",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}

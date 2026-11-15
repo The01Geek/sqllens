@@ -1,0 +1,580 @@
+[
+  {
+    "id": "VC-1",
+    "category": "api_contract",
+    "claim": "has_rewriting_guard in src/sqllens/tools/query_database.py is `cfg.rule_sets.loaded is not None or bool(cfg.rls)`, matching the two conditions under which build_agent wires RuleSetGuardRunner or RlsGuardRunner",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`cfg.rule_sets.loaded is not None or bool(cfg.rls)`, the two conditions under which `build_agent` wires `RuleSetGuardRunner` or `RlsGuardRunner`",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/tools/query_database.py and src/sqllens/agent/factory.py",
+    "verify_hint": "Compare `has_rewriting_guard` in query_database.py with the guard-wiring conditions in `build_agent` in agent/factory.py",
+    "claim_signature": "api_contract:tools.md:rewriting-guard-predicate",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "api_contract",
+    "claim": "server.py sets _meta[\"sqllens/query\"] = outgoing_query_info(query_info, as_written=has_rewriting_guard(cfg)), which returns query_info itself with no rewriting guard",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`server.py` sets `_meta[\"sqllens/query\"] = outgoing_query_info(query_info, as_written=has_rewriting_guard(cfg))` on the `CallToolResult`, which is `query_info` itself with no rewriting guard",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/server.py, src/sqllens/tools/query_database.py",
+    "verify_hint": "Check the query_database tool body in server.py and `outgoing_query_info` in query_database.py",
+    "claim_signature": "api_contract:tools.md:outgoing-query-info-call",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "data_format_assumption",
+    "claim": "outgoing_query_info returns a copy whose sql is note line + newline + model SQL, adds as_written: true, and leaves query_type and row_count unchanged (query_type computed from SQL without the note line)",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`_meta[\"sqllens/query\"]` is a copy of `query_info` built by `outgoing_query_info`: `sql` is the note line, a newline and the model's SQL, and `\"as_written\": true` is added. `query_type` and `row_count` are unchanged",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/tools/query_database.py",
+    "verify_hint": "Check `outgoing_query_info` and `_query_info_from_sql` in tools/_format.py",
+    "claim_signature": "data_format_assumption:tools.md:outgoing-copy-shape",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "api_contract",
+    "claim": "_append_sql_block appends the SQL block whenever query_info carries a non-empty sql, uses **Query as written:** plus the note line under a rewriting guard, and sizes the fence from the emitted text",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "appends `**Executed SQL:**\\n\\n```sql\\n<sql>\\n```` to the answer text whenever `query_info` carries a non-empty `sql`",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/tools/query_database.py",
+    "verify_hint": "Check `_append_sql_block` and its fence-sizing logic in query_database.py",
+    "claim_signature": "api_contract:tools.md:append-sql-block-condition",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "api_contract",
+    "claim": "The query_info returned by query_database_impl_with_widgets and AgentRunError.query_info keep the model's SQL with no note line and no as_written key",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The `query_info` dict `query_database_impl_with_widgets` returns, and `AgentRunError.query_info`, keep the documented `{\"sql\", \"query_type\", \"row_count\"?}` shape with the model's SQL and no note line",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/tools/query_database.py, src/sqllens/eval/",
+    "verify_hint": "Check the return and AgentRunError construction in `query_database_impl_with_widgets`, and how the verify-memory runner reads query_info",
+    "claim_signature": "api_contract:tools.md:internal-query-info-unchanged",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "sqllens verify-memory compares the agent's SQL with golden SQL through sqlglot, and sqlglot keeps comments (so a note line would change the comparison)",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`sqllens verify-memory` runs on flat-RLS servers and compares that SQL with golden SQL through sqlglot, which keeps comments.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/eval/",
+    "verify_hint": "Check the SQL comparison function in src/sqllens/eval/ and whether it strips comments before comparing",
+    "claim_signature": "dependency_interaction:tools.md:verify-memory-sqlglot-comments",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "dependency_interaction",
+    "claim": "MySQL treats the note line (`-- ` followed by a space) as a comment, so running the outgoing text runs the model's statement",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "MySQL reads the note line as a comment (`--` followed by a space), so a consumer that runs the outgoing text runs the model's statement.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "MySQL comment syntax; note line constant in src/sqllens/tools/query_database.py",
+    "verify_hint": "Confirm the note line constant starts with `-- ` and ends at a newline before the model SQL",
+    "claim_signature": "dependency_interaction:tools.md:note-line-mysql-comment",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "The rewritten SQL is never shown to the client on any rail (Markdown, sqllens/query, agent trace, error results)",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The rewritten statement is never shown to the client.",
+    "source_file": "docs/external/row-level-security.md",
+    "verify_against": "src/sqllens/safety/rls.py, src/sqllens/tools/_format.py, src/sqllens/tools/query_database.py",
+    "verify_hint": "Trace an [[rls]] query whose RlsGuardRunner rewrite fails at MySQL: does the error message, run_sql card metadata or agent trace error carry the rewritten SQL?",
+    "claim_signature": "absolute_claim:row-level-security.md:rewritten-never-shown",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "absolute_claim",
+    "claim": "The rewritten SQL under a rule set is never shown",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The rewritten SQL is never shown: it can hold the user ID, the compiled row rules and the names of link tables the role cannot query.",
+    "source_file": "docs/external/rule-sets.md",
+    "verify_against": "src/sqllens/safety/rule_sets.py, src/sqllens/tools/query_database.py",
+    "verify_hint": "Trace a rule-set query whose rewritten SQL errors at MySQL; check whether the runner error text or RefusalRedactingRunner output reaching the client or agent trace includes the rewritten SQL",
+    "claim_signature": "absolute_claim:rule-sets.md:rewritten-never-shown",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "data_format_assumption",
+    "claim": "The run_sql status card's metadata[\"sql\"] and agent trace arguments.sql hold the SQL the model wrote, not the guard-rewritten SQL",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The `run_sql` tool-arguments STATUS_CARD carries the SQL the model wrote in its metadata.",
+    "source_file": "docs/internal/agent/factory.md",
+    "verify_against": "src/sqllens/agent/tools/ (run_sql tool) and the guard runners in src/sqllens/safety/",
+    "verify_hint": "Check where the run_sql tool builds its STATUS_CARD metadata relative to the runner decorators' rewrite",
+    "claim_signature": "data_format_assumption:factory.md:run-sql-card-model-sql",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "api_contract",
+    "claim": "The verify-memory runner overrides show_details and retains the model SQL without the note line",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "It overrides `show_details` to retain the SQL the agent wrote (never the note line a rewriting guard adds to the outgoing answer)",
+    "source_file": "docs/internal/agent/memory.md",
+    "verify_against": "src/sqllens/eval/",
+    "verify_hint": "Check the verify-memory runner in src/sqllens/eval/ for which query_info it reads",
+    "claim_signature": "api_contract:memory.md:verify-no-note-line",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "test_mock_alignment",
+    "claim": "tests/unit/test_query_as_written.py exists and pins the rewriting-guard behavior described in the section",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Pinned by `tests/unit/test_query_as_written.py`.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "tests/unit/test_query_as_written.py",
+    "verify_hint": "Check that the test covers Markdown heading, note line, as_written meta, unchanged query_info and no-guard byte-equality",
+    "claim_signature": "test_mock_alignment:tools.md:pinned-by-test",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "api_contract",
+    "claim": "With show_details on, the sqllens/query entry and Markdown SQL appear only for a successful answer that ran SQL",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "every successful `query_database` answer that ran SQL carries the SQL the agent wrote alongside the natural-language result",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/tools/query_database.py, src/sqllens/server.py",
+    "verify_hint": "Check query_info is None/empty when no run_sql card was seen in `components_to_blocks`",
+    "claim_signature": "api_contract:tools.md:sql-only-when-ran",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "dependency_interaction",
+    "claim": "has_rewriting_guard returns True exactly in the cases where build_agent wires a rewriting guard: cfg.rule_sets.loaded is not None, or cfg.rls is non-empty.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "True when a rule-set file is loaded or at least one ``[[rls]]`` rule is\n    configured: the two cases in which ``build_agent`` wires a rewriting guard.",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 516,
+    "source_line_end": 522,
+    "verify_against": "src/sqllens/agent/factory.py build_agent / build_sql_runner guard wiring",
+    "verify_hint": "Check where build_sql_runner wraps the runner in RuleSetGuardRunner and RlsGuardRunner and what conditions gate each",
+    "claim_signature": "dependency_interaction:query_database.py:rewriting-guard-condition:516",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "data_format_assumption",
+    "claim": "cfg.rls is a list (empty when no [[rls]] rules) and cfg.rule_sets.loaded is None when no rule-set file is configured, so bool(cfg.rls) and the None check distinguish the cases.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 522,
+    "verify_against": "src/sqllens/config.py Config.rls and RuleSetsConfig.loaded",
+    "verify_hint": "Check the Config.rls field default and RuleSetsConfig.loaded / Config._load_rule_sets in config.py",
+    "claim_signature": "data_format_assumption:query_database.py:rls-loaded-defaults:522",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "api_contract",
+    "claim": "outgoing_query_info never mutates query_info; it returns a new dict with the note-prefixed sql and as_written True when as_written and sql are truthy, otherwise the original dict.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Never mutates ``query_info``: the\n    verify-memory runner compares its ``sql`` with golden SQL, and sqlglot's\n    comparison keeps comments.",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 529,
+    "verify_against": "src/sqllens/eval/runner.py comparison of query_info sql against golden SQL",
+    "verify_hint": "Check how eval/runner.py compares query_info['sql'] to golden SQL and whether that comparison would see comments",
+    "claim_signature": "api_contract:query_database.py:outgoing-query-info-no-mutation:529",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "api_contract",
+    "claim": "server.py applies outgoing_query_info only to the _meta['sqllens/query'] value; the query_info returned by query_database_impl_with_widgets (and on AgentRunError) carries no note line, and the error path attaches no sqllens/query key.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 521,
+    "source_line_end": 523,
+    "verify_against": "src/sqllens/server.py query_database tool function, success and AgentRunError paths",
+    "verify_hint": "Check the query_database handler in build_server for every place _QUERY_META_KEY is set, including the AgentRunError handler",
+    "criterion": 6,
+    "claim_signature": "api_contract:server.py:query-meta-as-written:521",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "api_contract",
+    "claim": "The server.py tool description states that on a rule-set or [[rls]] server the heading is **Query as written:**, the SQL starts with the note line text, and sqllens/query carries as_written true; the note text it quotes must equal AS_WRITTEN_NOTE_LINE.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "the SQL starts with the line ``-- SQL Lens applies this server's access\n        rules to queries before running them, so the query that ran can differ\n        from this text.``, and ``sqllens/query`` carries ``\"as_written\": true``.",
+    "source_file": "src/sqllens/server.py",
+    "verify_against": "AS_WRITTEN_NOTE_LINE in src/sqllens/tools/query_database.py",
+    "verify_hint": "Compare the docstring text with AS_WRITTEN_NOTE_LINE at query_database.py line 510",
+    "claim_signature": "api_contract:server.py:docstring-note-line",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "The query_database docstring says the default profile keeps show_details off so the SQL block is suppressed.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "the default\n        profile keeps ``show_details`` off so the SQL block is suppressed.",
+    "source_file": "src/sqllens/server.py",
+    "verify_against": "AgentRuntimeConfig.show_details default and profile resolution in profiles.py/runtime.py",
+    "verify_hint": "Trace a request with no profile selected when cfg.agent.show_details=true: does the default profile still suppress the block?",
+    "claim_signature": "absolute_claim:server.py:default-profile-suppresses-sql",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "api_contract",
+    "claim": "config-loading.md states show_details surfaces the SQL the agent wrote, labelled the query as written with a note line on a server with a rule-set file or [[rls]] rules, both in the Markdown and in _meta['sqllens/query'].",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Set to `true` to surface the SQL the agent wrote alongside the answer (labelled the query as written, with a note line, on a server with a rule-set file or `[[rls]]` rules)",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "verify_against": "src/sqllens/tools/query_database.py _append_sql_block and has_rewriting_guard; server.py outgoing_query_info call",
+    "verify_hint": "Check has_rewriting_guard and the two call sites using it",
+    "claim_signature": "api_contract:config-loading.md:show-details-as-written",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "api_contract",
+    "claim": "config.py show_details description says SQL is labelled the query as written with a rule-set file or [[rls]] rules because access rules change it before it runs.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"Append the SQL the agent wrote to query answers (with a rule-set file \"\n            \"or [[rls]] rules, labelled as the query as written, since access rules \"\n            \"change it before it runs). OFF by default: exposing \"",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 529,
+    "verify_against": "src/sqllens/tools/query_database.py has_rewriting_guard",
+    "verify_hint": "Check has_rewriting_guard condition matches the 'rule-set file or [[rls]] rules' scope",
+    "claim_signature": "api_contract:config.py:show-details-description:529",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "test_mock_alignment",
+    "claim": "_GuardedAgent emits run_sql cards and a STATUS_CARD with metadata {'sql': ...} shaped like the real agent's run_sql tool output, so components_to_blocks builds query_info and agent_trace as it would in production.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_query_as_written.py",
+    "source_line": 352,
+    "source_line_end": 381,
+    "verify_against": "src/sqllens/agent/tools run_sql tool status card emission and src/sqllens/tools/_format.py components_to_blocks",
+    "verify_hint": "Compare make_tool_cards/make_status_card in tests/unit/_agent_stubs.py with the real run_sql tool's UiComponent output",
+    "claim_signature": "test_mock_alignment:test_query_as_written.py:guarded-agent-cards:352",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "test_mock_alignment",
+    "claim": "_Recorder.run_sql matches the SqlRunner.run_sql signature (args, context, require_base_tables keyword) that RuleSetGuardRunner and RlsGuardRunner call.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_query_as_written.py",
+    "source_line": 344,
+    "verify_against": "src/sqllens/agent/capabilities/sql_runner SqlRunner and the guard runners' calls",
+    "verify_hint": "Check SqlRunner.run_sql and how RuleSetGuardRunner / RlsGuardRunner invoke the inner runner",
+    "claim_signature": "test_mock_alignment:test_query_as_written.py:recorder-signature:344",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "test_mock_alignment",
+    "claim": "Patching rule_sets._check_catalog_blocking is enough to bypass the catalog check the turn performs for a loaded rule-set file.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_query_as_written.py",
+    "source_line": 337,
+    "verify_against": "src/sqllens/rule_sets.py _check_catalog_blocking callers",
+    "verify_hint": "Check rule_sets.py around line 1233 and whether query_database imports the function by name",
+    "claim_signature": "test_mock_alignment:test_query_as_written.py:catalog-patch:337",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "test_mock_alignment",
+    "claim": "build_server(cfg)._tool_manager.get_tool('query_database').fn and the _Ctx stub with request_context.meta match the mcp 2.x MCPServer API the handler uses, and the result exposes .meta, .content and .is_error.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_query_as_written.py",
+    "source_line": 434,
+    "source_line_end": 437,
+    "verify_against": "mcp package MCPServer tool manager and CallToolResult; server.py handler's ctx usage",
+    "verify_hint": "Check how other tests in tests/unit call the query_database tool fn and what attributes the handler reads from ctx",
+    "claim_signature": "test_mock_alignment:test_query_as_written.py:tool-manager-call:434",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "absolute_claim",
+    "claim": "The test asserts the note line changes nothing MySQL runs, by comparing sqlglot output with comments stripped.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "def test_note_line_changes_nothing_mysql_runs() -> None:",
+    "source_file": "tests/unit/test_query_as_written.py",
+    "source_line": 462,
+    "verify_against": "sqlglot MySQL tokenizer comment handling",
+    "verify_hint": "Trace a model SQL whose first token is a MySQL executable comment or a line ending in a backslash: does prefixing a -- line change the parse?",
+    "claim_signature": "absolute_claim:test_query_as_written.py:note-changes-nothing:462",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The **note line** is exactly `-- SQL Lens applies this server's access rules to queries before running them, so the query that ran can differ from this text.` The outgoing SQL described in the criteria below, `docs/external/rule-sets.md`, `docs/external/configuration.md` and `docs/internal/mcp-server/tools.md` each carry it verbatim.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "source_file": "docs/external/rule-sets.md",
+    "verify_hint": "Compare the note line in rule-sets.md, configuration.md, tools.md and the constant in query_database.py",
+    "id": "VC-27",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "On a server whose config loads a rule-set file, and on a server with at least one `[[rls]]` rule and no rule-set file, for a successful `query_database` answer that ran SQL with `show_details` on, the Markdown that `query_database_impl_with_widgets` returns ends with `**Query as written:**` followed by a fenced `sql` block whose first line is the note line and whose remaining lines are the model's SQL exactly. The tool result's text content carries that Markdown unchanged, followed only by the conversation-ID footer when `agent.show_conversation_footer` is on.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 940,
+    "verify_hint": "Check _append_sql_block and its call in _query_database_turn",
+    "id": "VC-28",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "In the same two cases, `_meta[\"sqllens/query\"]` has `sql` equal to the note line, a newline and the model's SQL, and `\"as_written\": true`. Its `query_type` is computed from the model's SQL without the note line, and its `row_count` is the number of rows the query returned, both as before the change.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 521,
+    "verify_hint": "Check outgoing_query_info and its call in server.py build_server",
+    "id": "VC-29",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "On a server with no rule-set file and no `[[rls]]` rules, the Markdown answer and `_meta[\"sqllens/query\"]` are byte-for-byte what they are before the change: the `**Executed SQL:**` heading, no note line and no `as_written` key.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-405/local-20261115T132106Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: On a server with no rule-set file and no `[[rls]]` rules, the Markdown answer and `_meta[\"sqllens/query\"]` are byte-for-byte what they are before the change: the `**Executed SQL:**` heading, no note line and no `as_written` key.",
+    "id": "VC-30",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "On a server with a rule-set file or at least one `[[rls]]` rule, an answer with `show_details` off carries no SQL block, no note line and no `sqllens/query` key, and a failed turn's error result carries no `sqllens/query` key.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-405/local-20261115T132106Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: On a server with a rule-set file or at least one `[[rls]]` rule, an answer with `show_details` off carries no SQL block, no note line and no `sqllens/query` key, and a failed turn's error result carries no `sqllens/query` key.",
+    "id": "VC-31",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "On a server with a rule-set file or at least one `[[rls]]` rule, the `query_info` that `query_database_impl_with_widgets` returns, and the `query_info` on an `AgentRunError` it raises, hold the model's SQL with no note line, so `sqllens verify-memory` on a flat-RLS server compares the same SQL as before the change.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-405/local-20261115T132106Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: On a server with a rule-set file or at least one `[[rls]]` rule, the `query_info` that `query_database_impl_with_widgets` returns, and the `query_info` on an `AgentRunError` it raises, hold the model's SQL with no note line, so `sqllens verify-memory` on a flat-RLS server compares the same SQL as before the change.",
+    "id": "VC-32",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under a rule set whose queried table has a row rule, and under an `[[rls]]` rule on a table the query reads, neither the Markdown answer nor `_meta[\"sqllens/query\"]` contains the SQL text the guard passed to the runner beneath it, and neither contains the predicate the guard added.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-405/local-20261115T132106Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Under a rule set whose queried table has a row rule, and under an `[[rls]]` rule on a table the query reads, neither the Markdown answer nor `_meta[\"sqllens/query\"]` contains the SQL text the guard passed to the runner beneath it, and neither contains the predicate the guard added.",
+    "id": "VC-33",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The change leaves `_meta[\"sqllens/agent_trace\"]` unchanged: a `run_sql` step's `arguments.sql` is the model's SQL with no note line.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-405/local-20261115T132106Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The change leaves `_meta[\"sqllens/agent_trace\"]` unchanged: a `run_sql` step's `arguments.sql` is the model's SQL with no note line.",
+    "id": "VC-34",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/external/rule-sets.md`'s Limits bullet about `show_details` states that the SQL appears under `**Query as written:**`, starts with the note line, carries `as_written: true` in `sqllens/query`, and is the SQL the model wrote before the guard's rewrite, not the SQL MySQL ran.",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "source_file": "docs/external/rule-sets.md",
+    "verify_hint": "Check the `show_details shows the model's SQL` bullet in docs/external/rule-sets.md",
+    "id": "VC-35",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/external/configuration.md`'s `show_details` row states that on a server with a rule-set file or `[[rls]]` rules the heading is `**Query as written:**`, the SQL starts with the note line, and `sqllens/query` carries `as_written: true`. The row no longer calls the shown SQL \"the SQL the agent executed\" or \"the executed SQL\"; it calls it the SQL the agent wrote.",
+    "claim_signature": "issue-acceptance-10",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "source_file": "docs/external/configuration.md",
+    "verify_hint": "Check the `show_details` row in docs/external/configuration.md",
+    "id": "VC-36",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/internal/mcp-server/tools.md`'s Executed SQL channel section states the behavior on a server with a rule-set file or `[[rls]]` rules, documents `as_written` and the note line as parts of the outgoing `_meta[\"sqllens/query\"]` value only, and states that the `query_info` dict `query_database_impl_with_widgets` returns keeps its documented `{\"sql\", \"query_type\", \"row_count\"?}` shape with the model's SQL and no note line.",
+    "claim_signature": "issue-acceptance-11",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_hint": "Check the `On a server with a rewriting guard` subsection in docs/internal/mcp-server/tools.md",
+    "id": "VC-37",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The `query_database` MCP tool description in `src/sqllens/server.py` states that on a server with a rule-set file or `[[rls]]` rules the SQL is the query as written and starts with the note line, and it no longer says the result widget renders the SQL.",
+    "claim_signature": "issue-acceptance-12",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "verify_hint": "Check the query_database tool docstring in src/sqllens/server.py build_server",
+    "id": "VC-38",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "After the change, no line that `git grep -n -i -P 'executed[ _-]?sql' -- src docs/internal docs/external ':!docs/external/release-notes.md'` finds calls the SQL in the Markdown block, in `_meta[\"sqllens/query\"].sql` or in the `query_info` that `query_database_impl_with_widgets` returns \"the executed SQL\" or the SQL that ran, unless the line limits that to servers with no rule-set file and no `[[rls]]` rules. Lines that only name the removed in-widget \"Executed SQL\" panel, the `run_sql` status card, or `docs/internal/mcp-server/tools.md`'s \"Executed SQL channel\" section and its anchor are not such lines and may stay as they are.",
+    "claim_signature": "issue-acceptance-13",
+    "criteria_file": ".prflow/tmp/review/pr-405/local-20261115T132106Z-1/criteria.json",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_hint": "Search head view src, docs/internal, docs/external (excluding release-notes.md) for executed SQL phrasing, e.g. the configuration.md row and tools.md Markdown-rail bullet",
+    "id": "VC-39",
+    "reused_from_iter_prev": false
+  }
+]
