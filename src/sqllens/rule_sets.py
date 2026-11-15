@@ -61,10 +61,6 @@ _COMMIT_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _ASCII_DIGITS_RE = re.compile(r"^[0-9]+$")
 
-VERIFY_MEMORY_UNSUPPORTED_MESSAGE = (
-    "sqllens verify-memory does not support rule sets yet; run it against a config "
-    "without [rule_sets] file"
-)
 
 def _no_duplicates(values: list[Any], what: str) -> None:
     seen: set[Any] = set()
