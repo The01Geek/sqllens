@@ -10,6 +10,7 @@ sources), so each is pinned here against the locked sqlglot version.
 
 from __future__ import annotations
 
+import sqlite3
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from pydantic import SecretStr
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
 from sqllens.agent.factory import build_agent
 from sqllens.agent.integrations.mysql import MySQLRunner
+from sqllens.agent.integrations.sqlite import SqliteRunner
 from sqllens.agent.tools.run_sql import RunSqlTool
 from sqllens.config import (
     AgentRuntimeConfig,
@@ -499,3 +501,26 @@ def test_setting_loads_from_toml_and_env(tmp_path: Path, monkeypatch) -> None:
     assert Config.load(path).database.refuse_whole_row_selects is False
     monkeypatch.setenv("SQLLENS_DATABASE__REFUSE_WHOLE_ROW_SELECTS", "true")
     assert Config.load(path).database.refuse_whole_row_selects is True
+
+
+def _users_db(tmp_path: Path) -> str:
+    path = tmp_path / "people.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE users (id INTEGER, name TEXT, password_hash TEXT)")
+        conn.execute("INSERT INTO users VALUES (1, 'Ada', 'x1'), (2, 'Lin', 'x2')")
+    return str(path)
+
+
+async def test_run_sql_returns_the_refusal_as_a_tool_error_on_sqlite(tmp_path: Path) -> None:
+    runner = WholeRowSelectGuardRunner(SqliteRunner(_users_db(tmp_path)), dialect="sqlite")
+    tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+
+    refused = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT * FROM users"))
+    assert refused.success is False
+    assert refused.result_for_llm.startswith("Error executing query: refusing to execute query:")
+    assert "selects every column" in refused.result_for_llm
+    assert "password_hash" not in refused.result_for_llm
+
+    answered = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT id, name FROM users"))
+    assert answered.success is True
+    assert answered.metadata["columns"] == ["id", "name"]

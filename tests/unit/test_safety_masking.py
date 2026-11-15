@@ -699,3 +699,26 @@ def test_mysql_alias_hides_secret_but_unaliased_expression_is_masked(
     )
     assert expression.columns.tolist() == ["upper(password_hash)"]
     assert expression.iloc[0, 0] == W
+
+
+def test_sqlite_alias_hides_secret_but_unaliased_expression_is_masked(tmp_path: Path) -> None:
+    import sqlite3
+
+    from sqllens.agent.integrations.sqlite import SqliteRunner
+
+    db = tmp_path / "u.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE users (id INTEGER, password_hash TEXT)")
+    conn.execute("INSERT INTO users VALUES (1, 'SENTINEL-HASH')")
+    conn.commit()
+    conn.close()
+    guard = ResultMaskingRunner(SqliteRunner(database_path=str(db)))
+
+    aliased = asyncio.run(
+        guard.run_sql(RunSqlToolArgs(sql="SELECT password_hash AS h FROM users"), _context())
+    )
+    assert aliased["h"].tolist() == ["SENTINEL-HASH"]
+    expression = asyncio.run(
+        guard.run_sql(RunSqlToolArgs(sql="SELECT upper(password_hash) FROM users"), _context())
+    )
+    assert expression.iloc[0, 0] == W

@@ -739,3 +739,69 @@ async def test_unexpected_denylist_error_fails_closed(monkeypatch) -> None:
     with pytest.raises(UnsafeSqlError, match="denylist check errored"):
         await guard.run_sql(RunSqlToolArgs(sql="SELECT 1"), ToolContext.model_construct())
     assert inner.calls == []
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT id FROM all_orders",
+    "SELECT id FROM nested_orders",
+    'SELECT id FROM "all orders"',
+    "WITH q AS (SELECT * FROM all_orders) SELECT id FROM q",
+    "SELECT v.id FROM main.all_orders v JOIN public_values p ON v.id=p.id",
+    "SELECT id FROM ALL_ORDERS",
+    "SELECT (SELECT max(id) FROM all_orders) AS id FROM public_values",
+    "SELECT id FROM public_values WHERE id IN (SELECT id FROM all_orders)",
+])
+async def test_views_blocked_when_rls_is_active_on_sqlite(database, sql) -> None:
+    with pytest.raises(RlsError, match="view"):
+        await _guard(database).run_sql(RunSqlToolArgs(sql=sql), ToolContext.model_construct())
+
+
+async def test_base_tables_remain_scoped_and_unprotected_tables_readable_on_sqlite(
+    database,
+) -> None:
+    guard = _guard(database)
+    context = ToolContext.model_construct()
+    protected = await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM orders"), context)
+    public = await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM public_values"), context)
+    shadow = await guard.run_sql(
+        RunSqlToolArgs(sql="WITH orders AS (SELECT 3 AS id) SELECT id FROM orders"), context
+    )
+    assert protected["id"].tolist() == [1]
+    assert public["id"].tolist() == [1, 2]
+    assert shadow["id"].tolist() == [3]
+
+
+@pytest.mark.parametrize(("sql", "expected"), [
+    ("SELECT id FROM PUBLIC_VALUES", [1, 2]),
+    ("SELECT id FROM public_values WHERE id IN (SELECT id FROM orders)", [1]),
+    ("SELECT (SELECT max(id) FROM orders) AS id FROM public_values", [1, 1]),
+])
+async def test_base_table_subquery_and_case_shapes_pass_on_sqlite(database, sql, expected) -> None:
+    result = await _guard(database).run_sql(RunSqlToolArgs(sql=sql), ToolContext.model_construct())
+    assert result["id"].tolist() == expected
+
+
+async def test_view_reads_without_rls_are_unchanged_on_sqlite(database) -> None:
+    result = await SqliteRunner(str(database)).run_sql(
+        RunSqlToolArgs(sql="SELECT id FROM all_orders"), ToolContext.model_construct()
+    )
+    assert result["id"].tolist() == [1, 2]
+
+
+async def test_view_check_is_independent_of_read_only_setting_on_sqlite(database) -> None:
+    with pytest.raises(RlsError, match="view"):
+        await _guard(database, read_only=False).run_sql(
+            RunSqlToolArgs(sql="SELECT * FROM all_orders"), ToolContext.model_construct()
+        )
+
+
+async def test_catalog_results_are_not_cached_between_queries_on_sqlite(database) -> None:
+    guard = _guard(database)
+    context = ToolContext.model_construct()
+    await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM public_values"), context)
+    with sqlite3.connect(database) as conn:
+        conn.executescript(
+            "DROP TABLE public_values; CREATE VIEW public_values AS SELECT * FROM orders;"
+        )
+    with pytest.raises(RlsError, match="view"):
+        await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM public_values"), context)
