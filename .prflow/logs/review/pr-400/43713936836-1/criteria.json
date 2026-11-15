@@ -1,0 +1,82 @@
+[
+  {
+    "criterion": 1,
+    "text": "Under a rule-set file that loads, `sqllens verify-memory <golden> --rule-set R --account A --user U` with a confirmed set R, a bound account A and a valid user ID U runs every golden case, and each case logs one `rule-set audit:` line at info level on the `sqllens.tools.query_database` logger, naming rule set R, account A and user U."
+  },
+  {
+    "criterion": 2,
+    "text": "In that run, a case whose SQL reads a table that set R does not list is refused by the rule-set guard, and a case whose SQL reads only R's tables and columns runs."
+  },
+  {
+    "criterion": 3,
+    "text": "In that run, when set R gives a table a row rule that compares with the request's user ID, the SQL that MySQL runs for a case reading that table filters it to the rows that rule makes visible to user U."
+  },
+  {
+    "criterion": 4,
+    "text": "Under a rule-set file whose `[binding] account_ids` lists exactly one ID, a run with `--account` omitted (absent or empty) uses that ID: each case's audit line names it."
+  },
+  {
+    "criterion": 5,
+    "text": "The identity checks run after the command's configuration, `--format`, API-key and golden-file checks, which keep today's order and exit codes: under a rule-set file with no identity options and no API key, the command exits 2 with the API-key error. The refusal criteria below describe runs that pass those earlier checks."
+  },
+  {
+    "criterion": 6,
+    "text": "Under a rule-set file whose `[binding] account_ids` lists two or more IDs, a run with `--account` omitted exits 1 before any case runs and before any LLM request, and its error says `--account` is required because the file binds more than one account."
+  },
+  {
+    "criterion": 7,
+    "text": "Under a rule-set file, a run missing `--rule-set` or `--user` (absent or empty) exits 1 before any case runs and before any LLM request, and its error names each missing option."
+  },
+  {
+    "criterion": 8,
+    "text": "With no rule-set file configured, a run given any of `--rule-set`, `--account` or `--user`, with any value including an empty one, exits 1 before any case runs and before any LLM request, and its error says these options need a `[rule_sets] file`."
+  },
+  {
+    "criterion": 9,
+    "text": "Under a rule-set file, a run whose identity selection refuses, with any refusal the selection function raises, exits 1 before any case runs and before any LLM request; the refusals include at minimum `no such rule set`, `account not bound`, `user ID invalid` and `rule set not confirmed`. Its error contains the `Request refused: …` text and the rule set, account ID and user ID the run used (the account it defaulted to when `--account` was omitted)."
+  },
+  {
+    "criterion": 10,
+    "text": "Under a rule-set file whose identity passes selection, a catalog check that finds a missing table or column, or that cannot connect or read, makes the run exit 1 before any case runs and before any LLM request. Its error names the missing table or column, or the error that stopped the check."
+  },
+  {
+    "criterion": 11,
+    "text": "A run whose catalog check passes opens one catalog-check connection in total, and that connection uses a 5-second connect timeout and 30-second read and write timeouts."
+  },
+  {
+    "criterion": 12,
+    "text": "`run_verification` accepts a rule set, a user ID and an optional account ID. Under a rule-set file it applies the same account default, refusals and catalog check as the CLI, and raises before the first case for each refusal in the criteria above. With no rule-set file it raises before the first case when any identity value is passed (not `None`), an empty string included."
+  },
+  {
+    "criterion": 13,
+    "text": "With no rule-set file and no identity option, `sqllens verify-memory` behaves as today: it runs every case with no request metadata and keeps its existing exit policy (`tests/unit/test_cli_verify_memory.py` and `tests/unit/test_eval_runner.py` pass without changes to their non-rule-set cases)."
+  },
+  {
+    "criterion": 14,
+    "text": "When the configuration fails to load, `sqllens verify-memory` prints the configuration error and exits 2, and prints no rule-set message. `git grep -n -e 'VERIFY_MEMORY_UNSUPPORTED_MESSAGE' -e 'does not support rule sets yet' -e '_rule_set_file_configured' -e '_is_rule_set_file_error' -- src tests docs` prints nothing."
+  },
+  {
+    "criterion": 15,
+    "text": "`sqllens verify-memory --help` describes `--rule-set`, `--account` and `--user`, says they are used only with a rule-set file, and says `--account` may be omitted when the file binds exactly one account."
+  },
+  {
+    "criterion": 16,
+    "text": "`docs/external/rule-sets.md` no longer says `sqllens verify-memory` is unavailable or unsupported. It explains how to run it under a rule set: the three options and the account default; that a run checks one identity, so a golden file should hold only questions that rule set may answer; that row rules apply to each case, so `--user` decides which rows a case's queries return and a golden file should be run as a user whose rows the questions expect; that the expected SQL carries no row-rule filter, because the compared SQL is the model's, written before the guard adds that filter; that the comparison uses the SQL the model wrote, before the guard's rewrite; and, in its audit-line section, that each `verify-memory` case writes the same `rule-set audit:` line at info level as a `query_database` request, and that `sqllens verify-memory` does not display info-level log lines."
+  },
+  {
+    "criterion": 17,
+    "text": "`docs/external/configuration.md` and `docs/external/managing-memory.md` describe `verify-memory` under a rule-set file as running under the three options, and neither says it is unavailable."
+  },
+  {
+    "criterion": 18,
+    "text": "`docs/internal/database-connectors/rule-sets.md` and the \"Verifying an import (`verify-memory`)\" section of `docs/internal/agent/memory.md` describe the identity input, the account default, the checks before the first case, and the refusals, as this issue's Desired Behavior states them."
+  },
+  {
+    "criterion": 19,
+    "text": "When this issue's PR merges, no fragment in `changelog.d/` on `main` says `sqllens verify-memory` is not supported or not available under a rule-set file. Today `changelog.d/389.added.md` says \"`sqllens verify-memory` is not supported\"; while that fragment is unreleased, its sentence is corrected through a `codex/changelog-notes-<reason>` PR that merges before this issue's PR."
+  },
+  {
+    "criterion": 20,
+    "text": "The change leaves these as they are: a flat `[[rls]]` rule whose `value_from_metadata` names a key other than the three identity keys still blocks every verify query that reads that rule's table; `verify-memory` has no option for other request metadata; identity values reach flat row-level security as the strings given on the command line; the golden-file format has no per-case identity, so one run checks one identity; a run refused before its first case writes no `rule-set audit:` or `rule-set request refused:` log line; the audit line carries no field marking a verify case; `sqllens verify-memory` sets up no logging, so it displays no info-level log line; and a run that passes its checks does not display the account it used, so after the file's only bound account ID is replaced (for example `[\"5\"]` becomes `[\"6\"]`), a command that omits `--account` runs under the new account with no notice. Tables and columns do not change, but the audit line's account, the conversation identity and, where a flat `[[rls]]` rule reads the account key through `value_from_metadata`, the rows each case reads and so possibly its verdict do."
+  }
+]
