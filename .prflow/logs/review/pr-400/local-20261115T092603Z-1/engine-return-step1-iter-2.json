@@ -1,0 +1,608 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "severity": "important",
+   "agents": [
+    "prflow:requesting-code-review"
+   ],
+   "description": "changelog.d/389.added.md line 10 still says `sqllens verify-memory` is not supported, contradicting changelog.d/400.added.md; criterion 19 requires a separate codex/changelog-notes-<reason> PR correcting it to merge before this PR, and no such correction is visible.",
+   "defect_signature": {
+    "file": "changelog.d/389.added.md",
+    "line_range": [
+     10,
+     10
+    ],
+    "kind": "documented_falsehood"
+   }
+  },
+  {
+   "finding_id": "F-2",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:type-design-analyzer"
+   ],
+   "description": "src/sqllens/eval/runner.py: VerificationIdentityError.kind is a plain str rather than a Literal of the five kinds; describe() falls through silently for an unknown kind, and payload/kind invariants are only documented.",
+   "defect_signature": {
+    "file": "src/sqllens/eval/runner.py",
+    "line_range": [
+     120,
+     180
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-3",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:type-design-analyzer"
+   ],
+   "description": "src/sqllens/eval/runner.py: _verification_metadata re-sets loaded.catalog.confirmed = True outside the state lock after confirm_catalog already set it under the lock; redundant and implies the runner owns that state.",
+   "defect_signature": {
+    "file": "src/sqllens/eval/runner.py",
+    "line_range": [
+     237,
+     237
+    ],
+    "kind": "type_design"
+   }
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [
+  {
+   "agent": "prflow:code-reviewer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 2 (>= 2)"
+  },
+  {
+   "agent": "prflow:pr-test-analyzer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 2 (>= 2)"
+  }
+ ],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [
+  "F-1"
+ ],
+ "criterion_exempt": [],
+ "verdict": "REJECT",
+ "report": "## Verdict: REJECT (one Important finding: a stale release-note sentence that acceptance criterion nineteen requires to be corrected before merge)\nThe PR is not ready to merge: an existing release-note fragment still tells users that `sqllens verify-memory` is not supported under a rule-set file, which this PR makes false, and nothing in this change or the base corrects it.\nRule applied: rule 3 — a Phase-3 finding at or above the threshold (important) → REJECT\n\n## Code Review Findings\n### 🟠 Important / Major\n1. `changelog.d/389.added.md` line 10 still says \"`sqllens verify-memory` is not supported\". After this PR, that sentence is false, and it contradicts the new `changelog.d/400.added.md`. Acceptance criterion nineteen requires the sentence to be corrected through a separate `codex/changelog-notes-<reason>` PR that merges before this one; neither the base nor the head shows that correction. (raised by 1/4 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: release-note fragment consumed into published CHANGELOG; no reader decides program behavior from it -->\n\n### 🟡 Suggestion / Minor (4)\n<details><summary>4 items</summary>\n\n1. `src/sqllens/eval/runner.py` lines 120-180: `VerificationIdentityError.kind` is a plain `str`, and `describe()` sends any unknown kind to the `refused`/`catalog` message. The constructor does not check which fields go with which kind, for example `kind=\"missing\"` with an empty `missing` tuple. (raised by 1/4 agents)\n2. `src/sqllens/eval/runner.py` line 237: `_verification_metadata` sets `loaded.catalog.confirmed = True` outside the state lock, after `confirm_catalog` has already set it under the lock. The second write is redundant and weakens the encapsulation of `confirm_catalog`. (raised by 1/4 agents)\n- VC-28: FAIL (suggestion) — The release note says a refused run stops with exit 1 naming the refusal and the values it used [changelog.d/400.added.md]\n\n  <details><summary>Evidence</summary>\n\n  changelog.d/400.added.md says a refused run stops with exit 1 'naming the refusal and the values it used'. cli.py:652-657 does exit 1 with e.describe(...). But VerificationIdentityError.describe (src/sqllens/eval/runner.py:151-176) renders the values used (rule set, account, user) only in the fall-through branch, which covers kinds refused and catalog (lines 170-176). no_rule_set_file (154-158) is a fixed string with no values; missing (159-164) names only the absent fields; account_required (165-169) is a fixed string, although rule_set and user_id are passed at runner.py:203-205 they are not rendered. So for three of five refusal kinds the message does not name the values used; the absolute wording overstates.\n\n  </details>\n\n</details>\n\n### ℹ️ Informational — Deferred\n- VC-55: INCONCLUSIVE (critical) — When this issue's PR merges, no fragment in `changelog.d/` on `main` says `sqllens verify-memory` is not supported or not available under a rule-set file. Today `changelog.d/389.added.md` says \"`sqllens verify-memory` is not supported\"; while that fragment is unreleased, its sentence is corrected through a `codex/changelog-notes-<reason>` PR that merges before this issue's PR. [changelog.d/400.added.md]\n\n  <details><summary>Evidence</summary>\n\n  criteria.json is a valid list and carries criterion 19, so it counts. At head 54c376c, changelog.d/389.added.md:10 still reads 'and `sqllens verify-memory` is not supported.' Grep of view-head/changelog.d for 'not supported|not available|unsupported' finds no other fragment about verify-memory (387.removed.md:8 and +legacy-001.security.md:4 are unrelated). The PR diff touches only changelog.d/400.added.md and does not edit 389.added.md. Criterion 19 says the correction comes through a separate codex/changelog-notes-<reason> PR that merges before this PR. That PR is not in either view: base 4521a6f and head both still carry the sentence. Whether it merges first cannot be shown from the source or artifacts. I did not run any check of the remote or main branch state, so the post-merge state of main stays unverified. If this PR merged now, the stale sentence would remain.\n\n  </details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant, 12 changed files (913 changed lines); detect_all_audit not set (audit hints are documentation lines, not an audit).\n- Working tree: Phase 0.1 not run (head-override PR mode); the dirty-tree check reported no change.\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. requesting-code-review extension: content-present.\n- CI evidence: none held for head 54c376c; not assumed.\n- Severity threshold: important.\n- Reviewers excluded by plan on iteration 2: prflow:code-reviewer, prflow:pr-test-analyzer (iterations=first-only).\n- Normalized (wording-only): 0\n- Finding rejected lines not counted: no Finding rejected line.\n- prior-report: none\n- Vendored engine path absent; ran the plugin engine at its cache directory.\n- Checklist: 54 passed, 1 failed, 1 inconclusive\n- <details><summary>✅ Passed items (54 of 56)</summary>\n\n  - VC-12: The help strings' escaped `\\[rule_sets]` renders as the literal text `[rule_sets]` in `sqllens verify-memory --help` under Typer's rich markup mode, rather than being dropped as a markup tag or shown with a backslash [src/sqllens/cli.py]\n  - VC-29: The release note says a configuration that fails to load now prints only the configuration error [changelog.d/400.added.md]\n  - VC-30: managing-memory.md says that without a rule-set file, giving any of the three options is an error, an empty value included per the code [docs/external/managing-memory.md]\n  - VC-31: rule-sets.md says a missing --rule-set is reported as a missing option instead of `rule-set key missing`, i.e. the missing check runs before select_rule_set [docs/external/rule-sets.md]\n  - VC-32: The rule-set guard's refusal for a table the selected set does not list surfaces in the case error as text containing 'the query reads a table the rule set does not list', and the refused case produces no returned wrapper result (the spy records only one call result) [tests/connectors/test_row_rules_mysql.py]\n  - VC-33: row_rule_document(db, 'rr_') with rule set '2', account '5' and user '7' makes rr_customers rows 1 and 2 visible, and _with_link accepts a link_user_column keyword whose bogus value makes the catalog check report 'column rr_customer_reps.gone does not exist' [tests/connectors/test_row_rules_mysql.py]\n  - VC-34: rule_set_config accepts a url keyword and a document positional, and tests.unit._agent_stubs provides StubAgentMemory usable in place of ChromaAgentMemory by build_agent [tests/connectors/test_row_rules_mysql.py]\n  - VC-35: The agent_stub_factory fixture's stub records send_message_calls whose first element is a request context with a metadata attribute equal to the metadata passed to query_database_impl_with_widgets [tests/unit/test_cli_rule_sets.py]\n  - VC-36: The golden-file loader accepts the shape {\"sql_pairs\": {\"pairs\": [...]}} that _golden writes [tests/unit/test_cli_rule_sets.py]\n  - VC-37: Under a rule-set file that loads, `sqllens verify-memory <golden> --rule-set R --account A --user U` with a confirmed set R, a bound account A and a valid user ID U runs every golden case, and each case logs one `rule-set audit:` line at info level on the `sqllens.tools.query_database` logger, naming rule set R, account A and user U. [src/sqllens/tools/query_database.py:651-695]\n  - VC-38: In that run, a case whose SQL reads a table that set R does not list is refused by the rule-set guard, and a case whose SQL reads only R's tables and columns runs. [src/sqllens/eval/runner.py:179-287]\n  - VC-39: In that run, when set R gives a table a row rule that compares with the request's user ID, the SQL that MySQL runs for a case reading that table filters it to the rows that rule makes visible to user U. [tests/connectors/test_row_rules_mysql.py]\n  - VC-40: Under a rule-set file whose `[binding] account_ids` lists exactly one ID, a run with `--account` omitted (absent or empty) uses that ID: each case's audit line names it. [src/sqllens/eval/runner.py:199-206]\n  - VC-41: The identity checks run after the command's configuration, `--format`, API-key and golden-file checks, which keep today's order and exit codes: under a rule-set file with no identity options and no API key, the command exits 2 with the API-key error. The refusal criteria below describe runs that pass those earlier checks. [src/sqllens/cli.py]\n  - VC-42: Under a rule-set file whose `[binding] account_ids` lists two or more IDs, a run with `--account` omitted exits 1 before any case runs and before any LLM request, and its error says `--account` is required because the file binds more than one account. [src/sqllens/eval/runner.py:189-206]\n  - VC-43: Under a rule-set file, a run missing `--rule-set` or `--user` (absent or empty) exits 1 before any case runs and before any LLM request, and its error names each missing option. [src/sqllens/eval/runner.py:189-198]\n  - VC-44: With no rule-set file configured, a run given any of `--rule-set`, `--account` or `--user`, with any value including an empty one, exits 1 before any case runs and before any LLM request, and its error says these options need a `[rule_sets] file`. [src/sqllens/eval/runner.py:189-193]\n  - VC-45: Under a rule-set file, a run whose identity selection refuses, with any refusal the selection function raises, exits 1 before any case runs and before any LLM request; the refusals include at minimum `no such rule set`, `account not bound`, `user ID invalid` and `rule set not confirmed`. Its error contains the `Request refused: …` text and the rule set, account ID and user ID the run used (the account it defaulted to when `--account` was omitted). [src/sqllens/eval/runner.py:179-238]\n  - VC-46: Under a rule-set file whose identity passes selection, a catalog check that finds a missing table or column, or that cannot connect or read, makes the run exit 1 before any case runs and before any LLM request. Its error names the missing table or column, or the error that stopped the check. [src/sqllens/eval/runner.py:412-471]\n  - VC-47: A run whose catalog check passes opens one catalog-check connection in total, and that connection uses a 5-second connect timeout and 30-second read and write timeouts. [src/sqllens/rule_sets.py:1191-1229]\n  - VC-48: `run_verification` accepts a rule set, a user ID and an optional account ID. Under a rule-set file it applies the same account default, refusals and catalog check as the CLI, and raises before the first case for each refusal in the criteria above. With no rule-set file it raises before the first case when any identity value is passed (not `None`), an empty string included. [src/sqllens/eval/runner.py:179-301]\n  - VC-49: With no rule-set file and no identity option, `sqllens verify-memory` behaves as today: it runs every case with no request metadata and keeps its existing exit policy (`tests/unit/test_cli_verify_memory.py` and `tests/unit/test_eval_runner.py` pass without changes to their non-rule-set cases). [src/sqllens/eval/runner.py:412-471]\n  - VC-50: When the configuration fails to load, `sqllens verify-memory` prints the configuration error and exits 2, and prints no rule-set message. `git grep -n -e 'VERIFY_MEMORY_UNSUPPORTED_MESSAGE' -e 'does not support rule sets yet' -e '_rule_set_file_configured' -e '_is_rule_set_file_error' -- src tests docs` prints nothing. [src/sqllens/cli.py]\n  - VC-51: `sqllens verify-memory --help` describes `--rule-set`, `--account` and `--user`, says they are used only with a rule-set file, and says `--account` may be omitted when the file binds exactly one account. [src/sqllens/cli.py]\n  - VC-52: `docs/external/rule-sets.md` no longer says `sqllens verify-memory` is unavailable or unsupported. It explains how to run it under a rule set: the three options and the account default; that a run checks one identity, so a golden file should hold only questions that rule set may answer; that row rules apply to each case, so `--user` decides which rows a case's queries return and a golden file should be run as a user whose rows the questions expect; that the expected SQL carries no row-rule filter, because the compared SQL is the model's, written before the guard adds that filter; that the comparison uses the SQL the model wrote, before the guard's rewrite; and, in its audit-line section, that each `verify-memory` case writes the same `rule-set audit:` line at info level as a `query_database` request, and that `sqllens verify-memory` does not display info-level log lines. [docs/external/rule-sets.md]\n  - VC-53: `docs/external/configuration.md` and `docs/external/managing-memory.md` describe `verify-memory` under a rule-set file as running under the three options, and neither says it is unavailable. [docs/external/configuration.md]\n  - VC-54: `docs/internal/database-connectors/rule-sets.md` and the \"Verifying an import (`verify-memory`)\" section of `docs/internal/agent/memory.md` describe the identity input, the account default, the checks before the first case, and the refusals, as this issue's Desired Behavior states them. [docs/internal/agent/memory.md]\n  - VC-56: The change leaves these as they are: a flat `[[rls]]` rule whose `value_from_metadata` names a key other than the three identity keys still blocks every verify query that reads that rule's table; `verify-memory` has no option for other request metadata; identity values reach flat row-level security as the strings given on the command line; the golden-file format has no per-case identity, so one run checks one identity; a run refused before its first case writes no `rule-set audit:` or `rule-set request refused:` log line; the audit line carries no field marking a verify case; `sqllens verify-memory` sets up no logging, so it displays no info-level log line; and a run that passes its checks does not display the account it used, so after the file's only bound account ID is replaced (for example `[\"5\"]` becomes `[\"6\"]`), a command that omits `--account` runs under the new account with no notice. Tables and columns do not change, but the audit line's account, the conversation identity and, where a flat `[[rls]]` rule reads the account key through `value_from_metadata`, the rows each case reads and so possibly its verdict do. [src/sqllens/safety/rls.py:124-130]\n  - VC-1: run_verification accepts keyword arguments rule_set, user_id and account_id matching the names the CLI's identity dict passes [src/sqllens/cli.py:645]\n  - VC-2: VerificationIdentityError exposes describe(labels) taking a dict keyed by rule_set, account_id and user_id and returns the message string the CLI prints [src/sqllens/cli.py:652]\n  - VC-3: VerificationIdentityError is raised before the first case and before any LLM request, and is caught before the generic except so it exits 1 with the identity message rather than 'Verification run failed' [src/sqllens/cli.py:652]\n  - VC-4: Dropping None-valued options means an empty-string option is still passed to run_verification, so an empty --rule-set/--account/--user with no rule-set file is refused (criterion 8) and empty --account defaults to the sole bound account (criterion 4) [src/sqllens/cli.py:645]\n  - VC-5: After removing _is_rule_set_file_error and _rule_set_file_configured, the imports os, tomllib and ValidationError in cli.py are still used elsewhere (ruff F401 clean) and no other module or test references the removed helpers or VERIFY_MEMORY_UNSUPPORTED_MESSAGE [src/sqllens/cli.py:9]\n  - VC-6: The external doc asserts verify-memory sets up no logging so info lines are not displayed while warning-level lines still reach the terminal [docs/external/rule-sets.md]\n  - VC-7: The doc's example refusal message format 'Request refused: rule set not confirmed (--rule-set '3', --account '5' (the file's only bound account), --user '7')' matches what describe() renders [docs/external/rule-sets.md]\n  - VC-8: The doc says the identity values go into each case's _meta under the key names the file's [metadata] table defines, and each case starts a new conversation [docs/external/rule-sets.md]\n  - VC-9: The doc says the catalog check runs once on its own MySQL connection with 5s connect and 30s read/write timeouts, and when it passes no case repeats it [docs/external/rule-sets.md]\n  - VC-10: Internal doc lists VerificationIdentityError kinds no_rule_set_file, missing, account_required, refused, catalog with fields detail, missing, account_defaulted, and says a refusal here writes no log line and ensure_catalog_confirmed maps failures to REFUSED_CATALOG_UNCONFIRMED [docs/internal/database-connectors/rule-sets.md]\n  - VC-11: Internal doc says a driver= passed to run_verification receives no metadata but the checks still run [docs/internal/database-connectors/rule-sets.md]\n  - VC-13: managing-memory.md anchors rule-sets.md#verifying-memory-under-a-rule-set and rule-sets.md links managing-memory.md#verifying-memory-after-an-import, and memory.md links database-connectors/rule-sets.md#verify-runs; those headings exist [docs/external/managing-memory.md]\n  - VC-14: select_rule_set(loaded, metadata) raises RuleSetRequestError for every identity refusal (no such rule set, account not bound, user ID invalid, rule set not confirmed), and str(exc) is the 'Request refused: ...' text [src/sqllens/eval/runner.py:223]\n  - VC-15: loaded.file.metadata exposes attributes rule_set, account_id and user_id holding the request-metadata key names, and select_rule_set reads the identity from a dict keyed by those names [src/sqllens/eval/runner.py:213]\n  - VC-16: loaded.file.binding.account_ids is a sequence of string IDs, so bound[0] is a string account ID suitable as metadata [src/sqllens/eval/runner.py:201]\n  - VC-17: query_database_impl_with_widgets accepts a metadata keyword (None or dict) and an agent keyword, and with metadata runs the rule-set selection, guard, row rules and writes one 'rule-set audit:' info line on the sqllens.tools.query_database logger per call [src/sqllens/eval/runner.py:286]\n  - VC-18: After the runner's own select_rule_set + confirm_catalog, the per-case wrapper's ensure_catalog_confirmed sees catalog.confirmed and opens no further catalog connection, so a passing run opens one catalog connection in total [src/sqllens/eval/runner.py:237]\n  - VC-19: confirm_catalog runs _check_catalog_blocking via run_blocking_sql and propagates RuleSetCatalogError (naming each mismatch) or any other exception unwrapped; ensure_catalog_confirmed keeps the prior behavior of logging a WARNING and raising RuleSetRequestError(REFUSED_CATALOG_UNCONFIRMED) for both [src/sqllens/rule_sets.py:1213]\n  - VC-20: _check_catalog_blocking opens its connection with connect_timeout 5 and read/write timeouts 30 [src/sqllens/rule_sets.py:1228]\n  - VC-21: The CLI catches VerificationIdentityError and renders it with option labels (--rule-set, --account, --user), exiting 1, and the eval package exports VerificationIdentityError [src/sqllens/eval/runner.py:60]\n  - VC-22: Removing VERIFY_MEMORY_UNSUPPORTED_MESSAGE leaves no remaining importer in src, tests or docs [src/sqllens/rule_sets.py]\n  - VC-23: The docstring says the identity error is raised before any case and any agent work for each listed condition, and that a driver passed in receives no identity [src/sqllens/eval/runner.py:262]\n  - VC-24: Tests' ScriptedLlm subclass implements the LlmService abstract interface (send_request, stream_request, validate_tools) and LlmResponse/LlmStreamChunk/ToolCall accept the keyword fields used; factory exposes AnthropicLlmService and ChromaAgentMemory names to patch [tests/connectors/test_row_rules_mysql.py:289]\n  - VC-25: The cases_run spy returns the same 5-tuple shape (answer, blocks, sql dict, ...) the real query_database_impl_with_widgets returns, and the runner reads actual SQL from the third element's 'sql' key [tests/unit/test_cli_rule_sets.py]\n  - VC-26: The catalog-connection test's patch of pymysql.connect is the call _check_catalog_blocking actually makes (kwargs connect_timeout/read_timeout/write_timeout), and the audit line format matches the real logger output including user_id as an integer [tests/unit/test_cli_rule_sets.py]\n  - VC-27: example_document() binds two account IDs including '5', has rule set '2' confirmed and '3' unconfirmed, and uses metadata keys role/account/user, matching the test expectations [tests/unit/test_cli_rule_sets.py]\n\n  </details>\n- Reviewed against issue #376 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] Under a rule-set file that loads, `sqllens verify-memory <golden> --rule-set R --account A --user U` with a confirmed set R, a bound account A and a valid user ID U runs every golden case, and each case logs one `rule-set audit:` line at info level on the `sqllens.tools.query_database` logger, naming rule set R, account A and user U.\n- [ ] In that run, a case whose SQL reads a table that set R does not list is refused by the rule-set guard, and a case whose SQL reads only R's tables and columns runs.\n- [ ] In that run, when set R gives a table a row rule that compares with the request's user ID, the SQL that MySQL runs for a case reading that table filters it to the rows that rule makes visible to user U.\n- [ ] Under a rule-set file whose `[binding] account_ids` lists exactly one ID, a run with `--account` omitted (absent or empty) uses that ID: each case's audit line names it.\n- [ ] The identity checks run after the command's configuration, `--format`, API-key and golden-file checks, which keep today's order and exit codes: under a rule-set file with no identity options and no API key, the command exits 2 with the API-key error. The refusal criteria below describe runs that pass those earlier checks.\n- [ ] Under a rule-set file whose `[binding] account_ids` lists two or more IDs, a run with `--account` omitted exits 1 before any case runs and before any LLM request, and its error says `--account` is required because the file binds more than one account.\n- [ ] Under a rule-set file, a run missing `--rule-set` or `--user` (absent or empty) exits 1 before any case runs and before any LLM request, and its error names each missing option.\n- [ ] With no rule-set file configured, a run given any of `--rule-set`, `--account` or `--user`, with any value including an empty one, exits 1 before any case runs and before any LLM request, and its error says these options need a `[rule_sets] file`.\n- [ ] Under a rule-set file, a run whose identity selection refuses, with any refusal the selection function raises, exits 1 before any case runs and before any LLM request; the refusals include at minimum `no such rule set`, `account not bound`, `user ID invalid` and `rule set not confirmed`. Its error contains the `Request refused: …` text and the rule set, account ID and user ID the run used (the account it defaulted to when `--account` was omitted).\n- [ ] Under a rule-set file whose identity passes selection, a catalog check that finds a missing table or column, or that cannot connect or read, makes the run exit 1 before any case runs and before any LLM request. Its error names the missing table or column, or the error that stopped the check.\n- [ ] A run whose catalog check passes opens one catalog-check connection in total, and that connection uses a 5-second connect timeout and 30-second read and write timeouts.\n- [ ] `run_verification` accepts a rule set, a user ID and an optional account ID. Under a rule-set file it applies the same account default, refusals and catalog check as the CLI, and raises before the first case for each refusal in the criteria above. With no rule-set file it raises before the first case when any identity value is passed (not `None`), an empty string included.\n- [ ] With no rule-set file and no identity option, `sqllens verify-memory` behaves as today: it runs every case with no request metadata and keeps its existing exit policy (`tests/unit/test_cli_verify_memory.py` and `tests/unit/test_eval_runner.py` pass without changes to their non-rule-set cases).\n- [ ] When the configuration fails to load, `sqllens verify-memory` prints the configuration error and exits 2, and prints no rule-set message. `git grep -n -e 'VERIFY_MEMORY_UNSUPPORTED_MESSAGE' -e 'does not support rule sets yet' -e '_rule_set_file_configured' -e '_is_rule_set_file_error' -- src tests docs` prints nothing.\n- [ ] `sqllens verify-memory --help` describes `--rule-set`, `--account` and `--user`, says they are used only with a rule-set file, and says `--account` may be omitted when the file binds exactly one account.\n- [ ] `docs/external/rule-sets.md` no longer says `sqllens verify-memory` is unavailable or unsupported. It explains how to run it under a rule set: the three options and the account default; that a run checks one identity, so a golden file should hold only questions that rule set may answer; that row rules apply to each case, so `--user` decides which rows a case's queries return and a golden file should be run as a user whose rows the questions expect; that the expected SQL carries no row-rule filter, because the compared SQL is the model's, written before the guard adds that filter; that the comparison uses the SQL the model wrote, before the guard's rewrite; and, in its audit-line section, that each `verify-memory` case writes the same `rule-set audit:` line at info level as a `query_database` request, and that `sqllens verify-memory` does not display info-level log lines.\n- [ ] `docs/external/configuration.md` and `docs/external/managing-memory.md` describe `verify-memory` under a rule-set file as running under the three options, and neither says it is unavailable.\n- [ ] `docs/internal/database-connectors/rule-sets.md` and the \"Verifying an import (`verify-memory`)\" section of `docs/internal/agent/memory.md` describe the identity input, the account default, the checks before the first case, and the refusals, as this issue's Desired Behavior states them.\n- [ ] When this issue's PR merges, no fragment in `changelog.d/` on `main` says `sqllens verify-memory` is not supported or not available under a rule-set file. Today `changelog.d/389.added.md` says \"`sqllens verify-memory` is not supported\"; while that fragment is unreleased, its sentence is corrected through a `codex/changelog-notes-<reason>` PR that merges before this issue's PR.\n- [ ] The change leaves these as they are: a flat `[[rls]]` rule whose `value_from_metadata` names a key other than the three identity keys still blocks every verify query that reads that rule's table; `verify-memory` has no option for other request metadata; identity values reach flat row-level security as the strings given on the command line; the golden-file format has no per-case identity, so one run checks one identity; a run refused before its first case writes no `rule-set audit:` or `rule-set request refused:` log line; the audit line carries no field marking a verify case; `sqllens verify-memory` sets up no logging, so it displays no info-level log line; and a run that passes its checks does not display the account it used, so after the file's only bound account ID is replaced (for example `[\"5\"]` becomes `[\"6\"]`), a command that omits `--account` runs under the new account with no notice. Tables and columns do not change, but the audit line's account, the conversation identity and, where a flat `[[rls]]` rule reads the account key through `value_from_metadata`, the rows each case reads and so possibly its verdict do.",
+ "diff_produced_at_head": "54c376c664396e94bd7e93bb9700df6f6ca3bd9e",
+ "checklist": [
+  {
+   "id": "VC-12",
+   "claim_signature": "dependency_interaction:cli.py:help-bracket-escape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "category": "absolute_claim",
+   "claim": "The release note says a refused run stops with exit 1 naming the refusal and the values it used",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "Before the first case the command checks the identity and the rule-set file\nagainst the database, and stops with exit 1 naming the refusal and the values\nit used.",
+   "source_file": "changelog.d/400.added.md",
+   "verify_against": "VerificationIdentityError.describe in src/sqllens/eval/runner.py",
+   "verify_hint": "Trace describe() for kinds missing, account_required, no_rule_set_file and catalog: does each render the values used, or only refused/catalog?",
+   "claim_signature": "absolute_claim:400.added.md:refusal-names-values",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-2"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "changelog.d/400.added.md says a refused run stops with exit 1 'naming the refusal and the values it used'. cli.py:652-657 does exit 1 with e.describe(...). But VerificationIdentityError.describe (src/sqllens/eval/runner.py:151-176) renders the values used (rule set, account, user) only in the fall-through branch, which covers kinds refused and catalog (lines 170-176). no_rule_set_file (154-158) is a fixed string with no values; missing (159-164) names only the absent fields; account_required (165-169) is a fixed string, although rule_set and user_id are passed at runner.py:203-205 they are not rendered. So for three of five refusal kinds the message does not name the values used; the absolute wording overstates.",
+   "file_checked": "src/sqllens/eval/runner.py:151-176",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "absolute_claim:400.added.md:config-error-only",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-30",
+   "claim_signature": "absolute_claim:managing-memory.md:options-without-file-error",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-31",
+   "claim_signature": "api_contract:rule-sets.md:missing-before-selection",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "test_mock_alignment:test_row_rules_mysql.py:unlisted-table-refusal-text",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "test_mock_alignment:test_row_rules_mysql.py:row-rule-fixture-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "test_mock_alignment:test_row_rules_mysql.py:fixture-helper-signatures",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "test_mock_alignment:test_cli_rule_sets.py:stub-send-message-context",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "data_format_assumption:test_cli_rule_sets.py:golden-file-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-37",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-38",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-39",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-40",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-41",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-42",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-43",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-44",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-45",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-46",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-47",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-12",
+   "id": "VC-48",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-13",
+   "id": "VC-49",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-14",
+   "id": "VC-50",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-15",
+   "id": "VC-51",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-16",
+   "id": "VC-52",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-17",
+   "id": "VC-53",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-18",
+   "id": "VC-54",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "When this issue's PR merges, no fragment in `changelog.d/` on `main` says `sqllens verify-memory` is not supported or not available under a rule-set file. Today `changelog.d/389.added.md` says \"`sqllens verify-memory` is not supported\"; while that fragment is unreleased, its sentence is corrected through a `codex/changelog-notes-<reason>` PR that merges before this issue's PR.",
+   "claim_signature": "issue-acceptance-19",
+   "criteria_file": ".prflow/tmp/review/pr-400/local-20261115T092603Z-1/criteria.json",
+   "source_file": "changelog.d/400.added.md",
+   "verify_hint": "Read changelog.d/389.added.md for the 'is not supported' sentence",
+   "id": "VC-55",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "criteria.json is a valid list and carries criterion 19, so it counts. At head 54c376c, changelog.d/389.added.md:10 still reads 'and `sqllens verify-memory` is not supported.' Grep of view-head/changelog.d for 'not supported|not available|unsupported' finds no other fragment about verify-memory (387.removed.md:8 and +legacy-001.security.md:4 are unrelated). The PR diff touches only changelog.d/400.added.md and does not edit 389.added.md. Criterion 19 says the correction comes through a separate codex/changelog-notes-<reason> PR that merges before this PR. That PR is not in either view: base 4521a6f and head both still carry the sentence. Whether it merges first cannot be shown from the source or artifacts. I did not run any check of the remote or main branch state, so the post-merge state of main stays unverified. If this PR merged now, the stale sentence would remain.",
+   "file_checked": "changelog.d/389.added.md:10",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-20",
+   "id": "VC-56",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "id": "VC-1",
+   "claim_signature": "api_contract:cli.py:run-verification-identity-kwargs:645",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "api_contract:cli.py:describe-labels-keys:652",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "api_contract:cli.py:identity-error-before-cases:652",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "important",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "api_contract:cli.py:empty-option-passthrough:645",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:cli.py:removed-helper-references",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "absolute_claim:rule-sets.md:verify-logging-display",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "data_format_assumption:rule-sets.md:refusal-message-format",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "dependency_interaction:rule-sets.md:meta-key-names",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "dependency_interaction:rule-sets.md:catalog-once-timeouts",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "api_contract:rule-sets.md:identity-error-kinds",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "api_contract:rule-sets.md:driver-no-metadata",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "api_contract:managing-memory.md:anchor-links",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "dependency_interaction:runner.py:select-rule-set-refusals:223",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "data_format_assumption:runner.py:metadata-key-names:213",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "data_format_assumption:runner.py:binding-account-ids:201",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:runner.py:impl-metadata-kwarg:286",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "dependency_interaction:runner.py:single-catalog-connection:237",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "dependency_interaction:rule_sets.py:catalog-split-behavior:1213",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "dependency_interaction:rule_sets.py:catalog-timeouts:1228",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "api_contract:runner.py:cli-identity-error-labels",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "api_contract:rule_sets.py:unsupported-message-removed",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "absolute_claim:runner.py:raised-before-agent-work:262",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "test_mock_alignment:test_row_rules_mysql.py:scripted-llm-interface",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "test_mock_alignment:test_cli_rule_sets.py:impl-return-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "test_mock_alignment:test_cli_rule_sets.py:pymysql-connect-and-audit",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "test_mock_alignment:test_cli_rule_sets.py:example-document-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  }
+ ]
+}
