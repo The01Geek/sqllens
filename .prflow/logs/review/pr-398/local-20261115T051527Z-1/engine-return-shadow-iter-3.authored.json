@@ -1,0 +1,79 @@
+{
+  "root_completeness": "established",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "tests/unit/_fake_pymysql.py:70-80 _CatalogCursor.execute picks its answer from parameter shape only; the rule that tests name every relation in kinds is not enforced in code (a missing entry looks like a real 'could not verify a base table' refusal), kinds ignores the schema, and routines / non-zero lower_case_table_names are unused.",
+      "defect_signature": {"file": "tests/unit/_fake_pymysql.py", "line_range": [70, 80], "kind": "type_design"}
+    },
+    {
+      "finding_id": "F-2",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "description": "tests/unit/_fake_pymysql.py:70-80 answers catalog lookups by parameter shape: a two-name routine lookup whose second name is a kinds key gets a TABLE_TYPE back, and a relation missing from kinds gets None; both end in a refusal the test did not intend.",
+      "defect_signature": {"file": "tests/unit/_fake_pymysql.py", "line_range": [70, 80], "kind": "test_gap"}
+    },
+    {
+      "finding_id": "F-3",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "tests/unit/test_safety_limits.py:662 and :670-673 say the rows are not read-shaped because the statement does not parse; is_read_shaped only checks the first token (src/sqllens/safety/readonly.py:167-175).",
+      "defect_signature": {"file": "tests/unit/test_safety_limits.py", "line_range": [670, 673], "kind": "documented_falsehood"}
+    },
+    {
+      "finding_id": "F-4",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "tests/unit/test_safety.py:1107 unchanged comment about '#' opening a MySQL comment now fits only the sqlite row; the added mysql row ('x\\nSHOW ...') has no '#'.",
+      "defect_signature": {"file": "tests/unit/test_safety.py", "line_range": [1107, 1107], "kind": "comment_drift"}
+    },
+    {
+      "finding_id": "F-5",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "src/sqllens/installers/claude_desktop.py:150-152 derive_default_name docstring says other backends use the database segment, but lines 164-168 strip .db/.sqlite/.sqlite3 for every scheme; untouched by the diff.",
+      "defect_signature": {"file": "src/sqllens/installers/claude_desktop.py", "line_range": [150, 152], "kind": "comment_drift"}
+    },
+    {
+      "finding_id": "F-6",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "description": "tests/unit/_fake_pymysql.py:73-80 gives every no-parameter statement (lower_case_table_names,), so SELECT @@SESSION.sql_mode on the remove_sql_modes path would read 0 silently; a two-name routine lookup can be answered as a table-type lookup.",
+      "defect_signature": {"file": "tests/unit/_fake_pymysql.py", "line_range": [73, 80], "kind": "test_gap"}
+    },
+    {
+      "finding_id": "F-7",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "description": "tests/unit/test_cli_claude_desktop.py:184 adds a mysql+pymysql://.../orders.db -> orders case that pins behaviour derive_default_name's docstring contradicts.",
+      "defect_signature": {"file": "tests/unit/test_cli_claude_desktop.py", "line_range": [184, 184], "kind": "test_gap"}
+    },
+    {
+      "finding_id": "F-8",
+      "agent": "prflow:requesting-code-review",
+      "severity": "suggestion",
+      "description": "tests/unit/test_safety_limits.py:670-673 comment names parsing as the reason the rows are not read-shaped; is_read_shaped only checks the first keyword.",
+      "defect_signature": {"file": "tests/unit/test_safety_limits.py", "line_range": [670, 673], "kind": "comment_drift"}
+    },
+    {
+      "finding_id": "F-9",
+      "agent": "prflow:requesting-code-review",
+      "severity": "suggestion",
+      "description": "tests/unit/_fake_pymysql.py relation-lookup branch treats any two-parameter execute whose second parameter is a kinds key as a relation lookup; a mixed-case call can send ('Orders', 'orders') to the routine lookup and get 'BASE TABLE' back as a routine name. Latent; no current test sends such SQL.",
+      "defect_signature": {"file": "tests/unit/_fake_pymysql.py", "line_range": [288, 293], "kind": "logic_error"}
+    }
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": true, "test_relevant": true, "detect_all_audit": false, "file_count": 38, "changed_lines": 1740},
+  "cap_drops": {"count": 7, "by_category": {"data_format_assumption": 5, "api_contract": 2}},
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": [],
+  "verdict": "APPROVE with notes"
+}

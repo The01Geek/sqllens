@@ -1,0 +1,1846 @@
+[
+  {
+    "id": "VC-1",
+    "category": "test_mock_alignment",
+    "claim": "The fake pymysql module exposes every attribute MySQLRunner reads from pymysql: connect, cursors.DictCursor, cursors.SSDictCursor, MySQLError and Error (and no other pymysql attribute, such as pymysql.err, is reached on the paths the fake serves).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/_fake_pymysql.py",
+    "source_line": 37,
+    "source_line_end": 51,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check every `pymysql.` reference and import in `MySQLRunner` (connection setup, cursor class choice, exception handling) in `src/sqllens/agent/integrations/mysql/sql_runner.py`.",
+    "claim_signature": "test_mock_alignment:_fake_pymysql.py:fake-module-attributes:37",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "test_mock_alignment",
+    "claim": "The fake catalog cursor's dispatch on parameters matches the real runner's catalog statements: the @@lower_case_table_names probe passes no parameters, the TABLE_TYPE lookup passes exactly two parameters whose second is the relation name, and the stored-routine lookup passes other parameters naming the called functions; each statement's result is read with fetchone.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "It sets the row ``fetchone`` returns from\neach statement's parameters, never from its SQL text: no parameters give\n``(lower_case_table_names,)``, the answer to the ``@@lower_case_table_names``\nprobe; two parameters whose second is a name in ``kinds`` give that relation's\n``TABLE_TYPE``; any other parameters give the first stored routine whose name\nmatches one of them ignoring case, or no row.",
+    "source_file": "tests/unit/_fake_pymysql.py",
+    "source_line": 12,
+    "source_line_end": 17,
+    "verify_against": "src/sqllens/safety/relations.py and src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check the parameter tuples passed to `cursor.execute` in `verify_base_tables` and its MySQL kind / routine lookups in `src/sqllens/safety/relations.py`, and the lower_case_table_names probe in the MySQL runner or relations module.",
+    "claim_signature": "test_mock_alignment:_fake_pymysql.py:catalog-param-dispatch:70",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "test_mock_alignment",
+    "claim": "The real runner runs its session setup (SET SESSION TRANSACTION READ ONLY, SET SESSION MAX_EXECUTION_TIME) on a cursor obtained with conn.cursor() and no cursor class, and the user query on conn.cursor(<cursor class>), matching how the fake's FakeConnection.cursor routes them.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The catalog cursor (the one ``conn.cursor()`` returns with no cursor class)\nalso runs the runner's session setup.",
+    "source_file": "tests/unit/_fake_pymysql.py",
+    "source_line": 11,
+    "source_line_end": 12,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check how `MySQLRunner` creates cursors for session setup versus the user query in `src/sqllens/agent/integrations/mysql/sql_runner.py`.",
+    "claim_signature": "test_mock_alignment:_fake_pymysql.py:session-setup-cursor:123",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "test_mock_alignment",
+    "claim": "The fake FakeConnection and _QueryCursor implement every method and attribute MySQLRunner uses on a real pymysql connection and cursor (ping, cursor, commit, close, execute, fetchmany, rowcount); the runner does not call others (for example rollback, fetchall, or description) on the paths tests drive through the fake.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/_fake_pymysql.py",
+    "source_line": 89,
+    "source_line_end": 137,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check every method/attribute access on `conn` and `cursor` objects in `MySQLRunner.run_sql` and its worker helpers in `src/sqllens/agent/integrations/mysql/sql_runner.py`.",
+    "claim_signature": "test_mock_alignment:_fake_pymysql.py:connection-cursor-surface:108",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "test_mock_alignment",
+    "claim": "The real runner calls pymysql.connect with keyword arguments only, as the fake FakeMySQL.__call__(**kwargs) accepts no positional arguments.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/_fake_pymysql.py",
+    "source_line": 159,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check the `pymysql.connect(...)` call in `MySQLRunner` in `src/sqllens/agent/integrations/mysql/sql_runner.py`.",
+    "claim_signature": "test_mock_alignment:_fake_pymysql.py:connect-kwargs-only:159",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "test_mock_alignment",
+    "claim": "The fake query cursor's fetchmany(size) returning the first `size` scripted rows as dicts matches how the runner consumes an SSDictCursor read (a fetchmany(cap + 1) whose dict rows become the result).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/_fake_pymysql.py",
+    "source_line": 100,
+    "source_line_end": 102,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check the read branch of `MySQLRunner` (fetchmany call and how rows are turned into a DataFrame) in `src/sqllens/agent/integrations/mysql/sql_runner.py`.",
+    "claim_signature": "test_mock_alignment:_fake_pymysql.py:fetchmany-shape:100",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "dependency_interaction",
+    "claim": "MySQLRunner's constructor accepts keyword arguments host, database, user and password, and that set is enough to build one.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/_fake_pymysql.py",
+    "source_line": 173,
+    "source_line_end": 181,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check the `MySQLRunner.__init__` signature in `src/sqllens/agent/integrations/mysql/sql_runner.py`.",
+    "claim_signature": "dependency_interaction:_fake_pymysql.py:mysqlrunner-ctor-kwargs:173",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "Installing the fake means the test reaches no MySQL server, and the fake's connections log every statement in the order it ran with its cursor and thread.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``install_fake_pymysql`` replaces ``pymysql`` in ``sys.modules`` for one test,\nso that test reaches no MySQL server. ``FakeMySQL`` is a ``connect`` factory whose\nconnections log every statement in the order it ran, on which cursor, and on\nwhich thread.",
+    "source_file": "tests/unit/_fake_pymysql.py",
+    "source_line": 6,
+    "source_line_end": 9,
+    "verify_against": "tests/unit/_fake_pymysql.py and src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Trace a module that bound `pymysql` or `pymysql.connect` before the fake was installed (an `import pymysql` held in a module global), and a statement issued through a cursor method other than `execute` (e.g. `executemany`), to see whether either escapes the fake or its log.",
+    "claim_signature": "absolute_claim:_fake_pymysql.py:reaches-no-server-logs-all:6",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "dependency_interaction",
+    "claim": "The preflight database probe used by `serve` and `validate --check-db` looks up `connect` on the real `pymysql` module at call time, so `patch.object(pymysql, \"connect\")` intercepts it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli.py",
+    "source_line": 28,
+    "source_line_end": 37,
+    "verify_against": "src/sqllens/preflight.py",
+    "verify_hint": "Check how the MySQL database probe in `src/sqllens/preflight.py` imports and calls `pymysql.connect`.",
+    "claim_signature": "dependency_interaction:test_cli.py:patch-pymysql-connect:28",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "dependency_interaction",
+    "claim": "The real pymysql package is importable in the default test environment and exposes `pymysql.err.OperationalError(code, message)`, which the preflight probe catches as a connection failure.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli.py",
+    "source_line": 40,
+    "source_line_end": 41,
+    "verify_against": "pyproject.toml dependencies and src/sqllens/preflight.py",
+    "verify_hint": "Check pymysql is in the `dev`/`all` extras or core dependencies in `pyproject.toml`, and the exception handling of the MySQL probe in `src/sqllens/preflight.py`.",
+    "claim_signature": "dependency_interaction:test_cli.py:operationalerror-caught:40",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "api_contract",
+    "claim": "When the MySQL connect raises OperationalError, `serve` prints stderr containing `Preflight failed: database: OperationalError: connection failed` and exits 2.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli.py",
+    "source_line": 214,
+    "verify_against": "src/sqllens/preflight.py and src/sqllens/cli.py",
+    "verify_hint": "Check the error message the MySQL probe in `src/sqllens/preflight.py` builds on a connect failure and how `cli.py` prefixes `Preflight failed:`.",
+    "claim_signature": "api_contract:test_cli.py:db-preflight-failure-message:214",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "api_contract",
+    "claim": "`validate --check-db` reports `Preflight failed: database: OperationalError: connection failed` and exits 2 when connect raises.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli.py",
+    "source_line": 328,
+    "verify_against": "src/sqllens/cli.py validate command and src/sqllens/preflight.py",
+    "verify_hint": "Check the `validate` command's `--check-db` path in `src/sqllens/cli.py` and the probe's message in `src/sqllens/preflight.py`.",
+    "claim_signature": "api_contract:test_cli.py:db-preflight-failure-message:328",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "dependency_interaction",
+    "claim": "The preflight MySQL probe passes the URL host to pymysql.connect as the `host` keyword argument and closes the returned connection on success.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli.py",
+    "source_line": 291,
+    "source_line_end": 292,
+    "verify_against": "src/sqllens/preflight.py",
+    "verify_hint": "Check the MySQL probe's `pymysql.connect(...)` arguments and `close()` call in `src/sqllens/preflight.py`.",
+    "claim_signature": "dependency_interaction:test_cli.py:probe-host-kwarg-close:291",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "api_contract",
+    "claim": "`validate --check-llm` with no API key prints stderr containing `Preflight failed: llm: llm.api_key is not set` and exits 2.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli.py",
+    "source_line": 1041,
+    "verify_against": "src/sqllens/preflight.py",
+    "verify_hint": "Check the message the LLM probe raises when `cfg.llm.api_key` is None in `src/sqllens/preflight.py`.",
+    "claim_signature": "api_contract:test_cli.py:llm-preflight-message:1041",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "absolute_claim",
+    "claim": "The reserved .invalid domain does not resolve under a conforming resolver, so a test whose fake connect was missed cannot reach a developer's local server.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The reserved .invalid domain does not resolve under a conforming resolver, so\n# a test whose fake connect was missed cannot reach a developer's local server.",
+    "source_file": "tests/unit/test_cli.py",
+    "source_line": 23,
+    "source_line_end": 24,
+    "verify_against": "RFC 6761 section 6.4 and the URLs used in tests/unit/test_cli.py",
+    "verify_hint": "Trace host `db.invalid` under a resolver with a hosts-file entry or search-domain suffix; also check every DB URL in `tests/unit/test_cli.py` uses the `.invalid` host.",
+    "claim_signature": "absolute_claim:test_cli.py:invalid-domain-unresolvable:23",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "absolute_claim",
+    "claim": "The reserved .invalid domain does not resolve under a conforming resolver, so a real connect cannot reach a developer's local server.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The reserved .invalid domain does not resolve under a conforming resolver, so\n# a real connect cannot reach a developer's local server.",
+    "source_file": "tests/integration/conftest.py",
+    "source_line": 39,
+    "source_line_end": 40,
+    "verify_against": "RFC 6761 section 6.4",
+    "verify_hint": "Trace host `db.invalid` under a resolver with a hosts-file entry or search-domain suffix.",
+    "claim_signature": "absolute_claim:conftest.py:invalid-domain-unresolvable:39",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "dependency_interaction",
+    "claim": "The integration server configured for a MySQL database never connects to it: building the ASGI app and serving the exercised tools over HTTP opens no database connection.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The fixtures here spin up a real uvicorn server in a thread, configured for\na MySQL database it never connects to, with a configurable auth mode.",
+    "source_file": "tests/integration/conftest.py",
+    "source_line": 6,
+    "source_line_end": 7,
+    "verify_against": "src/sqllens/transport/http.py build_asgi_app, src/sqllens/server.py build_server, src/sqllens/agent/factory.py build_sql_runner",
+    "verify_hint": "Check whether `build_asgi_app`/`build_server`/`build_sql_runner` or `MySQLRunner.__init__` connect eagerly, and what `list_data_sources` reads; trace the integration tests for any tool call that runs SQL.",
+    "claim_signature": "dependency_interaction:conftest.py:no-connect-at-build:6",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "api_contract",
+    "claim": "The list_data_sources tool output includes the configured database name, the URL's `mysql` scheme and `read-only`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_http_transport.py",
+    "source_line": 133,
+    "source_line_end": 135,
+    "verify_against": "list_data_sources implementation under src/sqllens/tools/",
+    "verify_hint": "Check the text the `list_data_sources` tool builds (engine/scheme field, name, read-only marker) under `src/sqllens/tools/`.",
+    "claim_signature": "api_contract:test_http_transport.py:list-data-sources-scheme:133",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "dependency_interaction",
+    "claim": "The slow-agent-run responsiveness test's held query_database runs never execute SQL through MySQLRunner, so no pymysql.connect is reached with the `db.invalid` URL.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_slow_agent_run_responsiveness.py",
+    "source_line": 176,
+    "verify_against": "tests/integration/test_slow_agent_run_responsiveness.py stand-in Messages API",
+    "verify_hint": "Check the stand-in model responses in `test_slow_agent_run_responsiveness.py` for any tool_use of `run_sql`, and how the agent would reach `MySQLRunner.run_sql`.",
+    "claim_signature": "dependency_interaction:test_slow_agent_run_responsiveness.py:no-sql-executed:176",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "dependency_interaction",
+    "claim": "The installer's default-name derivation strips a file extension from the URL's last path segment without looking at the scheme, so `mysql+pymysql://u:p@h:3306/orders.db` yields `orders`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The file-extension strip does not look at the scheme.",
+    "source_file": "tests/unit/test_cli_claude_desktop.py",
+    "source_line": 183,
+    "source_line_end": 184,
+    "verify_against": "src/sqllens/installers/claude_desktop.py",
+    "verify_hint": "Check the name-derivation function (`derive_default_name` or equivalent) in `src/sqllens/installers/claude_desktop.py` for any scheme-conditional branch around the extension strip.",
+    "claim_signature": "dependency_interaction:test_cli_claude_desktop.py:extension-strip-scheme-blind:183",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "dependency_interaction",
+    "claim": "The claude-desktop install CLI and resolve_options paths exercised with a MySQL URL do not open a database connection or run a database probe.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_claude_desktop.py",
+    "source_line": 966,
+    "verify_against": "src/sqllens/installers/claude_desktop.py and src/sqllens/cli.py claude-desktop install",
+    "verify_hint": "Check `install`/`resolve_options` in `src/sqllens/installers/claude_desktop.py` and the `claude-desktop install` command in `src/sqllens/cli.py` for any preflight or connect call.",
+    "claim_signature": "dependency_interaction:test_cli_claude_desktop.py:install-no-connect",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "dependency_interaction",
+    "claim": "The verify-memory CLI tests using the MySQL config never reach pymysql.connect (their query path is stubbed above the runner or never runs SQL).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_verify_memory.py",
+    "source_line": 27,
+    "verify_against": "tests/unit/test_cli_verify_memory.py and src/sqllens/eval/",
+    "verify_hint": "Check what `test_cli_verify_memory.py` patches (e.g. `query_database_impl_with_widgets` or `build_sql_runner`) against the call chain of the verify-memory command in `src/sqllens/cli.py` and `src/sqllens/eval/`.",
+    "claim_signature": "dependency_interaction:test_cli_verify_memory.py:no-connect",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "dependency_interaction",
+    "claim": "The import/export-memory CLI tests using the MySQL config never reach pymysql.connect.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_memory.py",
+    "source_line": 27,
+    "verify_against": "src/sqllens/memory/ and src/sqllens/cli.py import-memory/export-memory",
+    "verify_hint": "Check whether the import-memory/export-memory commands in `src/sqllens/cli.py` build a SQL runner or run preflight database probes.",
+    "claim_signature": "dependency_interaction:test_cli_memory.py:no-connect",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "absolute_claim",
+    "claim": "Each test in tests/unit/test_sql_runner_cleanup.py installs its fake pymysql through install_fake_pymysql in tests/unit/_fake_pymysql.py, which replaces it in sys.modules with monkeypatch.setitem; the doc line also asserts the suite runs in the default pytest pass without the driver.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Each test installs a fake `pymysql` module through `install_fake_pymysql` in [`tests/unit/_fake_pymysql.py`](../../../tests/unit/_fake_pymysql.py), which replaces it in `sys.modules` with `monkeypatch.setitem`, so the suite does **not** require the driver to be installed and runs in the default `pytest -q` pass (which does not collect `tests/connectors/`).",
+    "source_file": "docs/internal/database-connectors/cleanup-error-handling.md",
+    "source_line": 58,
+    "verify_against": "tests/unit/test_sql_runner_cleanup.py",
+    "verify_hint": "Trace each test in `tests/unit/test_sql_runner_cleanup.py` for one that sets `sys.modules['pymysql']` directly or uses another helper instead of `install_fake_pymysql`.",
+    "claim_signature": "absolute_claim:cleanup-error-handling.md:each-test-uses-helper:58",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "api_contract",
+    "claim": "tests/unit/test_mysql_runner.py checks that MySQLRunner applies a profile's row cap and the require_base_tables relation check on a sqllens-sql thread, and tests/unit/test_sql_runner_event_loop.py still holds each check the sentence lists for it, ending with returning the slot when executor submission fails.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "and returns the slot when submitting to the executor fails; `tests/unit/test_mysql_runner.py` checks that `MySQLRunner` applies a profile's row cap and the `require_base_tables` relation check on a `sqllens-sql` thread.",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "source_line": 129,
+    "verify_against": "tests/unit/test_mysql_runner.py and tests/unit/test_sql_runner_event_loop.py",
+    "verify_hint": "Check `tests/unit/test_mysql_runner.py` for tests asserting the profile row cap and `verify_base_tables` run on a `sqllens-sql` thread, and the checks in `tests/unit/test_sql_runner_event_loop.py`.",
+    "claim_signature": "api_contract:transport.md:thread-checks-moved:129",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "dependency_interaction",
+    "claim": "ResultMaskingRunner masks by the result column label: a secret column read under the non-secret alias `h` comes back unmasked, while an unaliased `upper(password_hash)` comes back under the label `upper(password_hash)` (MySQL's label for it) and is masked as `[withheld]`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Masking reads the label the driver gives each column: a non-secret alias\n    # hides the secret column, while an unaliased expression keeps its name.",
+    "source_file": "tests/connectors/test_connectors.py",
+    "source_line": 120,
+    "source_line_end": 139,
+    "verify_against": "src/sqllens/safety/masking.py and MySQL column-label behavior for unaliased expressions",
+    "verify_hint": "Check how `ResultMaskingRunner` in `src/sqllens/safety/masking.py` decides which columns are secret (pattern match on DataFrame column labels) and whether a label containing `password_hash` inside `upper(...)` matches it.",
+    "claim_signature": "dependency_interaction:test_connectors.py:masking-by-label:120",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "dependency_interaction",
+    "claim": "Through RlsGuardRunner under the mysql dialect, a CTE named like the protected table is not filtered (returns its own row 3), an IN-subquery over the protected table is filtered to the rule's value, and a scalar `(SELECT max(id) FROM <protected>)` is filtered to 1 for each public row.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_connectors.py",
+    "source_line": 144,
+    "source_line_end": 152,
+    "verify_against": "src/sqllens/safety/rls.py apply_rls",
+    "verify_hint": "Check how `apply_rls` in `src/sqllens/safety/rls.py` handles CTE names shadowing a protected table, subqueries in WHERE, and scalar subqueries in the projection.",
+    "claim_signature": "dependency_interaction:test_connectors.py:rls-shape-outcomes:144",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-30"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "dependency_interaction",
+    "claim": "The freshly created tables pass RlsGuardRunner's relation check under the mysql dialect (they are BASE TABLE), the rule on a TEXT `tenant_id` column with value 'alpha' filters correctly, and the returned DataFrame has an `id` column.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_connectors.py",
+    "source_line": 162,
+    "source_line_end": 176,
+    "verify_against": "src/sqllens/safety/rls.py, src/sqllens/safety/relations.py",
+    "verify_hint": "Check `RlsGuardRunner.run_sql` and `verify_base_tables` in `src/sqllens/safety/` for the MySQL path.",
+    "claim_signature": "dependency_interaction:test_connectors.py:rls-guard-mysql-path:162",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "test_mock_alignment",
+    "claim": "The fake pymysql module installed by FakeMySQL.install supplies every attribute and call shape MySQLRunner uses on the real pymysql: connect(**kwargs), cursors.SSDictCursor and cursors.DictCursor, conn.cursor() with no class and conn.cursor(<class>), ping, commit, close, cursor.execute(sql, params), fetchone, fetchmany(size), rowcount, and MySQLError/Error. It also assumes MySQLRunner resolves pymysql from sys.modules after the fake is installed, so a cached reference to the real module is never used.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mysql_runner.py",
+    "source_line": 18,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py and tests/unit/_fake_pymysql.py",
+    "verify_hint": "Compare every pymysql attribute and method `MySQLRunner` (its `__init__`, `run_sql` and worker-thread helpers) touches, and how it imports pymysql, with `install_fake_pymysql`, `FakeConnection`, `_QueryCursor` and `_CatalogCursor` in `_fake_pymysql.py`",
+    "claim_signature": "test_mock_alignment:test_mysql_runner.py:fake-pymysql-surface",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "dependency_interaction",
+    "claim": "With read_only=True, MySQLRunner executes `SET SESSION TRANSACTION READ ONLY` with no parameters on a cursor opened with conn.cursor() (no cursor class), on the query's connection, before executing the user SQL on an SSDictCursor, and with the constructor's default statement timeout sends no other statement on that connection for a plain read.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mysql_runner.py",
+    "source_line": 28,
+    "source_line_end": 36,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check the session-setup code in `MySQLRunner` for the exact statement text, the params passed to execute and which cursor it uses, and the default `statement_timeout_ms` of `MySQLRunner.__init__`",
+    "claim_signature": "dependency_interaction:test_mysql_runner.py:read-only-session-setup:28",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "dependency_interaction",
+    "claim": "With statement_timeout_ms=1500 and read_only=False, MySQLRunner executes `SET SESSION MAX_EXECUTION_TIME = %s` with the parameter tuple (1500,) before the user SQL; with statement_timeout_ms=0 it sends no timeout statement.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mysql_runner.py",
+    "source_line": 50,
+    "source_line_end": 70,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check the `MAX_EXECUTION_TIME` execute call in `MySQLRunner` for the exact SQL text, the params container type (tuple vs. list or bare int) and the condition guarding it",
+    "claim_signature": "dependency_interaction:test_mysql_runner.py:statement-timeout-setup:50",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "dependency_interaction",
+    "claim": "MySQLRunner's read-versus-write branch treats a plain SELECT, a WITH ... SELECT, and reads led by a `--`, `#` or `/* */` comment as reads, running each on an SSDictCursor with a single fetchmany(cap + 1) call.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mysql_runner.py",
+    "source_line": 73,
+    "source_line_end": 96,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check how `MySQLRunner.run_sql` decides a statement is a read (the classifier it calls and the dialect it passes) and the fetchmany size it requests",
+    "claim_signature": "dependency_interaction:test_mysql_runner.py:read-branch-classification:73",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "dependency_interaction",
+    "claim": "On a write (UPDATE) with read_only=False, MySQLRunner runs the statement on a DictCursor without fetchmany, closes that cursor, commits, and returns a one-row DataFrame `{\"rows_affected\": cursor.rowcount}`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mysql_runner.py",
+    "source_line": 105,
+    "source_line_end": 119,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check the write branch of `MySQLRunner.run_sql` for the cursor class, the commit, the cursor close and the returned column name",
+    "claim_signature": "dependency_interaction:test_mysql_runner.py:write-branch-commit:105",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "dependency_interaction",
+    "claim": "A profile's lower max_rows set with set_effective_settings on the calling task reaches the SQL worker thread, where MySQLRunner opens the connection and executes the user SQL on a thread whose name starts with `sqllens-sql`, capping the read at the lower value (fetchmany(6) for max_rows=5).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mysql_runner.py",
+    "source_line": 122,
+    "source_line_end": 145,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py and src/sqllens/runtime.py",
+    "verify_hint": "Check how `MySQLRunner` dispatches to its worker thread (executor thread-name prefix, contextvars copy) and where it reads the effective `max_rows` from `sqllens.runtime`",
+    "claim_signature": "dependency_interaction:test_mysql_runner.py:profile-cap-worker-thread:122",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "dependency_interaction",
+    "claim": "MySQLRunner uses the lower of its constructor max_rows and the effective-settings max_rows, so a profile cap of 50 over a constructor cap of 3 fetches 4 rows and returns 3.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mysql_runner.py",
+    "source_line": 148,
+    "source_line_end": 165,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check the effective-cap computation in `MySQLRunner.run_sql` (or its helper) combining `self._max_rows` with the runtime settings",
+    "claim_signature": "dependency_interaction:test_mysql_runner.py:profile-cap-min:148",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "dependency_interaction",
+    "claim": "MySQLRunner looks up `verify_base_tables` as an attribute of the `sqllens.agent.integrations.mysql.sql_runner` module at call time (so monkeypatching that attribute replaces it), and when require_base_tables=True calls it as (connection, sql, dialect=\"mysql\") with the query's own connection on the sqllens-sql worker thread, after the read-only setup and before the user SQL; with require_base_tables=False it does not call it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mysql_runner.py",
+    "source_line": 168,
+    "source_line_end": 197,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check how `sql_runner.py` imports `verify_base_tables` (module-level name vs. local import or attribute access on `relations`) and the call site's arguments and ordering relative to session setup",
+    "claim_signature": "dependency_interaction:test_mysql_runner.py:verify-base-tables-call:168",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "dependency_interaction",
+    "claim": "For `SELECT id FROM orders` under dialect mysql, the real verify_base_tables runs `SELECT @@lower_case_table_names` with no params and then the information_schema.TABLES statement the test spells out with params (None, \"orders\") on conn.cursor(), and on a VIEW raises RlsError whose message contains `database views are not supported`; MySQLRunner then opens no query cursor and still closes the connection.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mysql_runner.py",
+    "source_line": 200,
+    "source_line_end": 223,
+    "verify_against": "src/sqllens/safety/relations.py and src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check the MySQL branch of `verify_base_tables` and its kind-lookup helper in `relations.py` for the SQL text, params and the view refusal message, and the error path of `MySQLRunner` for `conn.close()` in a finally",
+    "claim_signature": "dependency_interaction:test_mysql_runner.py:relation-check-view-refusal:200",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "test_mock_alignment",
+    "claim": "The fake catalog cursor's routing (no params give the lower_case_table_names row; two params whose second is in `kinds` give TABLE_TYPE; other params give a matching routine or no row) matches how the real MySQL relation check parameterizes its catalog statements, so the fake answers the lookups a MySQL server would.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mysql_runner.py",
+    "source_line": 205,
+    "verify_against": "tests/unit/_fake_pymysql.py `_CatalogCursor.execute` against src/sqllens/safety/relations.py",
+    "verify_hint": "Compare `_CatalogCursor.execute` in `_fake_pymysql.py` with every catalog query and its params in the MySQL path of `relations.py`",
+    "claim_signature": "test_mock_alignment:test_mysql_runner.py:catalog-cursor-routing",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "dependency_interaction",
+    "claim": "probe_database, given a `mysql+pymysql://u@db.invalid/shop` URL and no rule-set file, calls `pymysql.connect` through the `pymysql` module attribute (so patch.object(pymysql, \"connect\") intercepts it) once and then closes the returned connection.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_preflight.py",
+    "source_line": 106,
+    "source_line_end": 116,
+    "verify_against": "src/sqllens/preflight.py",
+    "verify_hint": "Check the MySQL branch of `probe_database` (its pymysql import form, its handling of the `mysql+pymysql` scheme and its close call)",
+    "claim_signature": "dependency_interaction:test_preflight.py:mysql-probe-connect-close:106",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "dependency_interaction",
+    "claim": "The comment asserts that without a rule-set file the MySQL preflight probe runs no SQL of its own.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Without a rule-set file the probe runs no SQL of its own.",
+    "source_file": "tests/unit/test_preflight.py",
+    "source_line": 114,
+    "verify_against": "src/sqllens/preflight.py",
+    "verify_hint": "Check `probe_database` and any rule-set catalog check it invokes for a cursor or execute call reached when `rule_sets` is unset",
+    "claim_signature": "dependency_interaction:test_preflight.py:probe-no-sql-without-rulesets:114",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "dependency_interaction",
+    "claim": "Under the mysql dialect, RunSqlTool classifies `? c\\nSELECT n FROM t` with query_type \"\" and adds no `results` key to its metadata, while `# c\\nSELECT n FROM t` under mysql classifies as SELECT with `results` present.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 73,
+    "source_line_end": 116,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py and first_sql_keyword in src/sqllens/safety/readonly.py",
+    "verify_hint": "Trace the input `? c\\nSELECT n FROM t` through `RunSqlTool.execute`'s query-type classification (`first_sql_keyword` under dialect mysql: does `?` tokenize as a placeholder or raise TokenError) and the condition that adds `results` to metadata",
+    "claim_signature": "dependency_interaction:test_factory_wiring.py:question-mark-led-classification:76",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "dependency_interaction",
+    "claim": "build_agent with a `mysql+pymysql://u@db.invalid/shop` URL constructs a MySQLRunner (exported from `sqllens.agent.integrations.mysql`) without opening a database connection, so the runner-stack wiring tests reach no MySQL server.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 510,
+    "verify_against": "src/sqllens/agent/factory.py and src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check `build_sql_runner` in `factory.py` and `MySQLRunner.__init__` for any `pymysql.connect` call or eager connection",
+    "claim_signature": "dependency_interaction:test_factory_wiring.py:build-agent-no-connect:510",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "dependency_interaction",
+    "claim": "The comment asserts that `#` opens a comment under mysql, which is why the mysql case's malformed input carries no `#`; the mysql input `this is not sql ?? !!` fails to parse under sqlglot's mysql dialect so compare returns ERROR.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# ``#`` opens a comment under mysql, so its malformed input carries none.",
+    "source_file": "tests/unit/test_eval_compare.py",
+    "source_line": 48,
+    "verify_against": "src/sqllens/eval/compare.py and sqlglot's MySQL tokenizer",
+    "verify_hint": "Trace `this is not sql ?? !!` and `this is not sql ## ?? !!` through `compare` / `normalize_sql` in `compare.py` under dialect mysql",
+    "claim_signature": "dependency_interaction:test_eval_compare.py:hash-comment-unparseable:48",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "dependency_interaction",
+    "claim": "Under dialect mysql, an actual SQL ending in an unterminated double-quoted string (`\"unterminated`) still raises a tokenizer or parse error that compare maps to Status.ERROR, although mysql reads a double-quoted run as a string rather than an identifier.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_compare.py",
+    "source_line": 106,
+    "source_line_end": 110,
+    "verify_against": "src/sqllens/eval/compare.py",
+    "verify_hint": "Check which sqlglot exceptions `compare` catches and maps to ERROR, and trace `SELECT name FROM users WHERE name = \"unterminated` through the mysql tokenizer",
+    "claim_signature": "dependency_interaction:test_eval_compare.py:unterminated-string-error:106",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "dependency_interaction",
+    "claim": "Under dialect mysql, an expected SQL ending in an unterminated double-quoted string still yields Status.ERROR from compare.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_compare.py",
+    "source_line": 113,
+    "source_line_end": 120,
+    "verify_against": "src/sqllens/eval/compare.py",
+    "verify_hint": "Check the expected-side parse path of `compare` for the exceptions mapped to ERROR under dialect mysql",
+    "claim_signature": "dependency_interaction:test_eval_compare.py:unterminated-string-error:113",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "dependency_interaction",
+    "claim": "Config.database.dialect for a `mysql+pymysql://` URL is the string \"mysql\", and run_verification passes that value to compare_sql as the `dialect` keyword.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 185,
+    "source_line_end": 198,
+    "verify_against": "src/sqllens/config.py and src/sqllens/eval/runner.py",
+    "verify_hint": "Check the `dialect` property of `DatabaseConfig` in `config.py` and the `compare_sql` call in `run_verification`",
+    "claim_signature": "dependency_interaction:test_eval_runner.py:dialect-from-mysql-url:185",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "dependency_interaction",
+    "claim": "Under dialect mysql, `SELECT amount FROM sys_payments` is classified as a data query (a `sys_` prefix is not a MySQL catalog entry), so its table is shown and clears the earlier error.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 1932,
+    "verify_against": "is_introspection_query in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the mysql-keyed catalog entries in `is_introspection_query` (schema names vs. name prefixes) for whether `sys_payments` matches",
+    "claim_signature": "dependency_interaction:test_format.py:sys-prefix-data-query:1932",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "dependency_interaction",
+    "claim": "The docstring asserts that with no dialect, a data query naming another engine's catalog would be hidden, and a `#`-led `SHOW` would read as a data query and be shown, so each parametrize row passes only when the configured dialect reaches the formatter.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Each row is classified right only when the dialect arrives: with no\n    dialect, a data query naming another engine's catalog would be hidden\n    too, and a ``#``-led ``SHOW`` would read as a data query and be shown.",
+    "source_file": "tests/unit/test_query_database.py",
+    "source_line": 1164,
+    "source_line_end": 1166,
+    "verify_against": "is_introspection_query in src/sqllens/safety/readonly.py",
+    "verify_hint": "Trace `# note\\nSHOW TABLES` and `SELECT id FROM sqlite_widgets` through `is_introspection_query` with dialect None and with dialect mysql (the leading-SHOW check, the tokenizer's handling of `#` with no dialect, and the fallback union)",
+    "claim_signature": "dependency_interaction:test_query_database.py:no-dialect-misclassifies-rows:1164",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "dependency_interaction",
+    "claim": "With a `mysql+pymysql://u@db.invalid/demo` URL and no API key, `sqllens validate` and `sqllens serve` (test_cli_validate_exits_one_without_api_key, test_cli_serve_fails_without_api_key) exit on the missing key before any preflight database probe calls pymysql.connect.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_config_smoke.py",
+    "verify_against": "src/sqllens/cli.py and src/sqllens/preflight.py",
+    "verify_hint": "Check the order of the API-key check and `run_preflight`/`probe_database` in the `validate` and `serve` commands of `cli.py`",
+    "claim_signature": "dependency_interaction:test_config_smoke.py:no-key-exits-before-db-probe",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "test_mock_alignment",
+    "claim": "FakeMySQL's catalog cursor answers the relation-type lookup verify_base_tables issues by keying on the lookup's second parameter (the relation name), so the real lookup passes (schema, name) with the name exactly as written in the SQL (e.g. 'all orders', 'ALL_ORDERS', 'shop'.'all_orders' -> 'all_orders').",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 60,
+    "source_line_end": 69,
+    "verify_against": "src/sqllens/safety/relations.py (MySQL relation lookup) and tests/unit/_fake_pymysql.py _CatalogCursor.execute",
+    "verify_hint": "Compare the parameters `verify_base_tables` passes to the information_schema.TABLES lookup in `src/sqllens/safety/relations.py` with `_CatalogCursor.execute` in `tests/unit/_fake_pymysql.py` (the `len(params) == 2 and params[1] in server.kinds` branch).",
+    "claim_signature": "test_mock_alignment:test_rls_views.py:catalog-lookup-keyed-by-name",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "dependency_interaction",
+    "claim": "For an unqualified relation name, verify_base_tables' MySQL relation lookup passes parameters (None, '<name>'), and it runs that lookup again on every query (no cache), so two queries on public_values produce exactly two (None, 'public_values') lookups.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 165,
+    "source_line_end": 179,
+    "verify_against": "src/sqllens/safety/relations.py",
+    "verify_hint": "Check how `verify_base_tables` in `src/sqllens/safety/relations.py` builds the schema parameter for an unqualified table under dialect mysql, and whether any lookup result is cached across calls.",
+    "claim_signature": "dependency_interaction:test_rls_views.py:unqualified-lookup-params-uncached",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "test_mock_alignment",
+    "claim": "The fake's catalog cursor reads `server.kinds` at lookup time, so mutating `server.kinds['public_values']` to 'VIEW' between queries changes the answer the second lookup gets.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 170,
+    "verify_against": "tests/unit/_fake_pymysql.py",
+    "verify_hint": "Check `_CatalogCursor.execute` and `FakeMySQL.kinds` in `tests/unit/_fake_pymysql.py`; confirm `_mysql_server` passes `dict(_MYSQL_KINDS)` and the cursor reads `server.kinds` per call.",
+    "claim_signature": "test_mock_alignment:test_rls_views.py:kinds-read-live",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "dependency_interaction",
+    "claim": "MySQLRunner runs verify_base_tables' catalog queries on a plain `conn.cursor()` (logged as cursor 'catalog' by the fake) and the user SQL on a cursor opened with a cursor class, so `_user_statements` (which drops 'catalog' entries) yields only user statements, and on refusal no user statement executes.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 85,
+    "source_line_end": 89,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py and src/sqllens/safety/relations.py",
+    "verify_hint": "Check which `connection.cursor(...)` call `verify_base_tables` in `relations.py` makes versus the cursor class `MySQLRunner.run_sql` uses for user SQL and session SET statements in `sql_runner.py`; also check `FakeConnection.cursor` in `tests/unit/_fake_pymysql.py`.",
+    "claim_signature": "dependency_interaction:test_rls_views.py:catalog-vs-query-cursor",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts `_user_statements` returns the statements each connection ran on its query cursor, in order.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"The statements each connection ran on its query cursor, in order.\"\"\"",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 86,
+    "verify_against": "tests/unit/_fake_pymysql.py FakeConnection.executed / Executed.cursor and MySQLRunner session SET statements",
+    "verify_hint": "Trace a read_only=True run: `SET SESSION TRANSACTION READ ONLY` is executed by MySQLRunner on some cursor; check in `sql_runner.py` and `_fake_pymysql.py` whether that SET is logged under a non-'catalog' cursor (and so included) or is it the query cursor; the falsifying input is a run whose SET statement lands in the list though it was not run on the query cursor.",
+    "claim_signature": "absolute_claim:test_rls_views.py:user-statements-docstring",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "dependency_interaction",
+    "claim": "apply_rls under dialect mysql rewrites `SELECT id FROM orders` to exactly `SELECT id FROM orders WHERE orders.tenant_id = 'alpha'`, leaves a CTE-shadowed `orders` unrewritten, and RlsGuardRunner hands that rewritten text to MySQLRunner, which executes it verbatim.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 118,
+    "source_line_end": 122,
+    "verify_against": "src/sqllens/safety/rls.py apply_rls and RlsGuardRunner in src/sqllens/safety/",
+    "verify_hint": "Check `apply_rls` in `src/sqllens/safety/rls.py` for the predicate shape and sqlglot mysql generation, and `RlsGuardRunner.run_sql` for what SQL it passes to the inner runner.",
+    "claim_signature": "dependency_interaction:test_rls_views.py:rewritten-sql-exact-text",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "dependency_interaction",
+    "claim": "apply_rls under mysql generates `MAX(id)` (upper-cased) for `max(id)` in a scalar subquery, and matches the upper-case `ORDERS` to rule table `orders`, producing `WHERE ORDERS.tenant_id = 'alpha'`; the upper-case `PUBLIC_VALUES` is left unrewritten.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 125,
+    "source_line_end": 138,
+    "verify_against": "src/sqllens/safety/rls.py apply_rls (identifier normalization under mysql) and sqlglot's MySQL generator",
+    "verify_hint": "Check identifier case handling in `apply_rls` in `src/sqllens/safety/rls.py` for dialect mysql, and how the generator renders the MAX function.",
+    "claim_signature": "dependency_interaction:test_rls_views.py:subquery-and-case-rewrites",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "dependency_interaction",
+    "claim": "The RlsError raised for a relation whose catalog type is VIEW carries a message containing 'database views are not supported'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 104,
+    "verify_against": "src/sqllens/safety/relations.py",
+    "verify_hint": "Find the RlsError raised for a VIEW / SYSTEM VIEW kind in `verify_base_tables` in `src/sqllens/safety/relations.py` and compare its message text.",
+    "claim_signature": "dependency_interaction:test_rls_views.py:view-refusal-message",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "test_mock_alignment",
+    "claim": "`mysql_runner()` with default kwargs builds a MySQLRunner with read_only=True and statement_timeout_ms=0, so a plain read executes exactly `SET SESSION TRANSACTION READ ONLY` (params None) then the user SQL (params None), with no MAX_EXECUTION_TIME statement.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 145,
+    "source_line_end": 153,
+    "verify_against": "tests/unit/_fake_pymysql.py mysql_runner and src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check `mysql_runner` defaults in `tests/unit/_fake_pymysql.py` and how `MySQLRunner.run_sql` executes session SET statements (with or without params) in `sql_runner.py`; also `FakeConnection.statements`.",
+    "claim_signature": "test_mock_alignment:test_rls_views.py:default-runner-session-statements",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "dependency_interaction",
+    "claim": "RlsGuardRunner's denylist check refuses `SELECT sleep(1) FROM public_values` under dialect mysql with an UnsafeSqlError matching \"function 'sleep' is not allowed\" before the inner MySQLRunner opens any connection, with read_only both False and True.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 700,
+    "source_line_end": 710,
+    "verify_against": "RlsGuardRunner.run_sql and ReadOnlyGuardRunner in src/sqllens/safety/; assert_no_denied_functions in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the order of the denylist check versus delegation in `RlsGuardRunner.run_sql`, and that `MySQLRunner` only calls `pymysql.connect` inside `run_sql` (not at construction) in `sql_runner.py`.",
+    "claim_signature": "dependency_interaction:test_rls_views.py:denylist-before-connect",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-60",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that with lower_case_table_names = 0 MySQL looks a name up as written, so the upper-case _MYSQL_KINDS entries pin what the guard does with the catalog-reported type rather than how MySQL resolves letter case.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The objects of ``database`` as a MySQL server reports them. The upper-case\n# names are separate entries: with lower_case_table_names = 0, MySQL looks a\n# name up as written, so these rows pin what the guard does with the type the\n# catalog reports, not how MySQL resolves letter case.",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 56,
+    "source_line_end": 59,
+    "verify_against": "tests/unit/_fake_pymysql.py (the @@lower_case_table_names probe answer) and src/sqllens/safety/relations.py identifier-case handling",
+    "verify_hint": "Check what value the fake's `_CatalogCursor` returns for `SELECT @@lower_case_table_names` and how `verify_base_tables` folds names for modes 0/1/2; the falsifying input is a lookup for `ALL_ORDERS` whose parameters are folded to `all_orders` before the fake sees it, making the upper-case entries unused.",
+    "claim_signature": "absolute_claim:test_rls_views.py:lower-case-table-names-comment",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-61",
+    "category": "test_mock_alignment",
+    "claim": "MySQLRunner streams a read (plain, CTE, WITH RECURSIVE, `-- `/`#` comment-led, touching-symbol) on a cursor of class SSDictCursor and calls fetchmany exactly once with max_rows + 1 (11 for max_rows=10); the fake records the class name and fetchmany sizes the runner used.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 109,
+    "source_line_end": 110,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py and tests/unit/_fake_pymysql.py _QueryCursor",
+    "verify_hint": "Check the read branch of `MySQLRunner.run_sql` in `sql_runner.py` (cursor class from `pymysql.cursors`, fetchmany size) and `_QueryCursor.fetchmany` / `FakeConnection.query_cursors` in `_fake_pymysql.py`.",
+    "claim_signature": "test_mock_alignment:test_safety_limits.py:ssdictcursor-fetchmany-cap",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-62",
+    "category": "test_mock_alignment",
+    "claim": "With read_only=False and the mysql_runner default timeout, MySQLRunner executes no session SET statement, so the connection's executed list is exactly the user SQL on SSDictCursor (reads) or DictCursor (writes).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 361,
+    "source_line_end": 364,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py and tests/unit/_fake_pymysql.py mysql_runner",
+    "verify_hint": "Check which statements `MySQLRunner.run_sql` executes when `read_only=False` and `statement_timeout_ms` is mysql_runner's default, and on which cursor class.",
+    "claim_signature": "test_mock_alignment:test_safety_limits.py:no-session-set-read-write",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-63",
+    "category": "dependency_interaction",
+    "claim": "MySQLRunner's write branch (non-read-shaped SQL such as UPDATE or an unterminated-comment SELECT) executes on a DictCursor, commits the connection, and reports the cursor's rowcount, which RunSqlTool renders as 'row(s) affected' with a NotificationComponent.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 643,
+    "source_line_end": 654,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py and src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check the non-read-shaped branch of `MySQLRunner.run_sql` (cursor class, `commit()`, `rowcount`) and the rows_affected rendering in `RunSqlTool.execute`.",
+    "claim_signature": "dependency_interaction:test_safety_limits.py:write-branch-dictcursor-commit",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-64",
+    "category": "dependency_interaction",
+    "claim": "RunSqlTool rejects empty or whitespace-only SQL with success False and a result_for_llm containing 'SQL is empty' before calling the runner, so no pymysql connection opens with read_only True or False.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 701,
+    "source_line_end": 704,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py and src/sqllens/safety/ ReadOnlyGuardRunner",
+    "verify_hint": "Check the empty-SQL handling in `RunSqlTool.execute` in `run_sql.py` and its message text; for read_only=True also check whether `ReadOnlyGuardRunner` refuses first and what message reaches result_for_llm.",
+    "claim_signature": "dependency_interaction:test_safety_limits.py:empty-sql-message-no-connect",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-65",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that, under each listed dialect (None, sqlite, and mysql for 'c\\nSELECT n FROM widgets'), the statement does not parse and so is not read-shaped.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Under these dialects the statement does not parse, so it is not\n        # read-shaped: it gets the row-count notification even when the runner\n        # returned capped rows, because the tool must classify with the\n        # runner's own dialect (build_agent passes it).",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 670,
+    "source_line_end": 673,
+    "verify_against": "src/sqllens/safety/readonly.py is_read_shaped / first_sql_keyword",
+    "verify_hint": "Trace `is_read_shaped('c\\nSELECT n FROM widgets', 'mysql')` in `readonly.py`: whether it fails because the first token `c` is not a read keyword rather than a parse failure; the falsifying input is that MySQL-syntax statement, which may tokenize fine with first keyword `C`.",
+    "claim_signature": "absolute_claim:test_safety_limits.py:does-not-parse-comment",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-66",
+    "category": "absolute_claim",
+    "claim": "The comment asserts '? c\\nSELECT 1' under mysql is the same leading symbol token, in MySQL syntax, as '#' is under sqlite/None, so first_sql_keyword returns '' for the same reason.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The same leading symbol token in MySQL syntax, where \"#\" would\n            # open a comment.",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 235,
+    "source_line_end": 237,
+    "verify_against": "src/sqllens/safety/readonly.py first_sql_keyword and sqlglot's tokenizer",
+    "verify_hint": "Trace how sqlglot's sqlite / default tokenizer types `#` and the MySQL tokenizer types `?` (e.g. a parameter/placeholder token) and how `first_sql_keyword` maps a non-keyword first token to ''; the falsifying input is `? c\\nSELECT 1` tokenizing to a token type `first_sql_keyword` treats differently from `#`.",
+    "claim_signature": "absolute_claim:test_safety_limits.py:same-symbol-token-comment",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-67",
+    "category": "dependency_interaction",
+    "claim": "DatabaseConfig accepts `mysql+pymysql://u@db.invalid/shop` as a URL, so the statement_timeout_ms upper-bound tests fail or pass only on the timeout bound.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 27,
+    "verify_against": "src/sqllens/config.py DatabaseConfig url validator",
+    "verify_hint": "Check the `DatabaseConfig.url` validator in `src/sqllens/config.py` accepts a `mysql+pymysql://` URL with user and host and no password, so `test_rejects_above_24h`'s ValidationError comes from the timeout field.",
+    "claim_signature": "dependency_interaction:test_safety_limits.py:mysql-url-accepted-by-config",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-68",
+    "category": "absolute_claim",
+    "claim": "The module docstring states the file holds unit tests for RowCapRunner and the runners' row cap and timeout.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"Unit tests for ``RowCapRunner`` and the runners' row cap and timeout.\"\"\"",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 4,
+    "verify_against": "tests/unit/test_safety_limits.py itself",
+    "verify_hint": "Check whether any test in the file exercises MySQLRunner's statement timeout (MAX_EXECUTION_TIME) or only SqliteRunner's; the falsifying case is a file whose only timeout tests are `TestSqliteRunnerTimeout` and the negative-timeout rejection.",
+    "claim_signature": "absolute_claim:test_safety_limits.py:module-docstring-scope",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-69",
+    "category": "dependency_interaction",
+    "claim": "Under dialect mysql, RunSqlTool's introspection check classifies `SELECT table_name FROM information_schema.tables` as a schema lookup, so a 300-row wide result gets no \"user's table\" display line.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_run_sql_display_line.py",
+    "source_line": 94,
+    "source_line_end": 104,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py and is_introspection_query in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check where `RunSqlTool` decides to append the display-cut line and whether it uses `is_introspection_query` with its own dialect.",
+    "claim_signature": "dependency_interaction:test_run_sql_display_line.py:mysql-schema-lookup-no-line",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-70",
+    "category": "dependency_interaction",
+    "claim": "load_rule_sets refuses a `postgresql://u@db.invalid/shop` database_url with a RuleSetFileError whose message contains 'need a MySQL database', and the `_load` helper passes `url` through as that database_url.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rule_set_file.py",
+    "source_line": 266,
+    "source_line_end": 269,
+    "verify_against": "src/sqllens/rule_sets.py load_rule_sets and the `_load` helper in tests/unit/test_rule_set_file.py",
+    "verify_hint": "Check the MySQL-URL check in `load_rule_sets` in `src/sqllens/rule_sets.py` (how it decides a URL is MySQL and its message) and the `_load` helper's signature in `test_rule_set_file.py`.",
+    "claim_signature": "dependency_interaction:test_rule_set_file.py:postgres-url-refused",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-71",
+    "category": "dependency_interaction",
+    "claim": "assert_select_only under dialect mysql refuses `INSERT INTO users VALUES (1, 'a')` and `DROP TABLE users` with messages matching `only SELECT .* (got INSERT)` and `only SELECT .* (got DROP)`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 276,
+    "source_line_end": 277,
+    "verify_against": "src/sqllens/safety/readonly.py assert_select_only root-type gate",
+    "verify_hint": "Check the root-type refusal message format in `assert_select_only` in `readonly.py` and the statement-type name it reports for sqlglot's Insert and Drop nodes.",
+    "claim_signature": "dependency_interaction:test_safety.py:root-type-refusal-message",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-72",
+    "category": "dependency_interaction",
+    "claim": "Under dialect mysql, `SELECT 1 /* outer /* nested */ -- */\\n + 2` is refused with an UnsafeSqlError matching 'Nested MySQL comments' (while the same text passes under sqlite).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 1365,
+    "source_line_end": 1367,
+    "verify_against": "src/sqllens/safety/readonly.py (_mysql_parse_sql nested-comment refusal)",
+    "verify_hint": "Check `_mysql_parse_sql` in `readonly.py` for the nested-block-comment refusal and its message text.",
+    "claim_signature": "dependency_interaction:test_safety.py:nested-comment-refused-mysql",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-73",
+    "category": "dependency_interaction",
+    "claim": "is_introspection_query treats a qualified `mysql.user` beside or aliased as a same-named CTE or derived table (`user`, `c`) as a catalog reference, in either FROM order, under dialect mysql and None.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 944,
+    "source_line_end": 947,
+    "verify_against": "src/sqllens/safety/readonly.py is_introspection_query CTE-reference exclusion",
+    "verify_hint": "Check how `is_introspection_query` excludes CTE references via scope analysis in `readonly.py`, specifically whether a db-qualified table `mysql.user` can be mistaken for the CTE `user`, and whether `user` (a MySQL keyword) parses as a CTE name under mysql.",
+    "claim_signature": "dependency_interaction:test_safety.py:qualified-mysql-catalog-beside-cte",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-74",
+    "category": "dependency_interaction",
+    "claim": "is_introspection_query classifies `SELECT id FROM mysql_events` under dialect mysql as data (a `mysql_` name prefix is not a MySQL catalog), and `x\\nSHOW 'abc` under mysql as not introspection.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 1045,
+    "verify_against": "src/sqllens/safety/readonly.py _CATALOGS_BY_DIALECT and is_introspection_query",
+    "verify_hint": "Check the mysql entry of `_CATALOGS_BY_DIALECT` (schema-based versus prefix-based matching) and the SHOW detection path in `is_introspection_query` for a statement whose first token is `x`.",
+    "claim_signature": "dependency_interaction:test_safety.py:mysql-prefix-is-data",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-75",
+    "category": "dependency_interaction",
+    "claim": "When traverse_scope raises, is_introspection_query under dialect None and mysql still classifies `WITH x AS (SELECT * FROM mysql.user) SELECT * FROM x` as introspection and logs a record containing 'RuntimeError' at INFO or above on logger sqllens.safety.readonly.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 1016,
+    "source_line_end": 1032,
+    "verify_against": "src/sqllens/safety/readonly.py is_introspection_query scope-failure handling",
+    "verify_hint": "Check the `except` around `traverse_scope` in `is_introspection_query` in `readonly.py`: its log level, logger name and message (does it include the exception type name), and whether `traverse_scope` is referenced as a module attribute so the monkeypatch takes effect.",
+    "claim_signature": "dependency_interaction:test_safety.py:scope-failure-logged-mysql",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-76",
+    "category": "absolute_claim",
+    "claim": "The comment asserts `x\\nSHOW 'abc` under mysql is the same statement in MySQL syntax as `#x\\nSHOW 'abc` under sqlite.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The same statement in MySQL syntax, where \"#\" would open a comment.",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 1102,
+    "verify_against": "src/sqllens/safety/readonly.py is_introspection_query and sqlglot's sqlite/mysql tokenizers",
+    "verify_hint": "Trace how the sqlite tokenizer reads `#x` (one token or `#` plus `x`) against how the mysql tokenizer reads `x`; the falsifying input is `#x` tokenizing under sqlite to a different leading-token shape than `x` under mysql.",
+    "claim_signature": "absolute_claim:test_safety.py:same-statement-mysql-syntax",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-77",
+    "category": "absolute_claim",
+    "claim": "The comment asserts `SELECT name FROM mysql.func` is the MySQL counterpart, a table in the mysql schema that is a MySQL entry of the same no-dialect catalog union.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The MySQL counterpart: a table in the mysql schema, a MySQL entry\n            # of the same no-dialect catalog union.",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 1115,
+    "source_line_end": 1117,
+    "verify_against": "src/sqllens/safety/readonly.py _CATALOGS_BY_DIALECT",
+    "verify_hint": "Check that the mysql entry of `_CATALOGS_BY_DIALECT` lists the `mysql` schema and that `_catalogs(None)` unions it in.",
+    "claim_signature": "absolute_claim:test_safety.py:mysql-func-counterpart-comment",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-78",
+    "category": "dependency_interaction",
+    "claim": "first_sql_keyword('? c\\nSELECT 1', 'mysql') returns '' (the `?` placeholder is a non-keyword first token and does not raise a TokenError path that differs).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 237,
+    "verify_against": "src/sqllens/safety/readonly.py first_sql_keyword",
+    "verify_hint": "Trace `first_sql_keyword` in `readonly.py` for a first token of type PLACEHOLDER (or whatever sqlglot's mysql tokenizer gives `?`).",
+    "claim_signature": "dependency_interaction:test_safety_limits.py:placeholder-first-token",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-79",
+    "category": "test_mock_alignment",
+    "claim": "The masking test scripts the fake's rows with key `h` for `SELECT password_hash AS h` and key `upper(password_hash)` for `SELECT upper(password_hash)`, so MySQLRunner must build the DataFrame columns from the dict keys the SSDictCursor fetchmany returns, with no renaming, for the asserted columns to match",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 691,
+    "source_line_end": 701,
+    "verify_against": "MySQLRunner read path in src/sqllens/agent/integrations/mysql/sql_runner.py and the fake in tests/unit/_fake_pymysql.py",
+    "verify_hint": "Check how `MySQLRunner.run_sql` turns `fetchmany` rows into a DataFrame, and `_QueryCursor.fetchmany` in `tests/unit/_fake_pymysql.py`",
+    "claim_signature": "test_mock_alignment:test_safety_masking.py:fake-row-keys-become-columns:691",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-80",
+    "category": "absolute_claim",
+    "claim": "The comment asserts the fake's keys are the column labels MySQL 8.0 and PyMySQL's SSDictCursor give these statements, and that the connector suite checks them against a live server",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The keys are the column labels MySQL 8.0 and PyMySQL's SSDictCursor give\n    # these statements; the connector suite checks them against a live server.",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 685,
+    "source_line_end": 686,
+    "verify_against": "MySQL connector tests under tests/connectors/ using ResultMaskingRunner",
+    "verify_hint": "Find the connector test in `tests/connectors/` that runs `SELECT password_hash AS h` and `SELECT upper(password_hash)` through `ResultMaskingRunner` and check it asserts keys `h` and `upper(password_hash)`; a falsifying input is MySQL labelling the expression column differently (e.g. `UPPER(password_hash)` case) than the fake",
+    "claim_signature": "absolute_claim:test_safety_masking.py:connector-suite-checks-labels:685",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-81",
+    "category": "dependency_interaction",
+    "claim": "ResultMaskingRunner masks a column labelled `upper(password_hash)` (the secret word inside an expression label) and leaves a column labelled `h` unmasked",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 695,
+    "source_line_end": 701,
+    "verify_against": "src/sqllens/safety/masking.py",
+    "verify_hint": "Check `SecretColumnMatcher.is_secret` and `ResultMaskingRunner.run_sql` in `src/sqllens/safety/masking.py` for how a label like `upper(password_hash)` is tokenized",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:expression-label-masked:695",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-82",
+    "category": "dependency_interaction",
+    "claim": "With RLS on and a `mysql+pymysql://` URL, build_agent's relation-check executor beneath the RLS guard is a MySQLRunner",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 649,
+    "source_line_end": 651,
+    "verify_against": "src/sqllens/agent/factory.py and `_relation_check_executor`",
+    "verify_hint": "Check `build_sql_runner` in `src/sqllens/agent/factory.py` for the runner chosen for a mysql URL, and `_relation_check_executor` for how it unwraps decorators",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:relation-executor-mysqlrunner:651",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-83",
+    "category": "dependency_interaction",
+    "claim": "build_agent over a `mysql+pymysql://u@db.invalid/shop` URL constructs the runner chain without opening a MySQL connection (MySQLRunner construction is lazy), so the wiring tests need no fake pymysql",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 627,
+    "source_line_end": 632,
+    "verify_against": "MySQLRunner.__init__ in src/sqllens/agent/integrations/mysql/sql_runner.py and build_agent in src/sqllens/agent/factory.py",
+    "verify_hint": "Check whether `MySQLRunner.__init__` imports pymysql or calls `pymysql.connect`, and whether `build_agent` performs any database I/O",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:mysqlrunner-construct-lazy:627",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-84",
+    "category": "dependency_interaction",
+    "claim": "`mysql_runner()` is called in test_relation_check_unwraps_the_guard without installing the fake pymysql, so constructing MySQLRunner must not require the real pymysql module to connect or be importable in a failing way",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "source_line": 471,
+    "source_line_end": 474,
+    "verify_against": "MySQLRunner.__init__ in src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check `MySQLRunner.__init__` for any import of `pymysql` or connection attempt; and `mysql_runner` in `tests/unit/_fake_pymysql.py`",
+    "claim_signature": "dependency_interaction:test_safety_whole_row.py:runner-built-without-fake:472",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-85",
+    "category": "test_mock_alignment",
+    "claim": "MySQLRunner executes the user SQL as `cursor.execute(sql)` with no parameters, as the last statement on the query's connection, so the fake logs it as `(\"SELECT id, name FROM users\", None)` after any session-setup statements",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "source_line": 401,
+    "verify_against": "MySQLRunner.run_sql in src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check the order of `SET SESSION ...` statements and the user-SQL `execute` call in `MySQLRunner`'s worker function, and `_QueryCursor.execute` default `params=None` in `tests/unit/_fake_pymysql.py`",
+    "claim_signature": "test_mock_alignment:test_safety_whole_row.py:user-sql-last-no-params:401",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-86",
+    "category": "dependency_interaction",
+    "claim": "WholeRowSelectGuardRunner refuses `SELECT * FROM users` before the inner MySQLRunner opens any connection, so the fake records no connections",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "source_line": 396,
+    "verify_against": "src/sqllens/safety/whole_row.py",
+    "verify_hint": "Check `WholeRowSelectGuardRunner.run_sql` in `src/sqllens/safety/whole_row.py` raises before delegating to `_inner`",
+    "claim_signature": "dependency_interaction:test_safety_whole_row.py:refusal-before-connect:396",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-87",
+    "category": "dependency_interaction",
+    "claim": "RunSqlTool's successful result metadata `columns` is `[\"id\", \"name\"]` when the fake returns rows with keys id and name; the fake returns all scripted rows regardless of the SELECT's column list",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "source_line": 386,
+    "source_line_end": 400,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py and tests/unit/_fake_pymysql.py",
+    "verify_hint": "Check how `RunSqlTool.execute` builds `metadata[\"columns\"]` from the runner's DataFrame",
+    "claim_signature": "dependency_interaction:test_safety_whole_row.py:runsql-columns-metadata:399",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-88",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that with no dialect a table in MySQL's catalog schemas counts as a catalog (so `SELECT * FROM mysql.users` is allowed under a None dialect)",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Likewise, with no dialect a table in MySQL's catalog schemas counts.",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "source_line": 166,
+    "source_line_end": 167,
+    "verify_against": "catalog detection in src/sqllens/safety/whole_row.py (and any shared catalog table in src/sqllens/safety/)",
+    "verify_hint": "Check how `assert_no_whole_row_select` classifies a catalog relation under `dialect=None`; trace `mysql.users`, `sys.x`, `performance_schema.x`, and `information_schema.x` as inputs",
+    "claim_signature": "absolute_claim:test_safety_whole_row.py:no-dialect-mysql-schema-catalog:166",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-89",
+    "category": "absolute_claim",
+    "claim": "The comment asserts a table whose name merely starts with a MySQL catalog schema's name (e.g. `sys_users`) is not a catalog under mysql, so `SELECT * FROM sys_users` is refused",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# A name merely starting with a MySQL catalog schema's name is no catalog.",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "source_line": 182,
+    "source_line_end": 183,
+    "verify_against": "catalog detection in src/sqllens/safety/whole_row.py",
+    "verify_hint": "Check whether MySQL catalog detection matches on the table's schema (db) qualifier or on a name prefix; falsifying inputs to trace: `sys_users`, `mysql_users`, `performance_schema_x` under dialect mysql",
+    "claim_signature": "absolute_claim:test_safety_whole_row.py:schema-prefix-not-catalog:182",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-90",
+    "category": "dependency_interaction",
+    "claim": "build_agent over a mysql URL places the whole-row guard with dialect `\"mysql\"` and its innermost SQL runner is MySQLRunner, with ReadOnlyGuardRunner or RowCapRunner directly beneath depending on read_only",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "source_line": 456,
+    "source_line_end": 459,
+    "verify_against": "src/sqllens/agent/factory.py",
+    "verify_hint": "Check `build_sql_runner`/`build_agent` in `src/sqllens/agent/factory.py` for the dialect passed to `WholeRowSelectGuardRunner` (via `sqlglot_dialect_for_url`) and the runner for a `mysql+pymysql` URL",
+    "claim_signature": "dependency_interaction:test_safety_whole_row.py:guard-dialect-mysql-chain:456",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-91",
+    "category": "dependency_interaction",
+    "claim": "`sqllens.agent.integrations.mysql` exports `MySQLRunner` at package level (imported as `from sqllens.agent.integrations.mysql import MySQLRunner`) and it is the same class the factory instantiates",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "source_line": 23,
+    "verify_against": "src/sqllens/agent/integrations/mysql/__init__.py",
+    "verify_hint": "Check `src/sqllens/agent/integrations/mysql/__init__.py` re-exports `MySQLRunner` from `sql_runner`, and which import path `factory.py` uses",
+    "claim_signature": "dependency_interaction:test_safety_whole_row.py:mysqlrunner-package-export",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-92",
+    "category": "test_mock_alignment",
+    "claim": "The shared fake sets `pymysql.Error` and `pymysql.MySQLError` to `FakeMySQLError` (previously `pymysql.Error = Exception`); the cleanup tests raise `_PrimaryError`/`_SecondaryCloseError` (plain Exception subclasses), so MySQLRunner's cleanup and error propagation must not depend on catching `pymysql.Error` for these errors to propagate or be suppressed as the tests assert",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_cleanup.py",
+    "source_line": 61,
+    "verify_against": "except clauses in src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check every `except` in `MySQLRunner` (e.g. around `conn.close()`, cursor close) for whether it catches `pymysql.Error`/`MySQLError` or `Exception`, and compare with `install_fake_pymysql` in `tests/unit/_fake_pymysql.py`",
+    "claim_signature": "test_mock_alignment:test_sql_runner_cleanup.py:fake-error-class-change",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-93",
+    "category": "test_mock_alignment",
+    "claim": "The fake pymysql module exposes every attribute MySQLRunner references (`connect`, `cursors.SSDictCursor`, `cursors.DictCursor`, `Error`, `MySQLError`) and nothing else MySQLRunner uses is missing",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_cleanup.py",
+    "source_line": 26,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "List every `pymysql.` attribute referenced in `src/sqllens/agent/integrations/mysql/sql_runner.py` and compare with `install_fake_pymysql` in `tests/unit/_fake_pymysql.py`",
+    "claim_signature": "test_mock_alignment:repo:fake-pymysql-surface",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-94",
+    "category": "dependency_interaction",
+    "claim": "apply_rls under dialect mysql emits the alias-qualified predicate as unquoted `o.tenant_id` (the test strips only double quotes, not backticks)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rls.py",
+    "source_line": 184,
+    "verify_against": "src/sqllens/safety/rls.py predicate construction and sqlglot mysql generator",
+    "verify_hint": "Check how `apply_rls` builds the column reference (quoted or not) and renders SQL with `dialect=\"mysql\"` in `src/sqllens/safety/rls.py`",
+    "claim_signature": "dependency_interaction:test_safety_rls.py:alias-predicate-unquoted:184",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-95",
+    "category": "absolute_claim",
+    "claim": "The comment asserts MySQL names an unaliased result column after the call's text (the reason the printf case's written case is kept)",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# MySQL names an unaliased result column after the call's text.",
+    "source_file": "tests/unit/test_safety_rls.py",
+    "source_line": 233,
+    "source_line_end": 236,
+    "verify_against": "src/sqllens/safety/rls.py rewrite of unrecognised functions under mysql, and MySQL's column-naming behaviour",
+    "verify_hint": "Check how `apply_rls` preserves function-name case for unrecognised functions under `dialect=\"mysql\"`; trace `SELECT printf('%s', name) FROM orders` and an upper-cased variant as inputs",
+    "claim_signature": "absolute_claim:test_safety_rls.py:mysql-unaliased-column-name:233",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-96",
+    "category": "dependency_interaction",
+    "claim": "Under dialect mysql, apply_rls output for `SELECT printf('%s', name) FROM orders` is exactly `SELECT printf('%s', name) FROM orders WHERE orders.tenant_id = 'acme'`",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rls.py",
+    "source_line": 234,
+    "source_line_end": 236,
+    "verify_against": "src/sqllens/safety/rls.py and the locked sqlglot mysql generator",
+    "verify_hint": "Check `apply_rls` in `src/sqllens/safety/rls.py` for how unrecognised functions are rendered (Anonymous node, case preserved) under mysql",
+    "claim_signature": "dependency_interaction:test_safety_rls.py:printf-rewrite-exact:234",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-97",
+    "category": "dependency_interaction",
+    "claim": "RlsError raised for a wrong-typed dynamic metadata value (None, dict, bytes, nested list) carries a message containing `unusable or suspicious value`",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rls.py",
+    "source_line": 519,
+    "verify_against": "src/sqllens/safety/rls.py",
+    "verify_hint": "Check the RlsError message raised by the dynamic-value resolution path (`_is_suspicious_scalar` caller) in `src/sqllens/safety/rls.py`",
+    "claim_signature": "dependency_interaction:test_safety_rls.py:wrong-type-message:519",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-98",
+    "category": "dependency_interaction",
+    "claim": "Under dialect mysql, an RLS rule on table `orders` also filters a schema-qualified `public.orders` reference",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rls.py",
+    "source_line": 328,
+    "source_line_end": 335,
+    "verify_against": "src/sqllens/safety/rls.py table matching",
+    "verify_hint": "Check how `apply_rls` matches a rule's `table` against `exp.Table` name versus its `db` qualifier in `src/sqllens/safety/rls.py`",
+    "claim_signature": "dependency_interaction:test_safety_rls.py:schema-qualified-filtered:328",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-99",
+    "category": "dependency_interaction",
+    "claim": "Under dialect mysql, `WITH RECURSIVE orders AS (...) SELECT * FROM orders` cases yield the same predicate counts as they did under sqlite (one predicate for the self-named non-recursive body, none for the self-referencing recursive CTE, two for the distinctly named recursive CTE)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rls.py",
+    "source_line": 300,
+    "source_line_end": 405,
+    "verify_against": "src/sqllens/safety/rls.py CTE scope handling under mysql",
+    "verify_hint": "Check CTE/recursive-CTE handling in `apply_rls` (`src/sqllens/safety/rls.py`) for any dialect-dependent branch",
+    "claim_signature": "dependency_interaction:test_safety_rls.py:recursive-cte-mysql-counts:300",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-100",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts building a real agent (the object graph) on a clean-startup path would be irrelevant work; it no longer mentions a database connect",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Building a real agent (the\n    object graph) on a clean-startup path would be irrelevant work",
+    "source_file": "tests/unit/test_transport_http.py",
+    "source_line": 202,
+    "source_line_end": 204,
+    "verify_against": "build_agent in src/sqllens/agent/factory.py",
+    "verify_hint": "Check whether `build_agent` with a mysql URL does any I/O beyond building objects (e.g. a connect or schema read)",
+    "claim_signature": "absolute_claim:test_transport_http.py:build-agent-object-graph-only:202",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-32"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "**Definitions.** A test, helper or fixture under `tests/` *uses SQLite* when it does any of these: names a `sqlite` URL; reads a file under `examples/sqlite-demo/`; imports or calls Python's `sqlite3` module or anything in `sqllens.agent.integrations.sqlite`; calls `sqllens.preflight._probe_sqlite`, or a preflight path that reaches it with a `sqlite` URL; passes `\"sqlite\"` as a dialect or engine value; or relies on a SQLite entry of the fallback union (`load_extension`, or a `sqlite_` or `pragma_` name, a CTE or table so named included). A case relies on such an entry when it runs under a `None` or unknown dialect and its outcome comes from that entry. It also relies on one when, under any dialect, its outcome differs from the `None`-dialect outcome only because the entry is in the union. An example is a `sqlite_`-prefixed data table under dialect `mysql` that proves the configured dialect arrives, as in the MySQL row #382 gave `test_with_widgets_hides_introspection_result_under_configured_dialect`. Naming ChromaDB's `chroma.sqlite3` file is not a use. A use is *SQLite-only* when the behaviour it asserts exists only for SQLite. That covers at minimum: the `sqllens.agent.integrations.sqlite` package, `sqlite_path_from_url` and `_readonly_uri`; the SQLite preflight probe; a `sqlite`-keyed entry of a per-dialect table in `src/sqllens/safety/` or in the system prompt (for example `sqlite_master`, `pragma_*` names, `load_extension`); `sqllens init`'s SQLite template; `claude-desktop install`'s SQLite file-stem naming; a case that relies on a SQLite entry of the fallback union; and a `sqlite` case whose expected outcome differs from the same test's `mysql` case with the same other inputs. A use whose classification is unclear counts as SQLite-only, and its test also gets a MySQL version. A `sqlite` URL used only as the non-MySQL input that a MySQL-only check refuses (`tests/unit/test_rule_set_file.py::test_non_mysql_url_is_refused`, `tests/unit/test_cli_rule_sets.py::test_validate_refuses_a_non_mysql_url`) is engine-neutral where another non-MySQL scheme can reach that check: its replacement passes one, for example `postgresql://u@db.invalid/shop`, straight to `load_rule_sets`, and asserts the same refusal. Where config load refuses every other scheme before the check runs (`sqllens validate`), the use is SQLite-only, and its map row says no MySQL counterpart exists because config load accepts only MySQL and SQLite URLs. Every other use is *engine-neutral*. After the change, every use of SQLite under `tests/` is SQLite-only.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "source_file": "tests/unit/test_rule_set_file.py",
+    "source_line": 266,
+    "verify_hint": "Check `test_non_mysql_url_is_refused` and the `_load` helper in test_rule_set_file.py.",
+    "id": "VC-101",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Each engine-neutral test (as the first criterion defines it) that needs a database URL uses a `mysql+pymysql://` URL that names a user and a host. This includes `tests/unit/_config_builders.py`, `tests/integration/conftest.py` and `tests/unit/test_transport_http.py`. The `list_data_sources` transport test asserts that the configured `mysql` scheme appears in the tool's output.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "source_file": "tests/unit/_config_builders.py",
+    "source_line": 46,
+    "verify_hint": "Check the URLs in `tests/unit/_config_builders.py`, `tests/integration/conftest.py` and `tests/unit/test_transport_http.py`.",
+    "id": "VC-102",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "No test in the default run opens a connection to a MySQL server. Proof: the default `pytest -q` run passes, and records no call, with the real `pymysql.connect` replaced for the whole session by a function that records each call and raises; the run fails if any call was recorded, even when the code under test caught the error. Every test whose path reaches `pymysql.connect` (query execution, or the preflight database probe through `serve`, `validate --check-db` or `run_preflight`) supplies its own fake.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "source_file": "tests/unit/test_cli.py",
+    "source_line": 28,
+    "verify_hint": "Check the autouse `mysql_connect` fixture in `tests/unit/test_cli.py` and other tests reaching `run_preflight` or `MySQLRunner`.",
+    "id": "VC-103",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Each MySQL replacement for a test whose assertion depends on behaviour inside the runner builds a real `MySQLRunner` over a fake `pymysql` module. That behaviour covers at minimum: session setup, cursor choice, the row cap, settings that reach the worker thread, the relation check and catalog lookups, the read-versus-write branch, and the rows `RunSqlTool` receives. The replacements cover the profile row cap on the worker thread, the relation check on the worker thread, the plain, CTE and comment-led `fetchmany` caps, `RunSqlTool`'s read-shaped results, and the view and catalog lookups now done live in `test_rls_views.py`. A fake `SqlRunner` stands in only where the asserted behaviour sits above the runner; where that is unclear, the test uses the fake driver. Some tests assert a result the database computes, such as the rows of a row-level-security query. A replacement for such a test asserts the exact statement the runner executed (for row-level security, the rewritten SQL carrying the predicate), never rows the fake was scripted to return.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "source_file": "tests/unit/_fake_pymysql.py",
+    "source_line": 173,
+    "verify_hint": "Check `mysql_runner` and `FakeMySQL` in `tests/unit/_fake_pymysql.py` and their users (e.g. `tests/unit/test_mysql_runner.py`, `tests/unit/test_rls_views.py`).",
+    "id": "VC-104",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Unit tests in the default run, using a fake `pymysql` module, assert that `MySQLRunner`: 1. with `read_only=True`, executes `SET SESSION TRANSACTION READ ONLY` on the query's connection before the user SQL, and with `read_only=False` does not execute it; 2. with `statement_timeout_ms` above 0, executes `SET SESSION MAX_EXECUTION_TIME = %s` with that value as its parameter before the user SQL, and with 0 does not execute it; 3. runs a plain, a `WITH … SELECT` and a comment-led read on an `SSDictCursor` with `fetchmany(cap + 1)`, returning `cap` rows with the truncation attribute `True` when the fake returns `cap + 1` rows, and `False` when it returns fewer; 4. caps a read at a profile's lower `max_rows`, set as effective settings on the calling task, while running on a `sqllens-sql` worker thread; 5. with `require_base_tables=True`, calls `verify_base_tables` with the query's own connection and dialect `mysql` on a `sqllens-sql` worker thread before executing the user SQL, and with `False` does not call it.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "source_file": "tests/unit/_fake_pymysql.py",
+    "source_line": 89,
+    "verify_hint": "Check `tests/unit/test_mysql_runner.py` for each of the five listed assertions using `FakeMySQL`.",
+    "id": "VC-105",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "For the dialect cases of every test: - A `sqlite` case with the same other inputs and the same expected outcome as an existing `mysql` case of that test is removed. - An engine-neutral case (as the first criterion defines it) that ran only under `sqlite` runs under `mysql`. Its outcome under `mysql` can differ from its SQLite expectation for two excused causes, and in both the SQLite case stays as SQLite-only: - a `mysql`- or `sqlite`-keyed entry or branch of a per-dialect table or dialect check in `src/`. The MySQL case asserts the code's MySQL outcome. - sqlglot's `mysql` grammar reading the same text differently (for example, `#` starts a comment and a double-quoted name is a string, only under `mysql`). The MySQL case is the input written in MySQL syntax with the same meaning (for example, backticks for a quoted name, or an unparseable statement with no `#`), and it asserts the SQLite case's outcome. An existing `mysql` case of the test that already is that input stands in for it. Any other difference, or one whose cause is unclear, is a defect handled as the last criterion states. - The default `dialect` of `_assert_filtered_and_readonly` in `tests/unit/test_safety_rls.py` is `\"mysql\"`. - Every `None`-dialect and unknown-dialect case that exists at the merge base still exists. - Each such case that relies on a SQLite entry of the fallback union (a SQLite-only case, as the first criterion defines it) has a counterpart in the same test, under each of the dialect values that case uses. The same applies to each case of any dialect that relies on such an entry. The counterpart relies only on a MySQL entry or on MySQL-only syntax (for example `load_file`, `sleep`, a table in the `mysql`, `sys` or `performance_schema` schema, or a statement only the `mysql` dialect reads, such as `# note\\nSHOW TABLES`). It asserts the same outcome as the SQLite case. If the code gives the MySQL entry a different outcome, the difference is handled as the last criterion states. The exception is a case whose outcome no MySQL entry or syntax can produce; for example, a CTE-shadowing case needs a name prefix, and MySQL's catalog entry has none. Its map row states that no MySQL counterpart exists and why. For `test_with_widgets_hides_introspection_result_under_configured_dialect`, the counterpart row's catalog statement is one only the `mysql` dialect classifies as introspection (for example `# note\\nSHOW TABLES`), so the test fails when the configured dialect does not reach the formatter.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 75,
+    "verify_hint": "Compare the parametrize rows of `test_run_sql_classifies_with_database_dialect` in `tests/unit/test_factory_wiring.py` with criterion 6's grammar-difference excuse",
+    "id": "VC-106",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Every moved or added test that expects a refusal (`UnsafeSqlError`, `RlsError`, `PreflightError`, `RuleSetFileError`) asserts the refusal's reason, with `match=` or an assertion on the error's message or detail. A statement refused for an unrelated reason then fails the test.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "source_file": "tests/unit/test_cli.py",
+    "source_line": 214,
+    "verify_hint": "Check the stderr assertions in `test_serve_preflight_blocks_on_bad_database`, `test_validate_check_db_reports_failure` and `test_validate_check_llm_runs_before_exit_one` in `tests/unit/test_cli.py`.",
+    "id": "VC-107",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The MySQL connector suite in `tests/connectors/` has a test that, against a live MySQL server through `ResultMaskingRunner`, does two things. It reads a secret column under a non-secret alias (`SELECT password_hash AS h`) and gets the stored value back unmasked under key `h`. It reads an unaliased expression over that column (`SELECT upper(password_hash)`) and gets the value masked. The implementing run shows this by running the test against a local `mysql:8.0` server published with a port mapping; a run that cannot start one ends Blocked on this criterion.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "source_file": "tests/connectors/test_connectors.py",
+    "source_line": 119,
+    "verify_hint": "Check `test_alias_and_expression_masking_follow_driver_labels` in `tests/connectors/test_connectors.py`.",
+    "id": "VC-108",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The MySQL connector suite in `tests/connectors/` has row-level-security cases that, against a live MySQL server through `RlsGuardRunner` over the read-only guard and row cap, assert the rows the server returns. The shapes cover at minimum: the protected table's rows filtered to the rule's value, an unprotected table read in full, a CTE that shadows the protected table's name, a `WHERE id IN (SELECT id FROM <protected>)` subquery, and a scalar subquery `(SELECT max(id) FROM <protected>)`. The letter-case shape (an upper-case table name) has no live case: on the CI server, `lower_case_table_names` is 0, so an upper-case name is a different table. The implementing run shows this by running the test against a local `mysql:8.0` server published with a port mapping; a run that cannot start one ends Blocked on this criterion.",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "source_file": "tests/connectors/test_connectors.py",
+    "source_line": 144,
+    "verify_hint": "Check `test_rls_query_shapes_return_scoped_rows` in `tests/connectors/test_connectors.py`.",
+    "id": "VC-109",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The PR body carries a port/delete map, continued in a PR comment that the body links to when the map does not fit in the body. The map has one row for each test, parametrized case group, helper or fixture under `tests/` that uses SQLite (as the first criterion defines it) at the merge base. A test or case is named by its node ID, and a helper or fixture by `path::name`. Each row gives the node ID or IDs of its MySQL replacement (the same test when only its URL or dialect changed), or `SQLite-only, deleted in #383`. A row for a test whose classification was unclear gives both. A SQLite-only row with no possible MySQL counterpart says so and why. Tests in one file with the same outcome may share a row that names them.",
+    "claim_signature": "issue-acceptance-10",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The PR body carries a port/delete map, continued in a PR comment that the body links to when the map does not fit in the body. The map has one row for each test, parametrized case group, helper or fixture under `tests/` that uses SQLite (as the first criterion defines it) at the merge base. A test or case is named by its node ID, and a helper or fixture by `path::name`. Each row gives the node ID or IDs of its MySQL replacement (the same test when only its URL or dialect changed), or `SQLite-only, deleted in #383`. A row for a test whose classification was unclear gives both. A SQLite-only row with no possible MySQL counterpart says so and why. Tests in one file with the same outcome may share a row that names them.",
+    "id": "VC-110",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Line coverage does not drop against the merge base. Instrument: coverage.py, installed with `pip install coverage` for the measurement only, `python -m coverage run -m pytest -q`, then `python -m coverage json`, comparing each file's `executed_lines` under all of `src/sqllens/`. Every line that the merge base's default run executes is also executed by this branch's default run with the map's `SQLite-only` tests deselected. Lines are matched through the PR's diff of `src/`: a line the diff deletes needs no match, and every line the diff adds that coverage.py reports as a statement (in `executed_lines` or `missing_lines`) is executed. The one exception is a line that no non-SQLite input can execute. It is defined by where the code is, not by which tests ran: a line in `sqllens.agent.integrations.sqlite` or `sqllens.preflight._probe_sqlite`, or a line inside a branch whose condition holds only for the `sqlite` dialect, a URL whose scheme starts with `sqlite`, or a SQLite database file, or a line in a function whose every caller is such a line (for example `sqllens.safety.relations._sqlite_kind`). When it is unclear whether a line is such a line, a MySQL test executes it. The PR body states the merge-base SHA compared against, and lists each excepted line as `path:line` or a line range with the SQLite-only condition that guards it.",
+    "claim_signature": "issue-acceptance-11",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "source_file": "tests/unit/test_cli_claude_desktop.py",
+    "source_line": 184,
+    "verify_hint": "Check the name-derivation function in `src/sqllens/installers/claude_desktop.py` against the `test_derives_from_dsn` parametrization in `tests/unit/test_cli_claude_desktop.py`.",
+    "id": "VC-111",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Each SQLite-only test (as the first criterion defines it) still runs and passes in the default run. The change leaves every file under `src/` unchanged except for the fix to a security defect that a new or moved test exposes. The list of security defects is closed. A security defect is a defect in the code of one of these guards that lets it be bypassed or weakened under the `mysql` dialect or a MySQL URL: the read-only guard (`ReadOnlyGuardRunner`, `assert_select_only`), the function denylist, row-level security (`RlsGuardRunner`, `apply_rls`) and its relation check (`verify_base_tables`), result masking (`ResultMaskingRunner`), the row cap (`RowCapRunner` and the runner's `fetchmany` cap), the whole-row guard (`WholeRowSelectGuardRunner`), the per-role rule-set guard (`RuleSetGuardRunner`, `apply_rule_set`: its table and column limits, catalog-read rewrite and row rules) and refusal redaction (`RefusalRedactingRunner`). A defect for which it is unclear whether it lies in one of these guards' code, or whether it bypasses or weakens one, counts as a security defect. Any other defect takes the ordinary route. That includes defects clearly in the MySQL session's read-only setting (`SET SESSION TRANSACTION READ ONLY`) or statement timeout (`MAX_EXECUTION_TIME`), or in the `None`/unknown-dialect fallback. A security defect is fixed in this PR, never deferred, its exposing test passes unmarked, and no public issue is filed for it. This is the maintainer's chosen route for this issue, an exception to `SECURITY.md`'s private-report route. Any other defect a new or moved test exposes in shipped code is named in the PR body by its own issue number. Its exposing test is marked `pytest.mark.xfail(strict=True, raises=<the exception the defect produces>)` with a reason naming that issue.",
+    "claim_signature": "issue-acceptance-12",
+    "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-398/local-20261115T051527Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Each SQLite-only test (as the first criterion defines it) still runs and passes in the default run. The change leaves every file under `src/` unchanged except for the fix to a security defect that a new or moved test exposes. The list of security defects is closed. A security defect is a defect in the code of one of these guards that lets it be bypassed or weakened under the `mysql` dialect or a MySQL URL: the read-only guard (`ReadOnlyGuardRunner`, `assert_select_only`), the function denylist, row-level security (`RlsGuardRunner`, `apply_rls`) and its relation check (`verify_base_tables`), result masking (`ResultMaskingRunner`), the row cap (`RowCapRunner` and the runner's `fetchmany` cap), the whole-row guard (`WholeRowSelectGuardRunner`), the per-role rule-set guard (`RuleSetGuardRunner`, `apply_rule_set`: its table and column limits, catalog-read rewrite and row rules) and refusal redaction (`RefusalRedactingRunner`). A defect for which it is unclear whether it lies in one of these guards' code, or whether it bypasses or weakens one, counts as a security defect. Any other defect takes the ordinary route. That includes defects clearly in the MySQL session's read-only setting (`SET SESSION TRANSACTION READ ONLY`) or statement timeout (`MAX_EXECUTION_TIME`), or in the `None`/unknown-dialect fallback. A security defect is fixed in this PR, never deferred, its exposing test passes unmarked, and no public issue is filed for it. This is the maintainer's chosen route for this issue, an exception to `SECURITY.md`'s private-report route. Any other defect a new or moved test exposes in shipped code is named in the PR body by its own issue number. Its exposing test is marked `pytest.mark.xfail(strict=True, raises=<the exception the defect produces>)` with a reason naming that issue.",
+    "id": "VC-112",
+    "reused_from_iter_prev": false
+  }
+]

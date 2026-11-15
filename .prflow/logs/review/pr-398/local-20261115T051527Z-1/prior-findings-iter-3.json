@@ -1,0 +1,102 @@
+[
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "FakeMySQL.kinds is keyed by relation name only and ignores the schema parameter, so the fake cannot represent schema-qualified catalog state.",
+  "defect_signature": {
+   "file": "tests/unit/_fake_pymysql.py",
+   "line_range": [
+    75,
+    76
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "deferred",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "suggestion",
+  "description": "No test covers the lower_case_table_names 1/2 (mysql_fold, LOWER(...)) branch of the relation check; fails closed.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/relations.py",
+   "line_range": [
+    168,
+    170
+   ],
+   "kind": "test_gap"
+  },
+  "fix_decision": "deferred",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "important",
+  "description": "test_tool_dialect_alone_decides_the_output is parametrized only [None, \"sqlite\"]; its SQLite outcome differs under mysql only because sqlglot's MySQL grammar reads # as a comment, and criterion 6 then requires a mysql case in the same test with the same meaning in MySQL syntax asserting the SQLite outcome, which the test lacks.",
+  "defect_signature": {
+   "file": "tests/unit/test_safety_limits.py",
+   "line_range": [
+    647,
+    665
+   ],
+   "kind": "test_gap"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "important",
+  "description": "test_hash_is_not_a_comment_outside_mysql has only a sqlite case (is_introspection_query(\"#x\\nSHOW 'abc\", dialect=\"sqlite\") is False); criterion 6 requires a mysql case in the same test with the same meaning in MySQL syntax asserting False, and the mysql row of test_untokenizable_show_is_data is a different test.",
+  "defect_signature": {
+   "file": "tests/unit/test_safety.py",
+   "line_range": [
+    1098,
+    1100
+   ],
+   "kind": "test_gap"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "_CatalogCursor.execute picks the catalog query it answers from the parameter shape, so a two-name routine lookup whose second name is a kinds key, or a relation missing from kinds while named in routines, gets the wrong answer; FakeMySQL.rows is normalized to a list only at construction, so a later non-sequence assignment makes the fake raise TypeError.",
+  "defect_signature": {
+   "file": "tests/unit/_fake_pymysql.py",
+   "line_range": [
+    73,
+    80
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "deferred"
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "The comment says a test whose fake connect was missed fails the same way on every machine, but a real connect to db.invalid depends on the resolver; test_validate_check_db_reports_failure (lines 320-328) never asserts mysql_connect was called, so it could pass after a real connect. The same claim was fixed in tests/integration/conftest.py but not here.",
+  "defect_signature": {
+   "file": "tests/unit/test_cli.py",
+   "line_range": [
+    23,
+    24
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "In test_rls_query_shapes_return_scoped_rows the finally block runs two DROP TABLE IF EXISTS calls in a row; if the first raises, the second table stays on the shared server and the cleanup error hides the original failure (same shape at line 141).",
+  "defect_signature": {
+   "file": "tests/connectors/test_connectors.py",
+   "line_range": [
+    178,
+    179
+   ],
+   "kind": "leak"
+  },
+  "fix_decision": "deferred"
+ }
+]

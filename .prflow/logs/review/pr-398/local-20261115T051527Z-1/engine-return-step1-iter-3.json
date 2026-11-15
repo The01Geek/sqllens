@@ -1,0 +1,1708 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "severity": "suggestion",
+   "defect_signature": {
+    "file": "tests/unit/_fake_pymysql.py",
+    "line_range": [
+     70,
+     79
+    ],
+    "kind": "type_design"
+   },
+   "description": "_CatalogCursor.execute answers every parameterless statement with (lower_case_table_names,), so the runner's SELECT @@SESSION.sql_mode probe (run when remove_sql_modes is set) would read 0 and send SET SESSION sql_mode = '0' with no error; no current test reaches it, but a future rule-set test on FakeMySQL would pass with a wrong session setup.",
+   "agents": [
+    "prflow:type-design-analyzer",
+    "prflow:silent-failure-hunter"
+   ],
+   "corroboration": 2,
+   "carve_out": null
+  },
+  {
+   "finding_id": "F-2",
+   "severity": "suggestion",
+   "defect_signature": {
+    "file": "tests/unit/test_safety_limits.py",
+    "line_range": [
+     662,
+     673
+    ],
+    "kind": "documented_falsehood"
+   },
+   "description": "Changed comments in test_tool_dialect_alone_decides_the_output say the statement 'does not parse, so it is not read-shaped', but is_read_shaped only checks the first token via first_sql_keyword and never parses; the new mysql row uses different SQL text, so the dialect alone does not decide it as the test name says.",
+   "agents": [
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review"
+   ],
+   "corroboration": 2,
+   "carve_out": null,
+   "inertness_cap": "suggestion"
+  },
+  {
+   "finding_id": "F-3",
+   "severity": "suggestion",
+   "defect_signature": {
+    "file": "tests/unit/test_safety.py",
+    "line_range": [
+     1102,
+     1107
+    ],
+    "kind": "comment_drift"
+   },
+   "description": "test_hash_is_not_a_comment_outside_mysql gained a mysql row ('x\\nSHOW ...') that has no '#', but the unchanged body comment still explains the outcome by '#' opening a comment only in MySQL; that reason fits only the sqlite row, and the test name has the same drift.",
+   "agents": [
+    "prflow:comment-analyzer"
+   ],
+   "corroboration": 1,
+   "carve_out": null,
+   "inertness_cap": "suggestion"
+  },
+  {
+   "finding_id": "F-4",
+   "severity": "suggestion",
+   "defect_signature": {
+    "file": "tests/unit/_fake_pymysql.py",
+    "line_range": [
+     11,
+     16
+    ],
+    "kind": "comment_drift"
+   },
+   "description": "The fake's module docstring says a parameterless statement gets the @@lower_case_table_names answer without noting the sql_mode probe gets the same; line 145 says kinds is keyed by the relation name 'as written in the SQL' while the lookup uses the parsed identifier without backticks.",
+   "agents": [
+    "prflow:comment-analyzer"
+   ],
+   "corroboration": 1,
+   "carve_out": null,
+   "inertness_cap": "suggestion"
+  },
+  {
+   "finding_id": "F-5",
+   "severity": "suggestion",
+   "defect_signature": {
+    "file": "tests/unit/test_safety_masking.py",
+    "line_range": [
+     700,
+     700
+    ],
+    "kind": "test_gap"
+   },
+   "description": "In test_mysql_alias_hides_secret_but_unaliased_expression_is_masked, the assertion expression.columns.tolist() == ['upper(password_hash)'] checks a label the test scripted into server.rows, so it cannot fail because of the runner or masking guard; the masking assertions and the live connector test carry the real checks.",
+   "agents": [
+    "prflow:requesting-code-review"
+   ],
+   "corroboration": 1,
+   "carve_out": null
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [
+  {
+   "agent": "prflow:code-reviewer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 3 (>= 2)"
+  },
+  {
+   "agent": "prflow:pr-test-analyzer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 3 (>= 2)"
+  }
+ ],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "file_count": 38,
+  "changed_lines": 1740
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (no finding or checklist FAIL at or above the important threshold; five Suggestions, one Suggestion-level checklist FAIL and nineteen inconclusive items remain)\nThe PR is ready to merge: it changes only tests and internal docs, every acceptance criterion has a checklist item, and nothing open is above Suggestion.\nRule applied: rule 6 — only findings or checklist FAILs below the threshold, plus INCONCLUSIVE items, remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (6)\n\n<details><summary>6 items</summary>\n\n1. `tests/unit/_fake_pymysql.py` lines 70-79: the fake catalog cursor answers every statement that has no parameters with `(lower_case_table_names,)`. The runner's `SELECT @@SESSION.sql_mode` probe also has no parameters, so it would get `0` back. The runner would then send `SET SESSION sql_mode = '0'` and no error would be raised. No current test reaches this, because no test builds a runner with `remove_sql_modes` over `FakeMySQL`. A future rule-set test built on this fake would still pass with a wrong session setup instead of failing. (raised by 2/4 agents)\n2. `tests/unit/test_safety_limits.py` lines 662-673: the changed comments in `test_tool_dialect_alone_decides_the_output` say the statement \"does not parse, so it is not read-shaped\". `is_read_shaped` only looks at the first token through `first_sql_keyword` and never parses the statement. The new `mysql` row also uses different SQL text, so for that row the dialect alone does not decide the result, as the test name says. (raised by 2/4 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: test comment only; making it true changes no test outcome or branch; git grep for the comment literals found only the comment lines themselves, no .sh/.py/.yml/instruction-file reader; test file comment is not published -->\n3. `tests/unit/test_safety.py` lines 1102-1107: the diff adds the row `(\"x\\nSHOW 'abc\", \"mysql\")` to `test_hash_is_not_a_comment_outside_mysql`. The unchanged body comment says `\"#\"` opens a line comment in MySQL but not in SQLite, so the statement is not a SHOW. That reason only fits the `sqlite` row. The `mysql` row has no `#`, and it is not a SHOW because its first token is `x`. The test name has the same drift. (raised by 1/4 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: test comment and test name only; no output or branch changes; git grep for the comment literal found only tests/unit/test_safety.py:1107; not published -->\n4. `tests/unit/_fake_pymysql.py` lines 11-16 and 144-146: the module docstring says a statement with no parameters gets the answer to the `@@lower_case_table_names` probe. It does not mention that the `sql_mode` probe gets the same answer. Line 145 says `kinds` is keyed by the relation name \"as written in the SQL\". The lookup actually uses the parsed identifier, without backticks. (raised by 1/4 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: docstring of a test double; making it true changes no behavior; git grep for the literals found only tests/unit/_fake_pymysql.py:145; not published -->\n5. `tests/unit/test_safety_masking.py` line 700: in `test_mysql_alias_hides_secret_but_unaliased_expression_is_masked`, `assert expression.columns.tolist() == [\"upper(password_hash)\"]` checks a label the test itself scripted into `server.rows` at line 696. Nothing the runner or the masking guard does can make it fail. The masking checks at lines 695 and 701 are meaningful, and the live connector test `test_alias_and_expression_masking_follow_driver_labels` checks the real labels. (raised by 1/4 agents)\n- VC-128: FAIL (suggestion) — The comment asserts that under every parametrized dialect (`None`, `sqlite`, `mysql`) the statement does not parse and that this is why it is not read-shaped; it covers the mysql case `c\\nSELECT n FROM widgets` as well as the two `# c` cases. [tests/unit/test_safety_limits.py:670]\n\n  <details><summary>Evidence</summary>\n\n  tests/unit/test_safety_limits.py:670-673 says that under None/sqlite/mysql 'the statement does not parse, so it is not read-shaped'. src/sqllens/safety/readonly.py:167-175 shows is_read_shaped() does not parse. It returns first_sql_keyword(sql, dialect) in _READ_SHAPED_KEYWORDS (readonly.py:41-43), and first_sql_keyword (readonly.py:124-164) only tokenizes (resolved.tokenize) and inspects the first token. run_sql.py:75-77 also only calls first_sql_keyword and is_read_shaped. Trace: (1) '# c\\nSELECT n FROM widgets' under None/sqlite: sqlglot's base Tokenizer has COMMENTS = ['--', ('/*','*/')] (sqlglot/tokens.py:563) and maps '#' to TokenType.HASH (tokens.py:156), so the first token is the symbol '#'. It is not VAR and not a word, so first_sql_keyword returns '' (readonly.py:160-163), which is not read-shaped. (2) 'c\\nSELECT n FROM widgets' under mysql: the first token is VAR 'c', so the function returns 'C' (readonly.py:156-157), and 'C' is not in _READ_SHAPED_KEYWORDS. In both cases the reason is the first token, not a parse failure. The rule the comment states is false. A statement that does not parse but starts with a read keyword (e.g. 'SELECT FROM WHERE') is still read-shaped, because the parser is never consulted. The comment misstates the mechanism for all three parametrized cases, including the mysql one. The test's assertions still hold. Contrast the accurate wording at test_safety_limits.py:639 ('does not tokenize, so it is not read-shaped'). No rejection line covers this (the only one concerns the mysql.func pragma row in test_safety.py).\n\n  </details>\n\n</details>\n\n### ℹ️ Informational — Deferred (19)\n\n<details><summary>19 items</summary>\n\n- VC-9: INCONCLUSIVE (suggestion) — Real pymysql exposes `pymysql.err.OperationalError`, constructible as `(2003, \"Can't connect to MySQL server\")`, and it is a subclass of whatever exception class the preflight probe catches, so raising it from `connect` takes the probe's failure path rather than escaping as an unhandled crash. [tests/unit/test_cli.py:40]\n\n  <details><summary>Evidence</summary>\n\n  Probe side verified: src/sqllens/preflight.py:143-150 wraps pymysql.connect(...) in `except pymysql.MySQLError as exc` and raises PreflightError (the probe's failure path). The test helper tests/unit/test_cli.py:40-41 builds pymysql.err.OperationalError(2003, \"Can't connect to MySQL server\") and the autouse fixture (line 36) patches pymysql.connect. What could not be verified: that pymysql.err.OperationalError exists, accepts those args, and derives from pymysql.MySQLError. The item has no dependency_sources, and pymysql's source (pymysql/err.py) is not in the head or base views (inventory.json lists only tests/unit/_fake_pymysql.py, a test fake, which is not the real library). A Glob for **/pymysql/err.py under the review directory found nothing. Per the rules, a library claim with no source in the views or dependency_sources is INCONCLUSIVE. Missing evidence: pymysql/err.py from the installed PyMySQL (the OperationalError -> DatabaseError -> Error -> MySQLError chain).\n\n  </details>\n\n- VC-72: INCONCLUSIVE (suggestion) — Under dialect `mysql`, `compare(\"this is not sql ?? !!\", \"SELECT 1\")` gets a sqlglot parse or tokenize error on the expected SQL and returns `Status.ERROR`. [tests/unit/test_eval_compare.py:46]\n\n  <details><summary>Evidence</summary>\n\n  Repo side confirmed: src/sqllens/eval/compare.py:58-84. compare() calls compare_sql(), which wraps normalize_sql(expected) in try/except sqlglot.errors.SqlglotError and raises SqlComparisonError. compare() maps that to Status.ERROR (lines 81-84). ParseError and TokenError both subclass SqlglotError. The test at tests/unit/test_eval_compare.py:43-51 passes \"this is not sql ?? !!\" under mysql. So the claim holds only if sqlglot 30.31.0 (pinned at requirements.txt:104) raises on that string under the mysql dialect. The item has no dependency_sources, and inventory.json lists no sqlglot/dialects/mysql file in the views. I did not read the library source and did not run the test or sqlglot. Without the mysql tokenizer and parser, I cannot tell whether the string is rejected or parsed, for example as an IS NOT chain with placeholders. The claim is unsettled. Missing evidence: sqlglot 30.31.0 source (tokens.py, parser.py, dialects/mysql.py), or the output of running pytest tests/unit/test_eval_compare.py::test_error_when_expected_unparseable.\n\n  </details>\n\n- VC-73: INCONCLUSIVE (suggestion) — The comment asserts that `#` opens a comment under mysql, so the mysql case's malformed input is written without one (and the sqlite case's `##` text would read differently under mysql). [tests/unit/test_eval_compare.py:45]\n\n  <details><summary>Evidence</summary>\n\n  The comment at tests/unit/test_eval_compare.py:45 ('``#`` opens a comment under mysql, so its malformed input carries none.') and the parametrized inputs at line 46 (sqlite 'this is not sql ## ?? !!', mysql 'this is not sql ?? !!') are as the claim describes. Whether `#` is a comment token in MySQL depends on sqlglot's MySQL tokenizer (requirements.txt:104 pins sqlglot==30.31.0). The item has no `dependency_sources`, and a Glob of the head view for **/dialects/mysql.py (and a Grep of the view for the \"#\" token) found no sqlglot source. The library source is therefore not in the views or in any supplied dependency directory, and I did not read an installed copy outside them. The claim is unsettled by the views. Missing evidence: sqlglot 30.31.0 dialects/mysql.py Tokenizer COMMENTS, and a run of sqlglot.parse_one('this is not sql ## ?? !!', read='mysql'). The rejection line in `rejections` concerns test_safety.py and does not cover this item.\n\n  </details>\n\n- VC-74: INCONCLUSIVE (suggestion) — Under dialect `mysql`, the actual SQL `@@@ definitely not sql @@@` fails to parse or tokenize (rather than parsing `@@` as a MySQL system-variable reference), so `compare` returns `Status.ERROR`. [tests/unit/test_eval_compare.py:57]\n\n  <details><summary>Evidence</summary>\n\n  Repository side confirmed: src/sqllens/eval/compare.py:58-84 resolves dialect 'mysql' unchanged, normalize_sql calls sqlglot.parse(sql, read='mysql') (l.48-50), compare_sql wraps any sqlglot.errors.SqlglotError (ParseError/TokenError) from the actual side in SqlComparisonError (l.68-71), and compare maps SqlComparisonError to Status.ERROR (l.81-84). The test at tests/unit/test_eval_compare.py:54-58 asserts exactly that for actual='@@@ definitely not sql @@@'. What remains is whether sqlglot's mysql tokenizer/parser raises on '@@@ definitely not sql @@@' rather than reading '@@' as a system variable. That depends on installed sqlglot behavior. The item has no dependency_sources, and the views contain no sqlglot source (Glob of **/sqlglot/** in view-head returned nothing). I did not read the working-tree .venv copy as the rules forbid it, and I did not run sqlglot on the input. Even if '@@' parsed as a session variable, the trailing 'definitely not sql @@@' tokens would likely still raise, but that is inference, not a read of the library. Missing evidence: sqlglot tokens.py/parser.py (mysql dialect) or the output of sqlglot.parse('@@@ definitely not sql @@@', read='mysql').\n\n  </details>\n\n- VC-75: INCONCLUSIVE (suggestion) — Under dialect `mysql`, a double-quoted text left unterminated in the actual SQL (`name = \"unterminated`) raises a sqlglot `TokenError`, and `compare` classifies it as `Status.ERROR`. [tests/unit/test_eval_compare.py:109]\n\n  <details><summary>Evidence</summary>\n\n  Repository side verified from the head view. src/sqllens/eval/compare.py:58-84: compare() calls compare_sql(), which wraps normalize_sql(actual) in `except sqlglot.errors.SqlglotError` and re-raises SqlComparisonError. compare() maps that to Status.ERROR. Any sqlglot error raised while tokenizing the actual side would therefore become ERROR, provided TokenError subclasses SqlglotError. The test at tests/unit/test_eval_compare.py:106-110 asserts exactly this with dialect=\"mysql\". What I could not settle is whether sqlglot's MySQL tokenizer treats `\"` as a string delimiter and raises TokenError on an unterminated one. That depends on installed sqlglot source. The item has no `dependency_sources`, and the head view's inventory.json lists no sqlglot files (no match for sqlglot/dialects/mysql). A sqlglot copy exists only in the working-tree .venv, which I may not use. Missing evidence: sqlglot/dialects/mysql.py (Tokenizer QUOTES and STRING_ESCAPES) and sqlglot/errors.py (TokenError base class), or running compare('SELECT name FROM users', 'SELECT name FROM users WHERE name = \"unterminated', dialect='mysql'), which I did not do.\n\n  </details>\n\n- VC-76: INCONCLUSIVE (suggestion) — Under dialect `mysql`, a double-quoted text left unterminated in the expected SQL raises a sqlglot `TokenError`, and `compare` classifies it as `Status.ERROR`, not `CHANGED`. [tests/unit/test_eval_compare.py:118]\n\n  <details><summary>Evidence</summary>\n\n  Repository side confirmed in the head view: src/sqllens/eval/compare.py:64-72 wraps normalize_sql in `except sqlglot.errors.SqlglotError` for both sides and re-raises SqlComparisonError; compare (lines 81-84) maps that to Status.ERROR. So any SqlglotError subclass raised while parsing the expected SQL (TokenError included, if it subclasses SqlglotError) gives ERROR, not CHANGED. The test at tests/unit/test_eval_compare.py:113-120 asserts exactly this. What I could not settle is the library half of the claim: that sqlglot's MySQL tokenizer treats a double-quoted run as a string and raises TokenError (a SqlglotError subclass) when it is unterminated. The item has no dependency_sources, and the view's inventory.json lists no sqlglot files (no sqlglot/tokens, errors or dialects/mysql entries). The only sqlglot copy is the working-tree .venv, which I may not use as a fallback. Missing evidence: sqlglot source (tokens.py, errors.py, dialects/mysql.py) or a run of compare() on the test inputs.\n\n  </details>\n\n- VC-77: INCONCLUSIVE (suggestion) — Under dialect `mysql`, `compare` gives the parametrized multi-statement outcomes: a differing second statement is CHANGED, whitespace/casing/trailing-semicolon differences are PASS, an extra statement is CHANGED, a `SELECT (` on either side is ERROR, and an empty expected string is ERROR. [tests/unit/test_eval_compare.py:129]\n\n  <details><summary>Evidence</summary>\n\n  Read tests/unit/test_eval_compare.py:129-141 (six parametrized cases, dialect=\"mysql\") and src/sqllens/eval/compare.py:39-84. The repo logic is as claimed. normalize_sql parses every statement with sqlglot.parse(read=mysql), drops None entries, raises ParseError if none remain, and joins the rendered statements with '; '. compare_sql returns PASS or CHANGED on equality of the normalized strings. It wraps SqlglotError as SqlComparisonError, and compare maps that to ERROR. So, assuming sqlglot behaves as expected, the six cases give: a differing second statement is CHANGED, whitespace/casing/trailing-';' differences are PASS, an extra statement is CHANGED, a 'SELECT (' side is ERROR, and an empty string is ERROR. However, three of these outcomes depend on sqlglot's runtime behavior. 'SELECT (' must raise a SqlglotError. A trailing ';' must not yield an extra statement. sqlglot.parse('') must yield no non-None statement. No dependency_sources were supplied, the view inventory has no sqlglot source, and no committed vendor copy exists, so I could not read sqlglot's parser or tokenizer. I also did not run the test. Missing evidence: the sqlglot parser source, or a run of tests/unit/test_eval_compare.py::test_comparison_covers_every_statement. The rejection line about test_safety.py does not cover this claim.\n\n  </details>\n\n- VC-80: INCONCLUSIVE (suggestion) — The comment asserts the `? c` row is the same symbol-led statement written in MySQL syntax, where `#` would open a comment. [tests/unit/test_factory_wiring.py:75]\n\n  <details><summary>Evidence</summary>\n\n  The claim depends on how sqlglot's MySQL and SQLite tokenizers treat '#' and '?', which is third-party library behavior. The item has no dependency_sources. sqlglot is not in the head view: a Glob of view-head for **/sqlglot/**/*.py found nothing. I did not read the installed sqlglot in the working-tree .venv, because the rules bar falling back to the working tree. What I could read: tests/unit/test_factory_wiring.py:70-116 parametrizes three rows. The first two are mysql '# c\\nSELECT n FROM t' -> 'SELECT' and sqlite '# c\\nSELECT n FROM t' -> ''. The third is the row the claim covers, mysql '? c\\nSELECT n FROM t' -> '' (line 76), under the comment at line 75. src/sqllens/safety/readonly.py:124-164 first_sql_keyword tokenizes with the dialect's sqlglot tokenizer and returns '' when the first non-'(' token is not a VAR or keyword. So the row-3 comment is accurate only if sqlglot's MySQL tokenizer yields a non-comment, non-word first token for '?', and its SQLite tokenizer does the same for '#'. That is the missing evidence. The test's own expected values (both '') are consistent with this, but they are not proof of it. Command not run: a sqlglot tokenize of '? c' under mysql and '# c' under sqlite, or a read of the installed sqlglot/dialects/mysql.py, sqlite.py and tokens.py.\n\n  </details>\n\n- VC-92: INCONCLUSIVE (suggestion) — Under a `mysql+pymysql` URL, `query_database_impl_with_widgets` passes dialect `mysql` to the formatter, which classifies `# note\\nSHOW TABLES` as introspection (withheld) and shows `SELECT id FROM widgets`; with no dialect, the `#`-led statement would be classified as a data query. [tests/unit/test_query_database.py:1147]\n\n  <details><summary>Evidence</summary>\n\n  Verified from the head view: query_database.py:831-832 passes dialect=sqlglot_dialect_for_url(cfg.database.url) to components_to_blocks, and readonly.py:178-189 maps a 'mysql+pymysql' scheme to 'mysql' (it is a _CATALOGS_BY_DIALECT key, readonly.py:200). _format.py:383 calls is_introspection_query(sql, dialect=dialect), and readonly.py:292 returns True when first_sql_keyword(sql, dialect) == 'SHOW'. first_sql_keyword (readonly.py:124-164) tokenizes with sqlglot's dialect tokenizer and returns the first non-L_PAREN token's text. So the claim holds only if sqlglot's MySQL tokenizer treats '#' as a line comment (so SHOW is the first token) and the default tokenizer does not (so '#' becomes a non-word token, first_sql_keyword returns '', the parse fails or finds no catalog table, and the statement counts as data). The repository's own tests assert this (tests/unit/test_safety.py:1034-1035 and 1106), but a test is not a source of truth. The tokenizer behavior is third-party library behavior. The item has no dependency_sources and the head view holds no sqlglot source (a Glob for **/sqlglot/tokens.py in the head view found nothing). I could not read sqlglot's Tokenizer COMMENTS definitions for the MySQL and base dialects, and I did not run the code. The data query 'SELECT id FROM widgets' is shown because it has no SHOW keyword and no catalog table; that part follows from the repository code alone. Missing evidence: sqlglot's source (dialects/mysql.py Tokenizer.COMMENTS and tokens.py base COMMENTS) or a run of first_sql_keyword('# note\\nSHOW TABLES', 'mysql') versus None.\n\n  </details>\n\n- VC-100: INCONCLUSIVE (suggestion) — With no dialect, `select user from mysql.user` is classified as introspection (`is_introspection_query` returns True), the `user` column name not preventing the parse. [tests/unit/test_safety.py:862]\n\n  <details><summary>Evidence</summary>\n\n  Repository side verified in the head view. src/sqllens/safety/readonly.py:254-317 is_introspection_query with dialect=None skips the dialect check, calls first_sql_keyword (not SHOW for a SELECT), then sqlglot.parse_one(sql, dialect=None). It iterates parsed.find_all(exp.Table) and calls is_catalog_table. is_catalog_table (320-333) calls _catalog_names(None), which returns _ALL_CATALOG_SCHEMAS (212-217). That set is information_schema united with every dialect's schemas (198-209), and _CATALOGS_BY_DIALECT['mysql'] contains 'mysql' (line 201). So if the parse yields an exp.Table with db='mysql', the function returns True. The test row is tests/unit/test_safety.py:862, added by this PR (diff.patch ~2328; absent from the base view). The unverified step is the claim's dependency part: whether sqlglot's default (no-dialect) parser accepts `select user from mysql.user` with `user` as a column and `mysql.user` as a Table(db=mysql). The review supplied no dependency_sources, and sqlglot is not in the head or base view. I did not read sqlglot's tokenizer or parser. The only copy on disk is the working-tree .venv, which the rules do not allow as a source. I did not run the test. A parse error would return False (lines 296-303), so this step decides the verdict. Missing evidence: sqlglot source (pyproject pins >=30.22,<31), or a run of `pytest tests/unit/test_safety.py -k TestIsIntrospectionQuery`.\n\n  </details>\n\n- VC-101: INCONCLUSIVE (suggestion) — With no dialect, `WITH user AS (SELECT 1) SELECT * FROM user JOIN mysql.user ON true` is introspection: the schema-qualified `mysql.user` reference is not treated as a reference to the CTE named `user`. [tests/unit/test_safety.py:924]\n\n  <details><summary>Evidence</summary>\n\n  Repo logic traced in head view src/sqllens/safety/readonly.py. _cte_reference_ids (220-251) counts a table as a CTE reference only when it has no db and no catalog arg and its name is in scope.cte_sources (238-240). So mysql.user (db='mysql') is never excluded as a CTE reference. is_introspection_query (311-317) then calls is_catalog_table(table, dialect=None). With dialect None, _catalog_names (212-217) returns _ALL_CATALOG_SCHEMAS, which includes 'mysql' (line 201), so is_catalog_table is True (329-330) and the query is introspection. The plain `user` reference is a CTE reference and is skipped. If sqlglot parses the SQL, the claim holds. It holds only if sqlglot's default dialect parses `FROM user` as an ordinary table named user (not a keyword or function) and parses `JOIN ... ON true`. A parse error would make is_introspection_query return False (296-303). Also, traverse_scope and normalize_identifiers must put `user` in scope.cte_sources. That is sqlglot runtime behaviour, and I could not read it. The item has no dependency_sources, the head view has no vendored sqlglot (Glob for sqlglot/tokens.py found nothing), and I ran no sqlglot command. pyproject.toml:46 pins sqlglot>=30.22,<31. The test case at tests/unit/test_safety.py:924 is new in the diff, and I saw no CI result for it. Missing evidence: sqlglot parse and scope output for this SQL under dialect None.\n\n  </details>\n\n- VC-109: INCONCLUSIVE (suggestion) — The comment asserts that `x\\nSHOW 'abc` under `mysql` is the same statement as `#x\\nSHOW 'abc` under `sqlite`, i.e. sqlglot's SQLite tokenizer reads `#x` as one leading non-comment token that a bare identifier `x` reproduces in MySQL syntax, and both are classified as not introspection. [tests/unit/test_safety.py:1102]\n\n  <details><summary>Evidence</summary>\n\n  The claim depends on how sqlglot's SQLite tokenizer tokenizes `#x` (and MySQL's `#` comment). The item has no `dependency_sources`, and a Glob of the head view for sqlglot/**/tokens.py found nothing, so no sqlglot source was available from the views. I did not use the working-tree .venv, as the rules forbid it. What the head view shows: tests/unit/test_safety.py:1098-1108 parametrizes (`#x\\nSHOW 'abc`, sqlite) and (`x\\nSHOW 'abc`, mysql), both expected False, with the comment 'The same statement in MySQL syntax, where \"#\" would open a comment.' src/sqllens/safety/readonly.py:292-317 (is_introspection_query) returns True when first_sql_keyword is SHOW. Otherwise it parses and returns False on ParseError or TokenError, or on an empty parse (lines 296-310). first_sql_keyword (readonly.py:124-164) tokenizes with the dialect's tokenizer and returns '' on TokenError. Both inputs would reach False if `#x` is a leading non-comment token in SQLite and the tokenizer or parser rejects the rest. Whether sqlglot's SQLite tokenizer reads `#x` as a single token (parameter or identifier), and whether `x` plus a newline and `SHOW 'abc` follows the same path under mysql, is unverified without the library source. Not run: reading sqlglot/tokens.py (SQLite tokenizer, MySQL COMMENTS) or executing the two calls.\n\n  </details>\n\n- VC-114: INCONCLUSIVE (suggestion) — The comment asserts `? c\\nSELECT 1` under `mysql` carries the same leading symbol token as `# c\\nSELECT 1` under `sqlite`/`None`, so `first_sql_keyword` returns `\"\"` for it (a `?` token is not a keyword and does not raise a `TokenError` that changes the outcome). [tests/unit/test_safety_limits.py:235]\n\n  <details><summary>Evidence</summary>\n\n  first_sql_keyword (src/sqllens/safety/readonly.py:124-164) tokenizes with resolved.tokenize(sql), returns \"\" on TokenError (149-150), continues past L_PAREN, returns text for a VAR token or for a word-shaped keyword token, and otherwise returns \"\" (155-163). A leading `?` is not word-shaped (text[:1] is not alpha or `_`), so if sqlglot's MySQL tokenizer emits any single token for `?` (e.g. a symbol or placeholder token) that is not VAR, the function returns \"\", which matches the test comment at tests/unit/test_safety_limits.py:235-237 and the row at line 237. Whether the MySQL tokenizer emits such a token for `?` and raises no TokenError over the rest of '? c\\nSELECT 1' depends on sqlglot's tokenizer internals (sqlglot>=30.22,<31 per pyproject.toml:46). That library source is not in the head view (inventory.json has no sqlglot/tokens entry) and the item supplies no dependency_sources directory, so I did not read it. Not settled: the token type sqlglot's MySQL tokenizer assigns to `?`, and the SQLite/None `#` behavior. Missing evidence: sqlglot/tokens.py and sqlglot/dialects/mysql.py at the installed version, or running first_sql_keyword('? c\\nSELECT 1', 'mysql') in the project's environment (not run). No rejections line covers this claim; the one rejection is about a different test (test_no_dialect_counts_pragma_functions).\n\n  </details>\n\n- VC-126: INCONCLUSIVE (suggestion) — `RunSqlTool` with dialect `mysql` reports `query_type` `SELECT` for `# note\\nSELECT n FROM widgets` and builds a table result from the runner's rows. [tests/unit/test_safety_limits.py:548]\n\n  <details><summary>Evidence</summary>\n\n  Traced the repository side: RunSqlTool.execute (src/sqllens/agent/tools/run_sql.py:75,77) passes self.dialect to both first_sql_keyword and is_read_shaped; the test (tests/unit/test_safety_limits.py:548,560) builds the tool with dialect='mysql'. first_sql_keyword (src/sqllens/safety/readonly.py:124-164) tokenizes with sqlglot's MySQL dialect tokenizer and returns the first non-paren token's text, and is_read_shaped (167-175) checks that keyword against _READ_SHAPED_KEYWORDS; the read branch (run_sql.py:131-187) builds the table result from df rows with metadata query_type, row_count, columns and results. Whether '# note\\nSELECT ...' yields SELECT depends on sqlglot's MySQL tokenizer treating '#' as a line comment. That is third-party library behavior. The review gave no dependency_sources, and no sqlglot source is in the head view (Glob for sqlglot/dialects/mysql.py found none; inventory.json has no sqlglot entries), so I could not read it. I did not run the test. The rejection line (about test_safety.py pragma/mysql.func rows) covers a different subject and does not apply. Missing evidence: sqlglot's MySQL Tokenizer COMMENTS definition, or running tests/unit/test_safety_limits.py::TestRunSqlToolReadShapedResults::test_runner_reads_return_rows.\n\n  </details>\n\n- VC-127: INCONCLUSIVE (suggestion) — The comment asserts that `SELECT n FROM widgets /* note` reaches MySQLRunner's write branch because the unterminated comment does not tokenize under `mysql`, so the runner runs it on a `DictCursor`, commits, and the tool reports `row(s) affected` from the fake's `rowcount`. [tests/unit/test_safety_limits.py:638]\n\n  <details><summary>Evidence</summary>\n\n  Verified from the head view: (1) src/sqllens/safety/readonly.py:139-150 first_sql_keyword returns \"\" when resolved.tokenize(sql) raises sqlglot.errors.TokenError, and :167-175 is_read_shaped is `first_sql_keyword(...) in _READ_SHAPED_KEYWORDS`, so a TokenError gives False. (2) src/sqllens/agent/integrations/mysql/sql_runner.py:159-186: when is_read_shaped is False the runner uses conn.cursor(pymysql.cursors.DictCursor), executes, calls conn.commit(), reads cursor.rowcount and returns DataFrame({'rows_affected': [rowcount]}). tests/unit/_fake_pymysql.py:93,123-131 gives the cursor class name 'DictCursor' and the server rowcount, and commit sets committed, which matches the test asserts at tests/unit/test_safety_limits.py:647-654. (3) src/sqllens/agent/tools/run_sql.py:77,188-196 takes the non-read branch and prints 'Query executed successfully. {len(df)} row(s) affected.'. What I could not settle: whether the mysql tokenizer raises TokenError on the unterminated `/* note` comment. That is sqlglot library behavior. The item has no dependency_sources, sqlglot source is not in the views, and the only in-repo statements of it are the readonly.py docstring (:136-137) and the test's own parametrization (test_safety_limits.py:286,319), none of which is an implementation. I did not run `is_read_shaped('SELECT n FROM widgets /* note', 'mysql')` or the test. Side note: the tool's count is len(df), which is 1 for the one-row rows_affected frame, not the fake's rowcount of 3. The test only asserts the phrase 'row(s) affected', so the claim's 'from the fake's rowcount' is loose about the number. The test's comment does not make that claim. No rejection line covers this item: the only one concerns the pragma_/mysql.func test row in test_safety.py.\n\n  </details>\n\n- VC-129: INCONCLUSIVE (critical) — The comment asserts `c\\nSELECT n FROM widgets` is the same unparseable statement in MySQL syntax as `# c\\nSELECT n FROM widgets` under `None`/`sqlite`, giving the same row-count notification outcome. [tests/unit/test_safety_limits.py:662]\n\n  <details><summary>Evidence</summary>\n\n  Read tests/unit/test_safety_limits.py:656-685 and src/sqllens/safety/readonly.py:124-175. is_read_shaped(sql, dialect) is first_sql_keyword(sql, dialect) in _READ_SHAPED_KEYWORDS. first_sql_keyword tokenizes with the dialect's sqlglot tokenizer, and a TokenError gives \"\". Otherwise it returns the first token's text if that token is a VAR or keyword word, and \"\" for anything else. For the mysql row, `c\\nSELECT n FROM widgets` starts with the identifier `c`. That is an unquoted word, so it returns \"C\", which is not read-shaped. This part follows from the repo source alone. The other half of the claim is how sqlglot's default and SQLite tokenizers read a leading `# c`. It decides whether `# c\\nSELECT ...` is also not read-shaped under None and sqlite. If `#` is a symbol token or a TokenError, the result is also False. If those tokenizers treated `#` as a comment, the first keyword would be SELECT and the statement would be read-shaped. The item has no `dependency_sources`, and sqlglot is not in the head or base view; a Glob for sqlglot/tokens.py under the review directory found nothing. So I could not read the tokenizer source. I did not run the test or the tokenizer. Without that source I cannot confirm that `#` does not open a comment under default/sqlite, or that the two inputs are equivalent for the notification outcome.\n\n  </details>\n\n- VC-134: INCONCLUSIVE (suggestion) — The removed `(\"SELECT 'unterminated\", \"sqlite\")` case of `test_tokenization_failure_is_a_structured_rls_error` had the same outcome as the kept `mysql` case (RlsError matching `could not parse SQL` whose `__cause__` is a sqlglot TokenError), so its removal drops only a duplicate. [tests/unit/test_safety_rls.py:546]\n\n  <details><summary>Evidence</summary>\n\n  Read: base tests/unit/test_safety_rls.py:544-555 had four params (sqlite, mysql, None, backtick-mysql); head tests/unit/test_safety_rls.py:546-556 drops only (\"SELECT 'unterminated\", \"sqlite\"). Both versions use the identical body: pytest.raises(RlsError, match='could not parse SQL') and assert isinstance(exc.value.__cause__, TokenError). src/sqllens/safety/rls.py:239-242 wraps both sqlglot ParseError and TokenError from sqlglot.parse(sql, dialect=dialect) into RlsError('could not parse SQL for row-level security: ...') with `from e`, so the wrapping is dialect-independent. What I could not settle is whether sqlglot's sqlite tokenizer raises TokenError (rather than ParseError or no error) for `SELECT 'unterminated`, the same as the mysql tokenizer. The item has no dependency_sources, and the head view's inventory.json has no sqlglot source (no tokenizer.py or dialects/sqlite.py entry). I did not read sqlglot installed under other worktrees' .venv directories or the working tree, and did not run the test. The base test asserting TokenError for sqlite is only the test's own expectation, not proof of its outcome. Missing evidence: sqlglot tokens.py and dialects/sqlite.py (and mysql.py) source, or a run of the base test.\n\n  </details>\n\n- VC-144: INCONCLUSIVE (critical) — The PR body carries a port/delete map, continued in a PR comment that the body links to when the map does not fit in the body. The map has one row for each test, parametrized case group, helper or fixture under `tests/` that uses SQLite (as the first criterion defines it) at the merge base. A test or case is named by its node ID, and a helper or fixture by `path::name`. Each row gives the node ID or IDs of its MySQL replacement (the same test when only its URL or dialect changed), or `SQLite-only, deleted in #383`. A row for a test whose classification was unclear gives both. A SQLite-only row with no possible MySQL counterpart says so and why. Tests in one file with the same outcome may share a row that names them. [tests]\n\n  <details><summary>Evidence</summary>\n\n  Graded with criteria.json counted (valid {criterion,text} list; criterion 10 present, read with criterion 1's definition of 'uses SQLite'). The claim is about the PR body and a linked PR comment, which are not repository files and are in neither view. The only PR-body text supplied is the run file pr-body.md (lines 1-8): 'Work in progress — automated review pending. Resolves #381 _(local run)_ Generated via /prflow:implement ...' plus a rejected-finding note. It has no port/delete map, no node-ID rows, no 'SQLite-only, deleted in #383' rows and no link to a continuation comment. Grep for 'deleted in #383' in diff.patch and in the whole head view found no match, so the map is in no committed file either. The body is a pre-review placeholder, so I cannot establish that the final PR body or a linked PR comment lacks the map. Without the map I also cannot check row coverage against the base's SQLite uses. Missing evidence: the final PR body and any linked PR comment (not run: gh pr view / gh api for PR #398 body and comments). If the final body is still this placeholder, the criterion is unmet.\n\n  </details>\n\n- VC-145: INCONCLUSIVE (critical) — Line coverage does not drop against the merge base. Instrument: coverage.py, installed with `pip install coverage` for the measurement only, `python -m coverage run -m pytest -q`, then `python -m coverage json`, comparing each file's `executed_lines` under all of `src/sqllens/`. Every line that the merge base's default run executes is also executed by this branch's default run with the map's `SQLite-only` tests deselected. Lines are matched through the PR's diff of `src/`: a line the diff deletes needs no match, and every line the diff adds that coverage.py reports as a statement (in `executed_lines` or `missing_lines`) is executed. The one exception is a line that no non-SQLite input can execute. It is defined by where the code is, not by which tests ran: a line in `sqllens.agent.integrations.sqlite` or `sqllens.preflight._probe_sqlite`, or a line inside a branch whose condition holds only for the `sqlite` dialect, a URL whose scheme starts with `sqlite`, or a SQLite database file, or a line in a function whose every caller is such a line (for example `sqllens.safety.relations._sqlite_kind`). When it is unclear whether a line is such a line, a MySQL test executes it. The PR body states the merge-base SHA compared against, and lists each excepted line as `path:line` or a line range with the SQLite-only condition that guards it. [tests/unit/_fake_pymysql.py]\n\n  <details><summary>Evidence</summary>\n\n  Criterion 11 (criteria.json element 11, matched, graded with the other criteria). It is a measured property: per-file executed_lines from `python -m coverage run -m pytest -q` + `python -m coverage json`, at the merge base (4521a6f) and at head (18f03d7, with SQLite-only tests deselected). This agent has only Read/Grep/Glob and cannot run either measurement, so reading the source cannot settle whether any merge-base executed line is lost. What the diff shows (diff.patch, `diff --git` list): every changed file is under tests/ or docs/internal/; no file under src/ is touched. So no line is added or deleted in src/, and the 'added statement lines must be executed' and 'deleted lines need no match' limbs are vacuous. Coverage drop can then only come from deselecting/replacing tests, which needs the real coverage runs and the map's SQLite-only deselection list. Also the claim requires the PR body to state the merge-base SHA and list each excepted line as path:line with its SQLite-only guard; the PR body is not among the supplied artifacts, so that part is unread. Missing evidence: coverage JSON for base default run and head run with SQLite-only tests deselected (not run: `python -m coverage run -m pytest -q` / `python -m coverage json`), and the PR body.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: test_relevant + has_new_types (not small_diff, not config_only), 38 changed files, 1740 changed lines; Phase 1 and Phase 2 ran.\n- Working tree: clean (`git status --porcelain` printed nothing).\n- Review prompt extension: `PROMPT-EXTENSION-STATUS: content-present`. Final-pass extension (`requesting-code-review`): `content-present`.\n- Command-shape table: `.prflow/tmp/command-shapes.md` does not exist; local tier assumed.\n- CI evidence for the reviewed head (18f03d7): not available to this engine entry; no test runner was run.\n- Severity threshold: `important` (from `prflow_review.verdict_severity_threshold`).\n- Phase 3 roster: prflow:silent-failure-hunter, prflow:comment-analyzer, prflow:requesting-code-review, prflow:type-design-analyzer. Excluded by plan on iteration 3: prflow:code-reviewer and prflow:pr-test-analyzer (`iterations=first-only`). All four dispatched reviewers returned results.\n- Carry-forward: 76 of 136 prior items carried; 2 malformed prior items skipped.\n- Verification: 126 passed, 1 failed (VC-128, Suggestion), 19 inconclusive; 70 verified fresh, 76 reused. Input warnings: VC-129 and VC-139 had no severity and were stored as critical (VC-129 is INCONCLUSIVE, VC-139 is PASS; neither is a FAIL).\n- Normalized (wording-only): 0\n- Re-verification: none requested (no disputed FAIL at or above the threshold).\n- Dirty-tree check: ran clean (`dirty-tree-compare-done`, no modified paths).\n- Deferrals: the PR body holds no deferred-findings marker; matcher not run.\n- Finding 5 (`tests/unit/test_safety_masking.py:700`) was weighed against criterion 4 and not routed to the unmet-criterion carve-out: its asserted behavior (masking) sits above the runner, it does not establish against the shipped code that the criterion is unmet, and the criterion's checklist item VC-138 passed.\n- Finding rejected \"the mysql.func row added to test_no_dialect_counts_pragma_functions never reaches the pragma_ name-prefix path, so the test name does not describe what it checks\": settled none.\n- Checklist: 126 passed, 1 failed, 19 inconclusive\n- <details><summary>✅ Passed items (126 of 146)</summary>\n\n  - VC-8: The preflight database probe reached by `serve` and `validate --check-db` looks up `connect` on the `pymysql` module object when it runs (for example `pymysql.connect(...)` after `import pymysql`, not `from pymysql import connect` bound at import), so `patch.object(pymysql, \"connect\")` in the autouse fixture replaces the call the probe makes. [tests/unit/test_cli.py:28]\n  - VC-11: When `pymysql.connect` raises `OperationalError` during `serve` preflight, the CLI exits 2 and stderr (after whitespace is collapsed) contains `Preflight failed: database: OperationalError: connection failed`, and connect was called once. [tests/unit/test_cli.py:212]\n  - VC-12: When `pymysql.connect` raises `OperationalError` under `validate --check-db`, the CLI exits 2 and stderr (after whitespace is collapsed) contains `Preflight failed: database: OperationalError: connection failed`. [tests/unit/test_cli.py:326]\n  - VC-13: On a clean MySQL config, the `serve` preflight database probe calls `pymysql.connect` with `host` passed as a keyword argument (equal to the URL's host `db.invalid`) and calls `close()` exactly once on the returned connection. [tests/unit/test_cli.py:290]\n  - VC-14: With `--no-preflight` or `SQLLENS_NO_PREFLIGHT=1`, `serve` runs no database probe, and with `sqllens.server.run` replaced nothing else on the `serve` path before `run` calls `pymysql.connect`. [tests/unit/test_cli.py:262]\n  - VC-16: `validate` with `--check-db --check-llm --check-memory --check-auth` calls `pymysql.connect` exactly once, so only the database probe connects and no other check opens a MySQL connection. [tests/unit/test_cli.py:296]\n  - VC-17: The fixture docstring states that `serve` with preflight on and `validate --check-db` connect to the configured MySQL server, that the fake accepts the connection by default, and that setting `side_effect` makes it fail. [tests/unit/test_cli.py:32]\n  - VC-34: The comment asserts that because `.invalid` does not resolve under a conforming resolver, a test whose fake connect was missed cannot reach a developer's local server. [tests/unit/test_cli.py:23]\n  - VC-35: `validate --check-llm` with no API key fails preflight and stderr (after whitespace is collapsed) contains `Preflight failed: llm: llm.api_key is not set`. [tests/unit/test_cli.py:1026]\n  - VC-63: `pymysql` is installed in the default test environment (`pip install -c requirements.txt -e \".[dev,all]\"`), so the module-level `import pymysql` in test_cli.py does not fail collection. [tests/unit/test_cli.py:14]\n  - VC-64: The fixture module docstring asserts the uvicorn server is configured for a MySQL database it never connects to. [tests/integration/conftest.py:6]\n  - VC-65: The comment asserts that because `.invalid` does not resolve under a conforming resolver, a real connect cannot reach a developer's local server. [tests/integration/conftest.py:39]\n  - VC-66: In the slow-agent responsiveness test, the `query_database` runs held against the local Messages API stand-in never reach `pymysql.connect` now that the configured database is `mysql+pymysql://u@db.invalid/shop`, and still return a non-error result once released. [tests/integration/test_slow_agent_run_responsiveness.py:136]\n  - VC-67: `list_data_sources` output includes the configured database name (`shop-test`), which the slow-agent test asserts on the quick request. [tests/integration/test_slow_agent_run_responsiveness.py:176]\n  - VC-68: `import-memory` and `export-memory` with a config whose database URL is `mysql+pymysql://u@db.invalid/shop` load config and use only the Chroma store, never building a SQL runner or calling `pymysql.connect`. [tests/unit/test_cli_memory.py:27]\n  - VC-70: `build_sql_runner(mysql_url, read_only=False)` returns a runner that does not set the session read-only, runs `CREATE TABLE`, `INSERT` and `DROP TABLE` on the write branch and commits, so the rows are visible to the separate read runner's connection in the same test. [tests/connectors/test_connectors.py:157]\n  - VC-78: The docstring asserts the test checks a dialect name sqlglot already recognises passes through unchanged; for that to hold with only the `mysql` row left, `mysql` must have no entry in `_SQLGLOT_DIALECT_MAP` (it reaches sqlglot through the `.get(key, key)` fallback). [tests/unit/test_eval_compare.py:96]\n  - VC-79: Under the `mysql` dialect, `RunSqlTool` classifies `? c\\nSELECT n FROM t` with an empty `query_type` and treats it as not read-shaped, so the metadata has no `results` key. [tests/unit/test_factory_wiring.py:76]\n  - VC-81: `build_agent` with a `mysql+pymysql://u@db.invalid/shop` URL builds a `MySQLRunner` leaf without opening a connection, and the test does not skip when `pymysql` is missing, so it relies on `pymysql` being installed in the default run. [tests/unit/test_factory_wiring.py:510]\n  - VC-84: `MySQLRunner` stores the constructor's timeout, row cap and read-only flag on the private attributes `_statement_timeout_ms`, `_max_rows` and `_read_only`, and has no `_inner` attribute, so the leaf walk stops at it. [tests/unit/test_factory_wiring.py:521]\n  - VC-91: With `read_only=False`, `MySQLRunner` sends each read in `_READS` (plain, CTE, `--`-led, `#`-led and `/* */`-led) as the only statement on an `SSDictCursor`, calls `fetchmany(cap + 1)` once, returns `cap` rows with `attrs[\"truncated\"]` True when cap+1 rows come back and False when fewer, sets `attrs[\"max_rows\"]`, closes the connection, leaves the streaming cursor unclosed and does not commit. [tests/unit/test_mysql_runner.py:84]\n  - VC-95: Under dialect `mysql`, `components_to_blocks` still shows the result of the unparseable `SELECT FROM WHERE ;;;` as one table block (introspection classification fails open to a data query). [tests/unit/test_format.py:1948]\n  - VC-96: Under a `None` dialect, `assert_select_only(\"SELECT load_file('/etc/passwd')\")` raises `UnsafeSqlError` whose message matches `function 'load_file' is not allowed`, because the no-dialect denylist is the union that includes the MySQL entry's `load_file`. [tests/unit/test_safety.py:239]\n  - VC-97: Under dialect `mysql`, `INSERT INTO users VALUES (1, 'a')` and `DROP TABLE users` are refused by the root-type gate with messages matching `only SELECT .* \\(got INSERT\\)` and `only SELECT .* \\(got DROP\\)` respectively, the statement-type name in the message being upper-case `INSERT`/`DROP`. [tests/unit/test_safety.py:276]\n  - VC-98: `ReadOnlyGuardRunner(inner, dialect=\"mysql\")` refuses `SELECT load_file('x')` with an `UnsafeSqlError` matching `function 'load_file' is not allowed` before calling the inner runner. [tests/unit/test_safety.py:338]\n  - VC-99: The denylist match is case-insensitive under dialect `mysql`: `SELECT LOAD_FILE('x.so')` is refused with a message naming the function in lower case (`function 'load_file' is not allowed`). [tests/unit/test_safety.py:492]\n  - VC-102: Under dialect `mysql`, a qualified `mysql.user` beside a same-named CTE `user` counts as introspection in either FROM order (`... FROM user, mysql.user` and `... FROM mysql.user, user`). [tests/unit/test_safety.py:944]\n  - VC-103: Under dialect `mysql`, `WITH c AS (SELECT 1 AS k) SELECT * FROM mysql.user AS c, c` counts as introspection: the catalog table aliased with the CTE's name is not excluded as a CTE reference. [tests/unit/test_safety.py:946]\n  - VC-104: Under dialect `mysql`, `SELECT count(*) FROM mysql.user, (SELECT 1 AS k) AS user` counts as introspection: a derived table aliased `user` does not make the `mysql.user` table count as a non-catalog reference. [tests/unit/test_safety.py:947]\n  - VC-105: When `traverse_scope` raises, `is_introspection_query` under dialect `None` and `mysql` logs a record at INFO level or above on logger `sqllens.safety.readonly` whose text contains `RuntimeError`, and still classifies `WITH x AS (SELECT * FROM mysql.user) SELECT * FROM x` as introspection. [tests/unit/test_safety.py:1016]\n  - VC-106: Under dialect `mysql`, an unqualified table named `mysql_events` is a data query: the MySQL catalog entry matches only the `mysql`, `sys`, `performance_schema` and `information_schema` schemas, with no table-name prefix. [tests/unit/test_safety.py:1045]\n  - VC-110: The comment asserts `SELECT name FROM mysql.func` counts as introspection with no dialect because the `mysql` schema is a MySQL entry of the same no-dialect catalog union the `pragma_` rows rely on. [tests/unit/test_safety.py:1115]\n  - VC-112: Under dialect `mysql`, `SELECT 1 /* outer /* nested */ -- */\\n + 2` is refused with an `UnsafeSqlError` matching `Nested MySQL comments`, a refusal the SQLite case of the same text does not get. [tests/unit/test_safety.py:1365]\n  - VC-116: For a plain read with `max_rows=10`, MySQLRunner opens exactly one query cursor and calls `fetchmany` on it once with 11, and the fake records that as `fetchmany_sizes == [11]`, returning the first 11 scripted rows. [tests/unit/test_safety_limits.py:104]\n  - VC-117: MySQLRunner with `read_only=False`, the default `statement_timeout_ms=0` and no `remove_sql_modes` executes no session-setup statement on any cursor, so the connection's recorded statements are only `(\"SSDictCursor\", <the CTE SQL>)`. [tests/unit/test_safety_limits.py:357]\n  - VC-125: MySQLRunner classifies `# note\\nSELECT n, label FROM widgets` as read-shaped under the `mysql` dialect and runs it on an `SSDictCursor` with `fetchmany(11)`, so the read is capped at 10 rows. [tests/unit/test_safety_limits.py:506]\n  - VC-130: For empty or whitespace-only SQL, both with `read_only=True` (behind `ReadOnlyGuardRunner`) and `read_only=False` (bare MySQLRunner), `RunSqlTool.execute` returns a failure whose `result_for_llm` contains `SQL is empty`, and no connection is opened. [tests/unit/test_safety_limits.py:690]\n  - VC-131: The module docstring asserts the file holds unit tests for `RowCapRunner` and for the runners' row cap and timeout. [tests/unit/test_safety_limits.py:4]\n  - VC-132: The docstring asserts `_user_statements` returns the statements each connection ran on its query cursor, in order; this holds only if the fake records MySQLRunner's session-setup statements and the relation check's lookups under cursor label `catalog` and the user SQL under the query cursor's class name. [tests/unit/test_rls_views.py]\n  - VC-133: Under dialect `sqlite`, `apply_rls` refused each of the four `TABLE` statements in `test_table_subquery_blocks_fail_secure` with an RlsError matching `unquoted TABLE keyword`, the same outcome as under `mysql`, so dropping the `sqlite` parametrize case removes only a duplicate. [tests/unit/test_safety_rls.py:366]\n  - VC-135: **Definitions.** A test, helper or fixture under `tests/` *uses SQLite* when it does any of these: names a `sqlite` URL; reads a file under `examples/sqlite-demo/`; imports or calls Python's `sqlite3` module or anything in `sqllens.agent.integrations.sqlite`; calls `sqllens.preflight._probe_sqlite`, or a preflight path that reaches it with a `sqlite` URL; passes `\"sqlite\"` as a dialect or engine value; or relies on a SQLite entry of the fallback union (`load_extension`, or a `sqlite_` or `pragma_` name, a CTE or table so named included). A case relies on such an entry when it runs under a `None` or unknown dialect and its outcome comes from that entry. It also relies on one when, under any dialect, its outcome differs from the `None`-dialect outcome only because the entry is in the union. An example is a `sqlite_`-prefixed data table under dialect `mysql` that proves the configured dialect arrives, as in the MySQL row #382 gave `test_with_widgets_hides_introspection_result_under_configured_dialect`. Naming ChromaDB's `chroma.sqlite3` file is not a use. A use is *SQLite-only* when the behaviour it asserts exists only for SQLite. That covers at minimum: the `sqllens.agent.integrations.sqlite` package, `sqlite_path_from_url` and `_readonly_uri`; the SQLite preflight probe; a `sqlite`-keyed entry of a per-dialect table in `src/sqllens/safety/` or in the system prompt (for example `sqlite_master`, `pragma_*` names, `load_extension`); `sqllens init`'s SQLite template; `claude-desktop install`'s SQLite file-stem naming; a case that relies on a SQLite entry of the fallback union; and a `sqlite` case whose expected outcome differs from the same test's `mysql` case with the same other inputs. A use whose classification is unclear counts as SQLite-only, and its test also gets a MySQL version. A `sqlite` URL used only as the non-MySQL input that a MySQL-only check refuses (`tests/unit/test_rule_set_file.py::test_non_mysql_url_is_refused`, `tests/unit/test_cli_rule_sets.py::test_validate_refuses_a_non_mysql_url`) is engine-neutral where another non-MySQL scheme can reach that check: its replacement passes one, for example `postgresql://u@db.invalid/shop`, straight to `load_rule_sets`, and asserts the same refusal. Where config load refuses every other scheme before the check runs (`sqllens validate`), the use is SQLite-only, and its map row says no MySQL counterpart exists because config load accepts only MySQL and SQLite URLs. Every other use is *engine-neutral*. After the change, every use of SQLite under `tests/` is SQLite-only. [tests/unit/test_cli_claude_desktop.py:180]\n  - VC-136: Each engine-neutral test (as the first criterion defines it) that needs a database URL uses a `mysql+pymysql://` URL that names a user and a host. This includes `tests/unit/_config_builders.py`, `tests/integration/conftest.py` and `tests/unit/test_transport_http.py`. The `list_data_sources` transport test asserts that the configured `mysql` scheme appears in the tool's output. [tests/unit/_config_builders.py:46]\n  - VC-137: No test in the default run opens a connection to a MySQL server. Proof: the default `pytest -q` run passes, and records no call, with the real `pymysql.connect` replaced for the whole session by a function that records each call and raises; the run fails if any call was recorded, even when the code under test caught the error. Every test whose path reaches `pymysql.connect` (query execution, or the preflight database probe through `serve`, `validate --check-db` or `run_preflight`) supplies its own fake. [tests/unit/test_cli.py:28]\n  - VC-138: Each MySQL replacement for a test whose assertion depends on behaviour inside the runner builds a real `MySQLRunner` over a fake `pymysql` module. That behaviour covers at minimum: session setup, cursor choice, the row cap, settings that reach the worker thread, the relation check and catalog lookups, the read-versus-write branch, and the rows `RunSqlTool` receives. The replacements cover the profile row cap on the worker thread, the relation check on the worker thread, the plain, CTE and comment-led `fetchmany` caps, `RunSqlTool`'s read-shaped results, and the view and catalog lookups now done live in `test_rls_views.py`. A fake `SqlRunner` stands in only where the asserted behaviour sits above the runner; where that is unclear, the test uses the fake driver. Some tests assert a result the database computes, such as the rows of a row-level-security query. A replacement for such a test asserts the exact statement the runner executed (for row-level security, the rewritten SQL carrying the predicate), never rows the fake was scripted to return. [tests/unit/test_rls_views.py:106]\n  - VC-139: Unit tests in the default run, using a fake `pymysql` module, assert that `MySQLRunner`: 1. with `read_only=True`, executes `SET SESSION TRANSACTION READ ONLY` on the query's connection before the user SQL, and with `read_only=False` does not execute it; 2. with `statement_timeout_ms` above 0, executes `SET SESSION MAX_EXECUTION_TIME = %s` with that value as its parameter before the user SQL, and with 0 does not execute it; 3. runs a plain, a `WITH … SELECT` and a comment-led read on an `SSDictCursor` with `fetchmany(cap + 1)`, returning `cap` rows with the truncation attribute `True` when the fake returns `cap + 1` rows, and `False` when it returns fewer; 4. caps a read at a profile's lower `max_rows`, set as effective settings on the calling task, while running on a `sqllens-sql` worker thread; 5. with `require_base_tables=True`, calls `verify_base_tables` with the query's own connection and dialect `mysql` on a `sqllens-sql` worker thread before executing the user SQL, and with `False` does not call it. [tests/unit/test_mysql_runner.py:84]\n  - VC-140: For the dialect cases of every test: - A `sqlite` case with the same other inputs and the same expected outcome as an existing `mysql` case of that test is removed. - An engine-neutral case (as the first criterion defines it) that ran only under `sqlite` runs under `mysql`. Its outcome under `mysql` can differ from its SQLite expectation for two excused causes, and in both the SQLite case stays as SQLite-only: - a `mysql`- or `sqlite`-keyed entry or branch of a per-dialect table or dialect check in `src/`. The MySQL case asserts the code's MySQL outcome. - sqlglot's `mysql` grammar reading the same text differently (for example, `#` starts a comment and a double-quoted name is a string, only under `mysql`). The MySQL case is the input written in MySQL syntax with the same meaning (for example, backticks for a quoted name, or an unparseable statement with no `#`), and it asserts the SQLite case's outcome. An existing `mysql` case of the test that already is that input stands in for it. Any other difference, or one whose cause is unclear, is a defect handled as the last criterion states. - The default `dialect` of `_assert_filtered_and_readonly` in `tests/unit/test_safety_rls.py` is `\"mysql\"`. - Every `None`-dialect and unknown-dialect case that exists at the merge base still exists. - Each such case that relies on a SQLite entry of the fallback union (a SQLite-only case, as the first criterion defines it) has a counterpart in the same test, under each of the dialect values that case uses. The same applies to each case of any dialect that relies on such an entry. The counterpart relies only on a MySQL entry or on MySQL-only syntax (for example `load_file`, `sleep`, a table in the `mysql`, `sys` or `performance_schema` schema, or a statement only the `mysql` dialect reads, such as `# note\\nSHOW TABLES`). It asserts the same outcome as the SQLite case. If the code gives the MySQL entry a different outcome, the difference is handled as the last criterion states. The exception is a case whose outcome no MySQL entry or syntax can produce; for example, a CTE-shadowing case needs a name prefix, and MySQL's catalog entry has none. Its map row states that no MySQL counterpart exists and why. For `test_with_widgets_hides_introspection_result_under_configured_dialect`, the counterpart row's catalog statement is one only the `mysql` dialect classifies as introspection (for example `# note\\nSHOW TABLES`), so the test fails when the configured dialect does not reach the formatter. [tests/unit/test_eval_compare.py:43]\n  - VC-141: Every moved or added test that expects a refusal (`UnsafeSqlError`, `RlsError`, `PreflightError`, `RuleSetFileError`) asserts the refusal's reason, with `match=` or an assertion on the error's message or detail. A statement refused for an unrelated reason then fails the test. [tests/unit/test_cli.py:214]\n  - VC-142: The MySQL connector suite in `tests/connectors/` has a test that, against a live MySQL server through `ResultMaskingRunner`, does two things. It reads a secret column under a non-secret alias (`SELECT password_hash AS h`) and gets the stored value back unmasked under key `h`. It reads an unaliased expression over that column (`SELECT upper(password_hash)`) and gets the value masked. The implementing run shows this by running the test against a local `mysql:8.0` server published with a port mapping; a run that cannot start one ends Blocked on this criterion. [tests/connectors/test_connectors.py:119]\n  - VC-143: The MySQL connector suite in `tests/connectors/` has row-level-security cases that, against a live MySQL server through `RlsGuardRunner` over the read-only guard and row cap, assert the rows the server returns. The shapes cover at minimum: the protected table's rows filtered to the rule's value, an unprotected table read in full, a CTE that shadows the protected table's name, a `WHERE id IN (SELECT id FROM <protected>)` subquery, and a scalar subquery `(SELECT max(id) FROM <protected>)`. The letter-case shape (an upper-case table name) has no live case: on the CI server, `lower_case_table_names` is 0, so an upper-case name is a different table. The implementing run shows this by running the test against a local `mysql:8.0` server published with a port mapping; a run that cannot start one ends Blocked on this criterion. [tests/connectors/test_connectors.py:144]\n  - VC-146: Each SQLite-only test (as the first criterion defines it) still runs and passes in the default run. The change leaves every file under `src/` unchanged except for the fix to a security defect that a new or moved test exposes. The list of security defects is closed. A security defect is a defect in the code of one of these guards that lets it be bypassed or weakened under the `mysql` dialect or a MySQL URL: the read-only guard (`ReadOnlyGuardRunner`, `assert_select_only`), the function denylist, row-level security (`RlsGuardRunner`, `apply_rls`) and its relation check (`verify_base_tables`), result masking (`ResultMaskingRunner`), the row cap (`RowCapRunner` and the runner's `fetchmany` cap), the whole-row guard (`WholeRowSelectGuardRunner`), the per-role rule-set guard (`RuleSetGuardRunner`, `apply_rule_set`: its table and column limits, catalog-read rewrite and row rules) and refusal redaction (`RefusalRedactingRunner`). A defect for which it is unclear whether it lies in one of these guards' code, or whether it bypasses or weakens one, counts as a security defect. Any other defect takes the ordinary route. That includes defects clearly in the MySQL session's read-only setting (`SET SESSION TRANSACTION READ ONLY`) or statement timeout (`MAX_EXECUTION_TIME`), or in the `None`/unknown-dialect fallback. A security defect is fixed in this PR, never deferred, its exposing test passes unmarked, and no public issue is filed for it. This is the maintainer's chosen route for this issue, an exception to `SECURITY.md`'s private-report route. Any other defect a new or moved test exposes in shipped code is named in the PR body by its own issue number. Its exposing test is marked `pytest.mark.xfail(strict=True, raises=<the exception the defect produces>)` with a reason naming that issue. [tests/unit/test_preflight.py]\n  - VC-1: Through ResultMaskingRunner over RowCapRunner over a real MySQLRunner, `SELECT password_hash AS h` returns the stored value unmasked under key `h`, because masking decides secrecy from the column label the result carries (`h`), not from the source column the expression reads. [tests/connectors/test_connectors.py:131]\n  - VC-2: MySQL through pymysql's dict cursor labels the unaliased expression `upper(password_hash)` with exactly that text (same case and spacing as written), and the masking predicate treats that label as secret, so the record is `{\"upper(password_hash)\": \"[withheld]\"}`. [tests/connectors/test_connectors.py:136]\n  - VC-3: The comment asserts masking reads the label the driver gives each column, so a non-secret alias hides the secret column from masking while an unaliased expression keeps its name. [tests/connectors/test_connectors.py:120]\n  - VC-4: RlsGuardRunner with dialect `mysql` and rule `tenant_id = 'alpha'` on the protected table rewrites `SELECT id FROM <orders> ORDER BY id` so the live server returns only id 1, and the relation check it requests passes through ReadOnlyGuardRunner and RowCapRunner to MySQLRunner for a base table. [tests/connectors/test_connectors.py:147]\n  - VC-5: A CTE named like the protected table (`WITH <orders> AS (SELECT 3 AS id) SELECT id FROM <orders>`) is not filtered by the RLS rewrite, and the relation check does not refuse it, so the live result is [3]. [tests/connectors/test_connectors.py:149]\n  - VC-6: The RLS rewrite adds the tenant predicate inside a `WHERE id IN (SELECT id FROM <orders>)` subquery, so the unprotected outer table returns only id 1 on the live server. [tests/connectors/test_connectors.py:150]\n  - VC-7: The RLS rewrite filters a scalar subquery `(SELECT max(id) FROM <orders>)` in the select list, so each of the two unprotected rows gets max over the alpha rows (1), giving [1, 1] under column `id`. [tests/connectors/test_connectors.py:151]\n  - VC-15: Every catalog-cursor statement whose `fetchone` result the runner or relation check consumes is answered correctly by the fake's parameter-based dispatch: the `@@lower_case_table_names` probe has no parameters, the TABLE_TYPE lookup has exactly two parameters with the relation name second, and the stored-routine lookup's parameters contain the called names; a consumed no-parameter read other than the probe (such as the `@@SESSION.sql_mode` read under `remove_sql_modes`) would receive `(lower_case_table_names,)`. [tests/unit/_fake_pymysql.py:70]\n  - VC-21: The docstring asserts a test must name every relation its SQL reads in `kinds`; with the fake, an unnamed relation's TABLE_TYPE lookup gets no row (or a routine name), and the relation check treats that as a refusal rather than a pass. [tests/unit/_fake_pymysql.py:17]\n  - VC-24: MySQLRunner and the relation check use only the cursor and connection members the fake implements (`cursor(cls)`, `execute`, `fetchone`, `fetchmany`, `close`, `rowcount`, `commit`, `ping`, `close`), and never use a cursor as a context manager, read `cursor.description`, or call `fetchall`. [tests/unit/_fake_pymysql.py:65]\n  - VC-30: The fake module supplies every `pymysql` attribute MySQLRunner and the relation check reach on these paths (`connect`, `cursors.DictCursor`, `cursors.SSDictCursor`, `MySQLError`, `Error`), and MySQLRunner calls `pymysql.connect` with keyword arguments only, as `FakeMySQL.__call__(**kwargs)` requires. [tests/unit/_fake_pymysql.py:37]\n  - VC-39: `MySQLRunner` accepts `host`, `database`, `user` and `password` as keyword arguments, with every other constructor parameter defaulted, so `mysql_runner()` builds one from those four alone. [tests/unit/_fake_pymysql.py:173]\n  - VC-41: The comment asserts `derive_default_name`'s file-extension strip does not look at the scheme, so `mysql+pymysql://u:p@h:3306/orders.db` gives `orders`. [tests/unit/test_cli_claude_desktop.py:183]\n  - VC-42: `resolve_options` with `name=None` and `mysql+pymysql://u@db.invalid/demo` derives the name `demo` from the URL path. [tests/unit/test_cli_claude_desktop.py:841]\n  - VC-43: A URL containing an apostrophe, `mysql+pymysql://u@db.invalid/demo's`, makes `_toml_string` choose its double-quoted form and is accepted by the `DatabaseConfig.url` validator when the generated TOML is loaded back through `Config.load`. [tests/unit/test_cli_claude_desktop.py:1228]\n  - VC-49: `sqllens claude-desktop install --db <mysql URL>` (including `--dry-run`) runs no database probe and never calls `pymysql.connect`. [tests/unit/test_cli_claude_desktop.py:960]\n  - VC-51: The verify-memory CLI tests that load a config with `mysql+pymysql://u@db.invalid/shop` replace `run_verification` or `build_agent`, so no path in them reaches `pymysql.connect`. [tests/unit/test_cli_verify_memory.py:27]\n  - VC-62: The doc states `tests/unit/test_sql_runner_event_loop.py` checks that a slow driver call in each runner leaves the loop free plus the listed SQL-pool behaviours, and that `tests/unit/test_mysql_runner.py` checks MySQLRunner applies a profile's row cap and the `require_base_tables` relation check on a `sqllens-sql` thread. [docs/internal/mcp-server/transport.md:129]\n  - VC-69: Under dialect `mysql`, `components_to_blocks` classifies `WITH w AS (SELECT n FROM widgets) SELECT n FROM w` as a data query, so its result is shown as one table block. [tests/unit/test_format.py:2011]\n  - VC-71: With `_cfg`'s default URL now `mysql+pymysql://u@db.invalid/shop`, no test in test_preflight.py that uses the default reaches an unpatched `pymysql.connect`: the probe_llm, probe_memory and probe_auth tests never call the database probe, and test_run_preflight_calls_probes_in_order_and_short_circuits replaces `_PROBES`. [tests/unit/test_preflight.py:39]\n  - VC-107: For the schema-qualified view query `SELECT v.id FROM shop.all_orders v JOIN public_values p ON v.id=p.id`, the relation check sends the schema `shop` and name `all_orders` as lookup parameters, and the fake answers by name from `_MYSQL_KINDS` (VIEW), so the refusal comes from the reported type for that name. [tests/unit/test_rls_views.py:102]\n  - VC-108: For the backtick-quoted view name `all orders`, sqlglot's mysql parse yields the relation name `all orders` (with the space, no backticks), which is the key the fake's `_MYSQL_KINDS` maps to VIEW. [tests/unit/test_rls_views.py:102]\n  - VC-111: The comment asserts that MySQL names an unaliased result column after the call's text, the property the `printf('%s', name)` row relies on. [tests/unit/test_safety_rls.py:233]\n  - VC-113: `apply_rls` raises an RlsError whose message contains `unusable or suspicious value` for each wrong-typed metadata value None, a dict, bytes and a nested list under a `value_from_metadata` rule with the `=` operator. [tests/unit/test_safety_rls.py:517]\n  - VC-115: Under dialect `mysql`, `apply_rls` filters `SELECT * FROM public.orders` for a rule on table `orders` (matching by table name whatever the schema qualifier) and the output passes `assert_select_only` under mysql. [tests/unit/test_safety_rls.py:328]\n  - VC-118: `build_agent` on a config with URL `mysql+pymysql://u@db.invalid/shop` and RLS rules wraps the runner as ResultMaskingRunner over RlsGuardRunner over ReadOnlyGuardRunner, and without rules builds no RlsGuardRunner, all without connecting to the database. [tests/unit/test_safety_rls.py:660]\n  - VC-119: The cleanup tests' `_PrimaryError` and `_SecondaryCloseError` are plain Exception subclasses, not the fake's `pymysql.Error`/`pymysql.MySQLError` (`FakeMySQLError`, where the removed local helper set `pymysql.Error = Exception`), and MySQLRunner's cleanup path still lets the primary error reach the caller and swallows a close-only failure for errors of either kind. [tests/unit/test_sql_runner_cleanup.py:29]\n  - VC-120: In the refusal test, `WholeRowSelectGuardRunner` refuses `SELECT * FROM users` under dialect `mysql` before the MySQLRunner opens any connection (the fake records no connection), and `RunSqlTool` reports it as a failed result whose text starts with `Error executing query: refusing to execute query:` and contains `selects every column`. [tests/unit/test_safety_whole_row.py:391]\n  - VC-121: With `mysql_runner()` defaults (read_only True), the last statement on the allowed query's single connection is the user SQL `SELECT id, name FROM users` with params None, after any session setup. [tests/unit/test_safety_whole_row.py:401]\n  - VC-122: `build_agent` with a `mysql+pymysql://` URL passes the dialect `mysql` (not the URL scheme `mysql+pymysql`) to `WholeRowSelectGuardRunner`, and the innermost SQL runner beneath it is a MySQLRunner. [tests/unit/test_safety_whole_row.py:456]\n  - VC-123: `test_relation_check_unwraps_the_guard` calls `mysql_runner()` with no fake installed, so `MySQLRunner.__init__` imports the real `pymysql` and opens no connection. [tests/unit/test_safety_whole_row.py:471]\n  - VC-124: The comment asserts the fake row keys are the column labels MySQL 8.0 and PyMySQL's SSDictCursor give these statements, and that the connector suite checks them against a live server. [tests/unit/test_safety_masking.py:685]\n  - VC-10: The doc states each test installs a fake pymysql through `install_fake_pymysql` in tests/unit/_fake_pymysql.py, which replaces it in sys.modules with monkeypatch.setitem, so the suite needs no installed driver. [docs/internal/database-connectors/cleanup-error-handling.md:58]\n  - VC-18: The test_http_transport module docstring asserts each test's server is configured for a MySQL database it never connects to. [tests/integration/test_http_transport.py:6]\n  - VC-19: The `list_data_sources` tool output includes the configured database name (`shop-test`), text containing `mysql` derived from the configured URL, and `read-only` for a read-only config. [tests/integration/test_http_transport.py:122]\n  - VC-20: `DatabaseConfig(url=\"mysql+pymysql://u@db.invalid/shop\")` (user, no password, host, database) passes the `DatabaseConfig.url` validator so `build_test_config` constructs a Config. [tests/unit/_config_builders.py:46]\n  - VC-22: With read_only=True, MySQLRunner executes `SET SESSION TRANSACTION READ ONLY` (no parameters) on the query's connection before the user SQL, on a cursor other than the SSDictCursor used for the user read, and the fake records exactly those two statements in that order. [tests/unit/test_mysql_runner.py:28]\n  - VC-23: With statement_timeout_ms above 0, MySQLRunner executes `SET SESSION MAX_EXECUTION_TIME = %s` with the parameter tuple `(1500,)` before the user SQL, and with statement_timeout_ms=0 sends no timeout statement. [tests/unit/test_mysql_runner.py:50]\n  - VC-25: MySQLRunner runs a write (`UPDATE ...`) on a pymysql DictCursor, never calls fetchmany, closes that cursor, commits, and returns a DataFrame with a single record `{\"rows_affected\": <cursor.rowcount>}`. [tests/unit/test_mysql_runner.py:105]\n  - VC-26: A lower profile `max_rows` set via `set_effective_settings` on the calling task is applied by MySQLRunner on its `sqllens-sql`-named worker thread (fetchmany(6), 5 rows, truncated True, max_rows attr 5), and both the connect and the executes happen on that worker thread. [tests/unit/test_mysql_runner.py:122]\n  - VC-27: A profile `max_rows` above the constructor cap does not widen it: MySQLRunner uses min(constructor cap, profile cap). [tests/unit/test_mysql_runner.py:148]\n  - VC-28: `sqllens.agent.integrations.mysql.sql_runner` looks up `verify_base_tables` as a module-level name (so monkeypatching it there takes effect) and calls it as `verify_base_tables(connection, sql, dialect=\"mysql\")` with the query's own connection, on the worker thread, after the read-only SET and before the user SQL, only when `require_base_tables=True`. [tests/unit/test_mysql_runner.py:168]\n  - VC-29: For a table the catalog reports as `VIEW`, the real `verify_base_tables` issues `SELECT @@lower_case_table_names` and then `SELECT TABLE_TYPE FROM information_schema.TABLES WHERE BINARY TABLE_SCHEMA = BINARY COALESCE(%s, DATABASE()) AND BINARY TABLE_NAME = BINARY %s` with params `(None, \"orders\")`, raises RlsError whose message contains \"database views are not supported\", the user SQL is never run, and the connection is closed. [tests/unit/test_mysql_runner.py:200]\n  - VC-31: The module docstring states the tests assert session setup, the row cap and the relation check on the statements the runner sends. [tests/unit/test_mysql_runner.py:4]\n  - VC-32: `probe_database` on a `mysql+pymysql://u@db.invalid/shop` URL with no rule-set file calls `pymysql.connect` exactly once, never opens a cursor, and closes the connection. [tests/unit/test_preflight.py:106]\n  - VC-33: The comment asserts that without a rule-set file the MySQL preflight probe runs no SQL of its own. [tests/unit/test_preflight.py:114]\n  - VC-36: `components_to_blocks` with dialect `mysql` classifies `SHOW CREATE TABLE widgets` as introspection, so its one-row result adds no text block. [tests/unit/test_format.py:1849]\n  - VC-37: Under dialect `mysql`, `SELECT amount FROM sys_payments` is classified as a data query (not catalog), so its result is shown and clears the earlier error. [tests/unit/test_format.py:1932]\n  - VC-38: Under dialect `mysql`, `SELECT table_name FROM information_schema.tables` is classified as introspection, so an oversized-header result is withheld with no block added. [tests/unit/test_format.py:2158]\n  - VC-40: The docstring asserts each row is classified right only when the dialect arrives: with no dialect a data query naming another engine's catalog would be hidden, and a `#`-led SHOW would read as a data query and be shown. [tests/unit/test_query_database.py:1164]\n  - VC-44: `DatabaseConfig.dialect` for `mysql+pymysql://u@db.invalid/shop` returns `\"mysql\"`, and `run_verification` passes it to `compare_sql` as the `dialect` keyword. [tests/unit/test_eval_runner.py:185]\n  - VC-45: `run_verification` calls an async `comparator` with positional `(expected_sql, actual_sql)`, where expected is the golden case's SQL and actual is the driver's `query_info[\"sql\"]`, and a PASS from it counts toward `report.passed`. [tests/unit/test_eval_runner.py:419]\n  - VC-46: `apply_rls` under dialect `mysql` raises RlsError matching \"not supplied\" when a `value_from_metadata` rule's key is absent from empty metadata. [tests/unit/test_metadata_bounds.py:43]\n  - VC-47: `sqllens validate` (no `--check-db`) and `sqllens serve` with a missing API key, given a `mysql+pymysql://u@db.invalid/demo` URL, finish without calling `pymysql.connect` (serve exits 2 before preflight's database probe). [tests/unit/test_config_smoke.py:172]\n  - VC-48: Changed test lines stay within the repo's ruff line length of 100 (e.g. the BOM byte-string at test_config_smoke.py:131 and the TOML strings at test_local_config_security.py:110 and :132). [tests/unit/test_local_config_security.py:132]\n  - VC-50: The comment asserts that with lower_case_table_names = 0 MySQL looks a name up as written, and that the upper-case `_MYSQL_KINDS` rows therefore pin what the guard does with the type the catalog reports rather than how MySQL resolves letter case; this holds only if the fake reports lower_case_table_names = 0 and verify_base_tables passes the name as written. [tests/unit/test_rls_views.py:56]\n  - VC-52: Under dialect `mysql`, RlsGuardRunner/verify_base_tables refuses a query naming a relation the catalog reports as VIEW (directly, nested, in a CTE, schema-qualified, in a scalar or IN subquery) with an RlsError whose message contains \"database views are not supported\", before the user SQL executes. [tests/unit/test_rls_views.py:92]\n  - VC-53: apply_rls under dialect `mysql` rewrites the base-table and shadow-CTE queries into exactly these strings: `SELECT id FROM orders WHERE orders.tenant_id = 'alpha'`, `SELECT id FROM public_values` unchanged, and the CTE named `orders` left without a predicate. [tests/unit/test_rls_views.py:109]\n  - VC-54: Under dialect `mysql`, apply_rls adds the predicate inside IN and scalar subqueries (regenerating `max` as `MAX`), leaves `PUBLIC_VALUES` unchanged, and treats unquoted `ORDERS` as the protected table `orders`, producing `SELECT id FROM ORDERS WHERE ORDERS.tenant_id = 'alpha'`. [tests/unit/test_rls_views.py:125]\n  - VC-55: `mysql_runner()` with default arguments builds a MySQLRunner with read_only=True and statement_timeout_ms=0, so a plain read executes exactly `SET SESSION TRANSACTION READ ONLY` then the user SQL, each with no parameters (recorded as None). [tests/unit/test_rls_views.py:145]\n  - VC-56: The relation lookup for an unqualified table under MySQL is executed with the parameter tuple `(None, \"public_values\")`, and is repeated on the second query rather than cached; the fake reads `server.kinds` live so the mutated VIEW kind is seen. [tests/unit/test_rls_views.py:165]\n  - VC-57: Constructing `mysql_runner()` (a MySQLRunner) without any fake pymysql installed neither connects nor fails, so `test_wrapper_subclass_is_checked_rather_than_looked_past` reaches the RlsGuardRunner TypeError and opens no MySQL connection. [tests/unit/test_rls_views.py:270]\n  - VC-58: verify_base_tables refuses `UPDATE orders SET tenant_id = 'beta'` under dialect `mysql` with an RlsError matching \"relation shape\" without opening a cursor. [tests/unit/test_rls_views.py:351]\n  - VC-59: With RLS rules active under dialect `mysql`, RlsGuardRunner's denylist check refuses `SELECT sleep(1) FROM public_values` with UnsafeSqlError matching \"function 'sleep' is not allowed\" before the MySQL runner opens any connection, with read_only both on and off. [tests/unit/test_rls_views.py:700]\n  - VC-60: `load_rule_sets` given `postgresql://u@db.invalid/shop` reaches the MySQL-only check and raises RuleSetFileError matching \"need a MySQL database\" (and not an earlier parse or connect error). [tests/unit/test_rule_set_file.py:266]\n  - VC-61: RunSqlTool passes its `dialect` to the display-line logic, and under `mysql` `SELECT table_name FROM information_schema.tables` is classified as introspection (no display line), while under `mysql` `SELECT c FROM t WHERE (` fails to parse and is treated as a data query. [tests/unit/test_run_sql_display_line.py:94]\n  - VC-82: ResultMaskingRunner over a MySQLRunner returns a DataFrame whose columns are the fake row dict keys, leaves the value under non-secret alias `h` unmasked and masks the `upper(password_hash)` column to `[withheld]`. [tests/unit/test_safety_masking.py:692]\n  - VC-83: With rls enabled and a mysql+pymysql URL, build_agent's relation-check executor beneath RlsGuardRunner is a MySQLRunner instance. [tests/unit/test_safety_masking.py:649]\n  - VC-85: RunSqlTool over a MySQLRunner fed rows [{id, name}, ...] reports metadata['columns'] == ['id', 'name']. [tests/unit/test_safety_whole_row.py:398]\n  - VC-86: The comment asserts that with no dialect, a table in one of MySQL's catalog schemas (here `mysql.users`) counts as a catalog, so a star over it is allowed. [tests/unit/test_safety_whole_row.py:166]\n  - VC-87: The comment asserts that a table whose name merely starts with a MySQL catalog schema's name (`sys_users`) is not treated as a catalog under mysql, so a star over it is refused. [tests/unit/test_safety_whole_row.py:182]\n  - VC-88: Every test parametrized over DIALECTS in test_safety_whole_row.py had the same expected outcome under `sqlite` as under `mysql`, so dropping `sqlite` from DIALECTS removes only duplicate cases and no SQLite-only case. [tests/unit/test_safety_whole_row.py:51]\n  - VC-89: Every test parametrized over DIALECTS in test_safety_table_shorthand.py gave `uses_table_shorthand` the same expected outcome under `sqlite` as under `mysql`, so removing `sqlite` drops only duplicate cases. [tests/unit/test_safety_table_shorthand.py:15]\n  - VC-90: The system prompt's Tool Errors bullets and Data Confidentiality section are the same for the `sqlite` dialect as for `mysql`, so removing the `sqlite` parametrize case drops only a duplicate. [tests/unit/test_system_prompt.py:461]\n  - VC-93: test_sql_runner_event_loop.py's use of install_fake_pymysql(monkeypatch, lambda **_kwargs: conn) matches the shared helper's signature, replacing the import from test_sql_runner_cleanup. [tests/unit/test_sql_runner_event_loop.py:90]\n  - VC-94: The fixture docstring asserts that building a real agent is the object graph only (the diff removed the 'sqlite connect' mention), i.e. build_agent for the configured URL performs no database connect on construction. [tests/unit/test_transport_http.py:202]\n\n  </details>\n- Reviewed against issue #381 — criteria from the workpad; scope unchanged.\n- prior-report: none\n\n</details>\n",
+ "acceptance_criteria": "- [ ] **Definitions.** A test, helper or fixture under `tests/` *uses SQLite* when it does any of these: names a `sqlite` URL; reads a file under `examples/sqlite-demo/`; imports or calls Python's `sqlite3` module or anything in `sqllens.agent.integrations.sqlite`; calls `sqllens.preflight._probe_sqlite`, or a preflight path that reaches it with a `sqlite` URL; passes `\"sqlite\"` as a dialect or engine value; or relies on a SQLite entry of the fallback union (`load_extension`, or a `sqlite_` or `pragma_` name, a CTE or table so named included). A case relies on such an entry when it runs under a `None` or unknown dialect and its outcome comes from that entry. It also relies on one when, under any dialect, its outcome differs from the `None`-dialect outcome only because the entry is in the union. An example is a `sqlite_`-prefixed data table under dialect `mysql` that proves the configured dialect arrives, as in the MySQL row #382 gave `test_with_widgets_hides_introspection_result_under_configured_dialect`. Naming ChromaDB's `chroma.sqlite3` file is not a use. A use is *SQLite-only* when the behaviour it asserts exists only for SQLite. That covers at minimum: the `sqllens.agent.integrations.sqlite` package, `sqlite_path_from_url` and `_readonly_uri`; the SQLite preflight probe; a `sqlite`-keyed entry of a per-dialect table in `src/sqllens/safety/` or in the system prompt (for example `sqlite_master`, `pragma_*` names, `load_extension`); `sqllens init`'s SQLite template; `claude-desktop install`'s SQLite file-stem naming; a case that relies on a SQLite entry of the fallback union; and a `sqlite` case whose expected outcome differs from the same test's `mysql` case with the same other inputs. A use whose classification is unclear counts as SQLite-only, and its test also gets a MySQL version. A `sqlite` URL used only as the non-MySQL input that a MySQL-only check refuses (`tests/unit/test_rule_set_file.py::test_non_mysql_url_is_refused`, `tests/unit/test_cli_rule_sets.py::test_validate_refuses_a_non_mysql_url`) is engine-neutral where another non-MySQL scheme can reach that check: its replacement passes one, for example `postgresql://u@db.invalid/shop`, straight to `load_rule_sets`, and asserts the same refusal. Where config load refuses every other scheme before the check runs (`sqllens validate`), the use is SQLite-only, and its map row says no MySQL counterpart exists because config load accepts only MySQL and SQLite URLs. Every other use is *engine-neutral*. After the change, every use of SQLite under `tests/` is SQLite-only.\n- [ ] Each engine-neutral test (as the first criterion defines it) that needs a database URL uses a `mysql+pymysql://` URL that names a user and a host. This includes `tests/unit/_config_builders.py`, `tests/integration/conftest.py` and `tests/unit/test_transport_http.py`. The `list_data_sources` transport test asserts that the configured `mysql` scheme appears in the tool's output.\n- [ ] No test in the default run opens a connection to a MySQL server. Proof: the default `pytest -q` run passes, and records no call, with the real `pymysql.connect` replaced for the whole session by a function that records each call and raises; the run fails if any call was recorded, even when the code under test caught the error. Every test whose path reaches `pymysql.connect` (query execution, or the preflight database probe through `serve`, `validate --check-db` or `run_preflight`) supplies its own fake.\n- [ ] Each MySQL replacement for a test whose assertion depends on behaviour inside the runner builds a real `MySQLRunner` over a fake `pymysql` module. That behaviour covers at minimum: session setup, cursor choice, the row cap, settings that reach the worker thread, the relation check and catalog lookups, the read-versus-write branch, and the rows `RunSqlTool` receives. The replacements cover the profile row cap on the worker thread, the relation check on the worker thread, the plain, CTE and comment-led `fetchmany` caps, `RunSqlTool`'s read-shaped results, and the view and catalog lookups now done live in `test_rls_views.py`. A fake `SqlRunner` stands in only where the asserted behaviour sits above the runner; where that is unclear, the test uses the fake driver. Some tests assert a result the database computes, such as the rows of a row-level-security query. A replacement for such a test asserts the exact statement the runner executed (for row-level security, the rewritten SQL carrying the predicate), never rows the fake was scripted to return.\n- [ ] Unit tests in the default run, using a fake `pymysql` module, assert that `MySQLRunner`: 1. with `read_only=True`, executes `SET SESSION TRANSACTION READ ONLY` on the query's connection before the user SQL, and with `read_only=False` does not execute it; 2. with `statement_timeout_ms` above 0, executes `SET SESSION MAX_EXECUTION_TIME = %s` with that value as its parameter before the user SQL, and with 0 does not execute it; 3. runs a plain, a `WITH … SELECT` and a comment-led read on an `SSDictCursor` with `fetchmany(cap + 1)`, returning `cap` rows with the truncation attribute `True` when the fake returns `cap + 1` rows, and `False` when it returns fewer; 4. caps a read at a profile's lower `max_rows`, set as effective settings on the calling task, while running on a `sqllens-sql` worker thread; 5. with `require_base_tables=True`, calls `verify_base_tables` with the query's own connection and dialect `mysql` on a `sqllens-sql` worker thread before executing the user SQL, and with `False` does not call it.\n- [ ] For the dialect cases of every test: - A `sqlite` case with the same other inputs and the same expected outcome as an existing `mysql` case of that test is removed. - An engine-neutral case (as the first criterion defines it) that ran only under `sqlite` runs under `mysql`. Its outcome under `mysql` can differ from its SQLite expectation for two excused causes, and in both the SQLite case stays as SQLite-only: - a `mysql`- or `sqlite`-keyed entry or branch of a per-dialect table or dialect check in `src/`. The MySQL case asserts the code's MySQL outcome. - sqlglot's `mysql` grammar reading the same text differently (for example, `#` starts a comment and a double-quoted name is a string, only under `mysql`). The MySQL case is the input written in MySQL syntax with the same meaning (for example, backticks for a quoted name, or an unparseable statement with no `#`), and it asserts the SQLite case's outcome. An existing `mysql` case of the test that already is that input stands in for it. Any other difference, or one whose cause is unclear, is a defect handled as the last criterion states. - The default `dialect` of `_assert_filtered_and_readonly` in `tests/unit/test_safety_rls.py` is `\"mysql\"`. - Every `None`-dialect and unknown-dialect case that exists at the merge base still exists. - Each such case that relies on a SQLite entry of the fallback union (a SQLite-only case, as the first criterion defines it) has a counterpart in the same test, under each of the dialect values that case uses. The same applies to each case of any dialect that relies on such an entry. The counterpart relies only on a MySQL entry or on MySQL-only syntax (for example `load_file`, `sleep`, a table in the `mysql`, `sys` or `performance_schema` schema, or a statement only the `mysql` dialect reads, such as `# note\\nSHOW TABLES`). It asserts the same outcome as the SQLite case. If the code gives the MySQL entry a different outcome, the difference is handled as the last criterion states. The exception is a case whose outcome no MySQL entry or syntax can produce; for example, a CTE-shadowing case needs a name prefix, and MySQL's catalog entry has none. Its map row states that no MySQL counterpart exists and why. For `test_with_widgets_hides_introspection_result_under_configured_dialect`, the counterpart row's catalog statement is one only the `mysql` dialect classifies as introspection (for example `# note\\nSHOW TABLES`), so the test fails when the configured dialect does not reach the formatter.\n- [ ] Every moved or added test that expects a refusal (`UnsafeSqlError`, `RlsError`, `PreflightError`, `RuleSetFileError`) asserts the refusal's reason, with `match=` or an assertion on the error's message or detail. A statement refused for an unrelated reason then fails the test.\n- [ ] The MySQL connector suite in `tests/connectors/` has a test that, against a live MySQL server through `ResultMaskingRunner`, does two things. It reads a secret column under a non-secret alias (`SELECT password_hash AS h`) and gets the stored value back unmasked under key `h`. It reads an unaliased expression over that column (`SELECT upper(password_hash)`) and gets the value masked. The implementing run shows this by running the test against a local `mysql:8.0` server published with a port mapping; a run that cannot start one ends Blocked on this criterion.\n- [ ] The MySQL connector suite in `tests/connectors/` has row-level-security cases that, against a live MySQL server through `RlsGuardRunner` over the read-only guard and row cap, assert the rows the server returns. The shapes cover at minimum: the protected table's rows filtered to the rule's value, an unprotected table read in full, a CTE that shadows the protected table's name, a `WHERE id IN (SELECT id FROM <protected>)` subquery, and a scalar subquery `(SELECT max(id) FROM <protected>)`. The letter-case shape (an upper-case table name) has no live case: on the CI server, `lower_case_table_names` is 0, so an upper-case name is a different table. The implementing run shows this by running the test against a local `mysql:8.0` server published with a port mapping; a run that cannot start one ends Blocked on this criterion.\n- [ ] The PR body carries a port/delete map, continued in a PR comment that the body links to when the map does not fit in the body. The map has one row for each test, parametrized case group, helper or fixture under `tests/` that uses SQLite (as the first criterion defines it) at the merge base. A test or case is named by its node ID, and a helper or fixture by `path::name`. Each row gives the node ID or IDs of its MySQL replacement (the same test when only its URL or dialect changed), or `SQLite-only, deleted in #383`. A row for a test whose classification was unclear gives both. A SQLite-only row with no possible MySQL counterpart says so and why. Tests in one file with the same outcome may share a row that names them.\n- [ ] Line coverage does not drop against the merge base. Instrument: coverage.py, installed with `pip install coverage` for the measurement only, `python -m coverage run -m pytest -q`, then `python -m coverage json`, comparing each file's `executed_lines` under all of `src/sqllens/`. Every line that the merge base's default run executes is also executed by this branch's default run with the map's `SQLite-only` tests deselected. Lines are matched through the PR's diff of `src/`: a line the diff deletes needs no match, and every line the diff adds that coverage.py reports as a statement (in `executed_lines` or `missing_lines`) is executed. The one exception is a line that no non-SQLite input can execute. It is defined by where the code is, not by which tests ran: a line in `sqllens.agent.integrations.sqlite` or `sqllens.preflight._probe_sqlite`, or a line inside a branch whose condition holds only for the `sqlite` dialect, a URL whose scheme starts with `sqlite`, or a SQLite database file, or a line in a function whose every caller is such a line (for example `sqllens.safety.relations._sqlite_kind`). When it is unclear whether a line is such a line, a MySQL test executes it. The PR body states the merge-base SHA compared against, and lists each excepted line as `path:line` or a line range with the SQLite-only condition that guards it.\n- [ ] Each SQLite-only test (as the first criterion defines it) still runs and passes in the default run. The change leaves every file under `src/` unchanged except for the fix to a security defect that a new or moved test exposes. The list of security defects is closed. A security defect is a defect in the code of one of these guards that lets it be bypassed or weakened under the `mysql` dialect or a MySQL URL: the read-only guard (`ReadOnlyGuardRunner`, `assert_select_only`), the function denylist, row-level security (`RlsGuardRunner`, `apply_rls`) and its relation check (`verify_base_tables`), result masking (`ResultMaskingRunner`), the row cap (`RowCapRunner` and the runner's `fetchmany` cap), the whole-row guard (`WholeRowSelectGuardRunner`), the per-role rule-set guard (`RuleSetGuardRunner`, `apply_rule_set`: its table and column limits, catalog-read rewrite and row rules) and refusal redaction (`RefusalRedactingRunner`). A defect for which it is unclear whether it lies in one of these guards' code, or whether it bypasses or weakens one, counts as a security defect. Any other defect takes the ordinary route. That includes defects clearly in the MySQL session's read-only setting (`SET SESSION TRANSACTION READ ONLY`) or statement timeout (`MAX_EXECUTION_TIME`), or in the `None`/unknown-dialect fallback. A security defect is fixed in this PR, never deferred, its exposing test passes unmarked, and no public issue is filed for it. This is the maintainer's chosen route for this issue, an exception to `SECURITY.md`'s private-report route. Any other defect a new or moved test exposes in shipped code is named in the PR body by its own issue number. Its exposing test is marked `pytest.mark.xfail(strict=True, raises=<the exception the defect produces>)` with a reason naming that issue.",
+ "diff_produced_at_head": "18f03d7b83a5caa93139f2806fb08a88e1e55f82",
+ "checklist": [
+  {
+   "id": "VC-8",
+   "claim_signature": "dependency_interaction:test_cli.py:patch-object-pymysql-connect:28",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "category": "dependency_interaction",
+   "claim": "Real pymysql exposes `pymysql.err.OperationalError`, constructible as `(2003, \"Can't connect to MySQL server\")`, and it is a subclass of whatever exception class the preflight probe catches, so raising it from `connect` takes the probe's failure path rather than escaping as an unhandled crash.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_cli.py",
+   "source_line": 40,
+   "source_line_end": 41,
+   "verify_against": "src/sqllens/preflight.py (the except clause around the MySQL connect) and the installed pymysql package (pymysql/err.py)",
+   "verify_hint": "Check the exception types `probe_database` catches around `pymysql.connect` in `preflight.py`, and that `OperationalError` in pymysql's `err.py` derives from `MySQLError`.",
+   "claim_signature": "dependency_interaction:test_cli.py:operational-error-caught:40",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-2"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Probe side verified: src/sqllens/preflight.py:143-150 wraps pymysql.connect(...) in `except pymysql.MySQLError as exc` and raises PreflightError (the probe's failure path). The test helper tests/unit/test_cli.py:40-41 builds pymysql.err.OperationalError(2003, \"Can't connect to MySQL server\") and the autouse fixture (line 36) patches pymysql.connect. What could not be verified: that pymysql.err.OperationalError exists, accepts those args, and derives from pymysql.MySQLError. The item has no dependency_sources, and pymysql's source (pymysql/err.py) is not in the head or base views (inventory.json lists only tests/unit/_fake_pymysql.py, a test fake, which is not the real library). A Glob for **/pymysql/err.py under the review directory found nothing. Per the rules, a library claim with no source in the views or dependency_sources is INCONCLUSIVE. Missing evidence: pymysql/err.py from the installed PyMySQL (the OperationalError -> DatabaseError -> Error -> MySQLError chain).",
+   "file_checked": "src/sqllens/preflight.py:143-150",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "data_format_assumption:test_cli.py:db-preflight-failure-message:214",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "data_format_assumption:test_cli.py:db-preflight-failure-message:328",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "dependency_interaction:test_cli.py:probe-connect-kwargs-close:291",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "dependency_interaction:test_cli.py:no-preflight-no-connect:263",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "dependency_interaction:test_cli.py:validate-connect-once:317",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "dependency_interaction:test_cli.py:fixture-docstring-connect-paths:32",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "absolute_claim:test_cli.py:invalid-domain-cannot-reach:23",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "data_format_assumption:test_cli.py:llm-api-key-missing-message:1041",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-63",
+   "claim_signature": "dependency_interaction:test_cli.py:pymysql-installed-default-env:14",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-64",
+   "claim_signature": "absolute_claim:conftest.py:never-connects:6",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-65",
+   "claim_signature": "absolute_claim:conftest.py:invalid-domain-cannot-reach:39",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-66",
+   "claim_signature": "dependency_interaction:test_slow_agent_run_responsiveness.py:held-run-no-connect:136",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-67",
+   "claim_signature": "api_contract:test_slow_agent_run_responsiveness.py:list-data-sources-name:176",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-68",
+   "claim_signature": "dependency_interaction:test_cli_memory.py:memory-cli-no-connect:27",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-70",
+   "claim_signature": "dependency_interaction:test_connectors.py:writer-runner-commits:157",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-72",
+   "category": "dependency_interaction",
+   "claim": "Under dialect `mysql`, `compare(\"this is not sql ?? !!\", \"SELECT 1\")` gets a sqlglot parse or tokenize error on the expected SQL and returns `Status.ERROR`.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_eval_compare.py",
+   "source_line": 46,
+   "source_line_end": 51,
+   "verify_against": "src/sqllens/eval/compare.py (compare and its error classification) and sqlglot's MySQL tokenizer/parser at the locked version in requirements.txt",
+   "verify_hint": "Check how `compare` in `eval/compare.py` catches `ParseError`/`TokenError` on the expected side, and whether sqlglot's mysql dialect parses `this is not sql ?? !!` (for example as an alias chain) instead of raising.",
+   "claim_signature": "dependency_interaction:test_eval_compare.py:mysql-unparseable-expected:46",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-1"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Repo side confirmed: src/sqllens/eval/compare.py:58-84. compare() calls compare_sql(), which wraps normalize_sql(expected) in try/except sqlglot.errors.SqlglotError and raises SqlComparisonError. compare() maps that to Status.ERROR (lines 81-84). ParseError and TokenError both subclass SqlglotError. The test at tests/unit/test_eval_compare.py:43-51 passes \"this is not sql ?? !!\" under mysql. So the claim holds only if sqlglot 30.31.0 (pinned at requirements.txt:104) raises on that string under the mysql dialect. The item has no dependency_sources, and inventory.json lists no sqlglot/dialects/mysql file in the views. I did not read the library source and did not run the test or sqlglot. Without the mysql tokenizer and parser, I cannot tell whether the string is rejected or parsed, for example as an IS NOT chain with placeholders. The claim is unsettled. Missing evidence: sqlglot 30.31.0 source (tokens.py, parser.py, dialects/mysql.py), or the output of running pytest tests/unit/test_eval_compare.py::test_error_when_expected_unparseable.",
+   "file_checked": "src/sqllens/eval/compare.py:58-84",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-73",
+   "category": "data_format_assumption",
+   "claim": "The comment asserts that `#` opens a comment under mysql, so the mysql case's malformed input is written without one (and the sqlite case's `##` text would read differently under mysql).",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# ``#`` opens a comment under mysql, so its malformed input carries none.",
+   "source_file": "tests/unit/test_eval_compare.py",
+   "source_line": 45,
+   "verify_against": "sqlglot's MySQL tokenizer (comment tokens) at the version locked in requirements.txt",
+   "verify_hint": "Check the MySQL tokenizer's COMMENTS setting in sqlglot's `dialects/mysql.py` for `#`; trace `this is not sql ## ?? !!` under mysql to see the text after `##` dropped as a comment.",
+   "claim_signature": "data_format_assumption:test_eval_compare.py:hash-comment-mysql:45",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-2"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The comment at tests/unit/test_eval_compare.py:45 ('``#`` opens a comment under mysql, so its malformed input carries none.') and the parametrized inputs at line 46 (sqlite 'this is not sql ## ?? !!', mysql 'this is not sql ?? !!') are as the claim describes. Whether `#` is a comment token in MySQL depends on sqlglot's MySQL tokenizer (requirements.txt:104 pins sqlglot==30.31.0). The item has no `dependency_sources`, and a Glob of the head view for **/dialects/mysql.py (and a Grep of the view for the \"#\" token) found no sqlglot source. The library source is therefore not in the views or in any supplied dependency directory, and I did not read an installed copy outside them. The claim is unsettled by the views. Missing evidence: sqlglot 30.31.0 dialects/mysql.py Tokenizer COMMENTS, and a run of sqlglot.parse_one('this is not sql ## ?? !!', read='mysql'). The rejection line in `rejections` concerns test_safety.py and does not cover this item.",
+   "file_checked": "tests/unit/test_eval_compare.py:45",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-74",
+   "category": "dependency_interaction",
+   "claim": "Under dialect `mysql`, the actual SQL `@@@ definitely not sql @@@` fails to parse or tokenize (rather than parsing `@@` as a MySQL system-variable reference), so `compare` returns `Status.ERROR`.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_eval_compare.py",
+   "source_line": 57,
+   "source_line_end": 58,
+   "verify_against": "src/sqllens/eval/compare.py and sqlglot's mysql dialect handling of `@@` session variables",
+   "verify_hint": "Check how sqlglot's mysql parser treats a leading `@@@` token sequence and whether `compare` classifies that outcome as ERROR.",
+   "claim_signature": "dependency_interaction:test_eval_compare.py:mysql-at-sigil-unparseable:57",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-3"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Repository side confirmed: src/sqllens/eval/compare.py:58-84 resolves dialect 'mysql' unchanged, normalize_sql calls sqlglot.parse(sql, read='mysql') (l.48-50), compare_sql wraps any sqlglot.errors.SqlglotError (ParseError/TokenError) from the actual side in SqlComparisonError (l.68-71), and compare maps SqlComparisonError to Status.ERROR (l.81-84). The test at tests/unit/test_eval_compare.py:54-58 asserts exactly that for actual='@@@ definitely not sql @@@'. What remains is whether sqlglot's mysql tokenizer/parser raises on '@@@ definitely not sql @@@' rather than reading '@@' as a system variable. That depends on installed sqlglot behavior. The item has no dependency_sources, and the views contain no sqlglot source (Glob of **/sqlglot/** in view-head returned nothing). I did not read the working-tree .venv copy as the rules forbid it, and I did not run sqlglot on the input. Even if '@@' parsed as a session variable, the trailing 'definitely not sql @@@' tokens would likely still raise, but that is inference, not a read of the library. Missing evidence: sqlglot tokens.py/parser.py (mysql dialect) or the output of sqlglot.parse('@@@ definitely not sql @@@', read='mysql').",
+   "file_checked": "src/sqllens/eval/compare.py:58-84",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-75",
+   "category": "dependency_interaction",
+   "claim": "Under dialect `mysql`, a double-quoted text left unterminated in the actual SQL (`name = \"unterminated`) raises a sqlglot `TokenError`, and `compare` classifies it as `Status.ERROR`.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_eval_compare.py",
+   "source_line": 109,
+   "source_line_end": 110,
+   "verify_against": "src/sqllens/eval/compare.py and sqlglot's MySQL tokenizer (double quote as a string delimiter)",
+   "verify_hint": "Check that sqlglot's mysql tokenizer treats `\"` as a string quote and raises `TokenError` on an unterminated one, and that `compare` catches `TokenError` on the actual side.",
+   "claim_signature": "dependency_interaction:test_eval_compare.py:unterminated-dquote-actual:109",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-4"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Repository side verified from the head view. src/sqllens/eval/compare.py:58-84: compare() calls compare_sql(), which wraps normalize_sql(actual) in `except sqlglot.errors.SqlglotError` and re-raises SqlComparisonError. compare() maps that to Status.ERROR. Any sqlglot error raised while tokenizing the actual side would therefore become ERROR, provided TokenError subclasses SqlglotError. The test at tests/unit/test_eval_compare.py:106-110 asserts exactly this with dialect=\"mysql\". What I could not settle is whether sqlglot's MySQL tokenizer treats `\"` as a string delimiter and raises TokenError on an unterminated one. That depends on installed sqlglot source. The item has no `dependency_sources`, and the head view's inventory.json lists no sqlglot files (no match for sqlglot/dialects/mysql). A sqlglot copy exists only in the working-tree .venv, which I may not use. Missing evidence: sqlglot/dialects/mysql.py (Tokenizer QUOTES and STRING_ESCAPES) and sqlglot/errors.py (TokenError base class), or running compare('SELECT name FROM users', 'SELECT name FROM users WHERE name = \"unterminated', dialect='mysql'), which I did not do.",
+   "file_checked": "src/sqllens/eval/compare.py:58-84",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-76",
+   "category": "dependency_interaction",
+   "claim": "Under dialect `mysql`, a double-quoted text left unterminated in the expected SQL raises a sqlglot `TokenError`, and `compare` classifies it as `Status.ERROR`, not `CHANGED`.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_eval_compare.py",
+   "source_line": 118,
+   "source_line_end": 120,
+   "verify_against": "src/sqllens/eval/compare.py and sqlglot's MySQL tokenizer",
+   "verify_hint": "Check that `compare` catches `TokenError` (not only `ParseError`) when parsing the expected SQL under mysql.",
+   "claim_signature": "dependency_interaction:test_eval_compare.py:unterminated-dquote-expected:118",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-5"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Repository side confirmed in the head view: src/sqllens/eval/compare.py:64-72 wraps normalize_sql in `except sqlglot.errors.SqlglotError` for both sides and re-raises SqlComparisonError; compare (lines 81-84) maps that to Status.ERROR. So any SqlglotError subclass raised while parsing the expected SQL (TokenError included, if it subclasses SqlglotError) gives ERROR, not CHANGED. The test at tests/unit/test_eval_compare.py:113-120 asserts exactly this. What I could not settle is the library half of the claim: that sqlglot's MySQL tokenizer treats a double-quoted run as a string and raises TokenError (a SqlglotError subclass) when it is unterminated. The item has no dependency_sources, and the view's inventory.json lists no sqlglot files (no sqlglot/tokens, errors or dialects/mysql entries). The only sqlglot copy is the working-tree .venv, which I may not use as a fallback. Missing evidence: sqlglot source (tokens.py, errors.py, dialects/mysql.py) or a run of compare() on the test inputs.",
+   "file_checked": "src/sqllens/eval/compare.py:64-84",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-77",
+   "category": "dependency_interaction",
+   "claim": "Under dialect `mysql`, `compare` gives the parametrized multi-statement outcomes: a differing second statement is CHANGED, whitespace/casing/trailing-semicolon differences are PASS, an extra statement is CHANGED, a `SELECT (` on either side is ERROR, and an empty expected string is ERROR.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_eval_compare.py",
+   "source_line": 129,
+   "source_line_end": 141,
+   "verify_against": "src/sqllens/eval/compare.py (statement splitting/comparison)",
+   "verify_hint": "Check how `compare` parses with `sqlglot.parse` under mysql, compares statement lists, and handles an empty parse.",
+   "claim_signature": "dependency_interaction:test_eval_compare.py:multi-statement-mysql:140",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-6"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Read tests/unit/test_eval_compare.py:129-141 (six parametrized cases, dialect=\"mysql\") and src/sqllens/eval/compare.py:39-84. The repo logic is as claimed. normalize_sql parses every statement with sqlglot.parse(read=mysql), drops None entries, raises ParseError if none remain, and joins the rendered statements with '; '. compare_sql returns PASS or CHANGED on equality of the normalized strings. It wraps SqlglotError as SqlComparisonError, and compare maps that to ERROR. So, assuming sqlglot behaves as expected, the six cases give: a differing second statement is CHANGED, whitespace/casing/trailing-';' differences are PASS, an extra statement is CHANGED, a 'SELECT (' side is ERROR, and an empty string is ERROR. However, three of these outcomes depend on sqlglot's runtime behavior. 'SELECT (' must raise a SqlglotError. A trailing ';' must not yield an extra statement. sqlglot.parse('') must yield no non-None statement. No dependency_sources were supplied, the view inventory has no sqlglot source, and no committed vendor copy exists, so I could not read sqlglot's parser or tokenizer. I also did not run the test. Missing evidence: the sqlglot parser source, or a run of tests/unit/test_eval_compare.py::test_comparison_covers_every_statement. The rejection line about test_safety.py does not cover this claim.",
+   "file_checked": "src/sqllens/eval/compare.py:39-84",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-78",
+   "claim_signature": "data_format_assumption:test_eval_compare.py:mysql-unmapped-passthrough:96",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-79",
+   "claim_signature": "dependency_interaction:test_factory_wiring.py:question-led-not-select:76",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-80",
+   "category": "data_format_assumption",
+   "claim": "The comment asserts the `? c` row is the same symbol-led statement written in MySQL syntax, where `#` would open a comment.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# The same symbol-led statement in MySQL syntax, where \"#\" would open a comment.",
+   "source_file": "tests/unit/test_factory_wiring.py",
+   "source_line": 75,
+   "verify_against": "sqlglot's MySQL and SQLite tokenizers; tests/unit/test_factory_wiring.py rows at lines 73-76",
+   "verify_hint": "Check whether sqlglot's sqlite tokenizer reads `#` the way sqlglot's mysql tokenizer reads `?` (both as a non-comment symbol leading the statement), so the two rows have the same meaning.",
+   "claim_signature": "data_format_assumption:test_factory_wiring.py:symbol-led-same-meaning:75",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-9"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim depends on how sqlglot's MySQL and SQLite tokenizers treat '#' and '?', which is third-party library behavior. The item has no dependency_sources. sqlglot is not in the head view: a Glob of view-head for **/sqlglot/**/*.py found nothing. I did not read the installed sqlglot in the working-tree .venv, because the rules bar falling back to the working tree. What I could read: tests/unit/test_factory_wiring.py:70-116 parametrizes three rows. The first two are mysql '# c\\nSELECT n FROM t' -> 'SELECT' and sqlite '# c\\nSELECT n FROM t' -> ''. The third is the row the claim covers, mysql '? c\\nSELECT n FROM t' -> '' (line 76), under the comment at line 75. src/sqllens/safety/readonly.py:124-164 first_sql_keyword tokenizes with the dialect's sqlglot tokenizer and returns '' when the first non-'(' token is not a VAR or keyword. So the row-3 comment is accurate only if sqlglot's MySQL tokenizer yields a non-comment, non-word first token for '?', and its SQLite tokenizer does the same for '#'. That is the missing evidence. The test's own expected values (both '') are consistent with this, but they are not proof of it. Command not run: a sqlglot tokenize of '? c' under mysql and '# c' under sqlite, or a read of the installed sqlglot/dialects/mysql.py, sqlite.py and tokens.py.",
+   "file_checked": "tests/unit/test_factory_wiring.py:70-116",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-81",
+   "claim_signature": "dependency_interaction:test_factory_wiring.py:build-agent-mysql-no-connect:510",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-84",
+   "claim_signature": "dependency_interaction:test_factory_wiring.py:mysqlrunner-private-attrs:521",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-91",
+   "claim_signature": "dependency_interaction:test_mysql_runner.py:fetchmany-cap-reads:84",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-92",
+   "category": "dependency_interaction",
+   "claim": "Under a `mysql+pymysql` URL, `query_database_impl_with_widgets` passes dialect `mysql` to the formatter, which classifies `# note\\nSHOW TABLES` as introspection (withheld) and shows `SELECT id FROM widgets`; with no dialect, the `#`-led statement would be classified as a data query.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_query_database.py",
+   "source_line": 1147,
+   "source_line_end": 1151,
+   "verify_against": "src/sqllens/tools/query_database.py (dialect passed to components_to_blocks) and src/sqllens/safety/readonly.py is_introspection_query / first_sql_keyword",
+   "verify_hint": "Trace `# note\\nSHOW TABLES` through `first_sql_keyword` under mysql and under None, and check the dialect the tool passes to `components_to_blocks`.",
+   "claim_signature": "dependency_interaction:test_query_database.py:hash-led-show-hidden:1149",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-13"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Verified from the head view: query_database.py:831-832 passes dialect=sqlglot_dialect_for_url(cfg.database.url) to components_to_blocks, and readonly.py:178-189 maps a 'mysql+pymysql' scheme to 'mysql' (it is a _CATALOGS_BY_DIALECT key, readonly.py:200). _format.py:383 calls is_introspection_query(sql, dialect=dialect), and readonly.py:292 returns True when first_sql_keyword(sql, dialect) == 'SHOW'. first_sql_keyword (readonly.py:124-164) tokenizes with sqlglot's dialect tokenizer and returns the first non-L_PAREN token's text. So the claim holds only if sqlglot's MySQL tokenizer treats '#' as a line comment (so SHOW is the first token) and the default tokenizer does not (so '#' becomes a non-word token, first_sql_keyword returns '', the parse fails or finds no catalog table, and the statement counts as data). The repository's own tests assert this (tests/unit/test_safety.py:1034-1035 and 1106), but a test is not a source of truth. The tokenizer behavior is third-party library behavior. The item has no dependency_sources and the head view holds no sqlglot source (a Glob for **/sqlglot/tokens.py in the head view found nothing). I could not read sqlglot's Tokenizer COMMENTS definitions for the MySQL and base dialects, and I did not run the code. The data query 'SELECT id FROM widgets' is shown because it has no SHOW keyword and no catalog table; that part follows from the repository code alone. Missing evidence: sqlglot's source (dialects/mysql.py Tokenizer.COMMENTS and tokens.py base COMMENTS) or a run of first_sql_keyword('# note\\nSHOW TABLES', 'mysql') versus None.",
+   "file_checked": "src/sqllens/safety/readonly.py:124-164",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-95",
+   "claim_signature": "dependency_interaction:test_format.py:unparseable-shown-mysql:1948",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-96",
+   "claim_signature": "dependency_interaction:test_safety.py:none-dialect-load-file-union:239",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-97",
+   "claim_signature": "data_format_assumption:test_safety.py:root-type-refusal-message:276",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-98",
+   "claim_signature": "dependency_interaction:test_safety.py:guard-runner-mysql-load-file:338",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-99",
+   "claim_signature": "dependency_interaction:test_safety.py:denylist-case-insensitive-mysql:492",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-100",
+   "category": "dependency_interaction",
+   "claim": "With no dialect, `select user from mysql.user` is classified as introspection (`is_introspection_query` returns True), the `user` column name not preventing the parse.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_safety.py",
+   "source_line": 862,
+   "verify_against": "src/sqllens/safety/readonly.py is_introspection_query and is_catalog_table",
+   "verify_hint": "Trace `select user from mysql.user` through `is_introspection_query(sql, dialect=None)`: whether sqlglot's default dialect parses `user` as a column, and whether the no-dialect catalog union includes the `mysql` schema.",
+   "claim_signature": "dependency_interaction:test_safety.py:no-dialect-mysql-user-column:862",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-5"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Repository side verified in the head view. src/sqllens/safety/readonly.py:254-317 is_introspection_query with dialect=None skips the dialect check, calls first_sql_keyword (not SHOW for a SELECT), then sqlglot.parse_one(sql, dialect=None). It iterates parsed.find_all(exp.Table) and calls is_catalog_table. is_catalog_table (320-333) calls _catalog_names(None), which returns _ALL_CATALOG_SCHEMAS (212-217). That set is information_schema united with every dialect's schemas (198-209), and _CATALOGS_BY_DIALECT['mysql'] contains 'mysql' (line 201). So if the parse yields an exp.Table with db='mysql', the function returns True. The test row is tests/unit/test_safety.py:862, added by this PR (diff.patch ~2328; absent from the base view). The unverified step is the claim's dependency part: whether sqlglot's default (no-dialect) parser accepts `select user from mysql.user` with `user` as a column and `mysql.user` as a Table(db=mysql). The review supplied no dependency_sources, and sqlglot is not in the head or base view. I did not read sqlglot's tokenizer or parser. The only copy on disk is the working-tree .venv, which the rules do not allow as a source. I did not run the test. A parse error would return False (lines 296-303), so this step decides the verdict. Missing evidence: sqlglot source (pyproject pins >=30.22,<31), or a run of `pytest tests/unit/test_safety.py -k TestIsIntrospectionQuery`.",
+   "file_checked": "src/sqllens/safety/readonly.py:254-333",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-101",
+   "category": "dependency_interaction",
+   "claim": "With no dialect, `WITH user AS (SELECT 1) SELECT * FROM user JOIN mysql.user ON true` is introspection: the schema-qualified `mysql.user` reference is not treated as a reference to the CTE named `user`.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_safety.py",
+   "source_line": 924,
+   "verify_against": "src/sqllens/safety/readonly.py (`_cte_reference_ids`, is_introspection_query)",
+   "verify_hint": "Check how `_cte_reference_ids` decides a table node is a CTE reference (does it require no `db` qualifier), and whether sqlglot's default dialect parses `user` as a table name in `FROM user`.",
+   "claim_signature": "dependency_interaction:test_safety.py:none-qualified-beside-cte:924",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-6"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Repo logic traced in head view src/sqllens/safety/readonly.py. _cte_reference_ids (220-251) counts a table as a CTE reference only when it has no db and no catalog arg and its name is in scope.cte_sources (238-240). So mysql.user (db='mysql') is never excluded as a CTE reference. is_introspection_query (311-317) then calls is_catalog_table(table, dialect=None). With dialect None, _catalog_names (212-217) returns _ALL_CATALOG_SCHEMAS, which includes 'mysql' (line 201), so is_catalog_table is True (329-330) and the query is introspection. The plain `user` reference is a CTE reference and is skipped. If sqlglot parses the SQL, the claim holds. It holds only if sqlglot's default dialect parses `FROM user` as an ordinary table named user (not a keyword or function) and parses `JOIN ... ON true`. A parse error would make is_introspection_query return False (296-303). Also, traverse_scope and normalize_identifiers must put `user` in scope.cte_sources. That is sqlglot runtime behaviour, and I could not read it. The item has no dependency_sources, the head view has no vendored sqlglot (Glob for sqlglot/tokens.py found nothing), and I ran no sqlglot command. pyproject.toml:46 pins sqlglot>=30.22,<31. The test case at tests/unit/test_safety.py:924 is new in the diff, and I saw no CI result for it. Missing evidence: sqlglot parse and scope output for this SQL under dialect None.",
+   "file_checked": "src/sqllens/safety/readonly.py:220-251,311-317",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-102",
+   "claim_signature": "dependency_interaction:test_safety.py:mysql-qualified-beside-cte-order:944",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-103",
+   "claim_signature": "dependency_interaction:test_safety.py:mysql-catalog-aliased-as-cte:946",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-104",
+   "claim_signature": "dependency_interaction:test_safety.py:mysql-derived-alias-beside-catalog:947",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-105",
+   "claim_signature": "dependency_interaction:test_safety.py:scope-failure-mysql-catalog-logged:1016",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-106",
+   "claim_signature": "dependency_interaction:test_safety.py:mysql-prefixed-table-is-data:1045",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-109",
+   "category": "data_format_assumption",
+   "claim": "The comment asserts that `x\\nSHOW 'abc` under `mysql` is the same statement as `#x\\nSHOW 'abc` under `sqlite`, i.e. sqlglot's SQLite tokenizer reads `#x` as one leading non-comment token that a bare identifier `x` reproduces in MySQL syntax, and both are classified as not introspection.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# The same statement in MySQL syntax, where \"#\" would open a comment.",
+   "source_file": "tests/unit/test_safety.py",
+   "source_line": 1102,
+   "source_line_end": 1103,
+   "verify_against": "sqlglot's SQLite and MySQL tokenizers (the dependency directory) and src/sqllens/safety/readonly.py is_introspection_query",
+   "verify_hint": "Check how sqlglot's SQLite tokenizer tokenizes `#x` (parameter, identifier or error) and whether `is_introspection_query` reaches the same fail-open/data path for `x\\nSHOW 'abc` under `mysql` as for `#x\\nSHOW 'abc` under `sqlite`.",
+   "claim_signature": "data_format_assumption:test_safety.py:hash-statement-mysql-equivalent:1102",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-12"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim depends on how sqlglot's SQLite tokenizer tokenizes `#x` (and MySQL's `#` comment). The item has no `dependency_sources`, and a Glob of the head view for sqlglot/**/tokens.py found nothing, so no sqlglot source was available from the views. I did not use the working-tree .venv, as the rules forbid it. What the head view shows: tests/unit/test_safety.py:1098-1108 parametrizes (`#x\\nSHOW 'abc`, sqlite) and (`x\\nSHOW 'abc`, mysql), both expected False, with the comment 'The same statement in MySQL syntax, where \"#\" would open a comment.' src/sqllens/safety/readonly.py:292-317 (is_introspection_query) returns True when first_sql_keyword is SHOW. Otherwise it parses and returns False on ParseError or TokenError, or on an empty parse (lines 296-310). first_sql_keyword (readonly.py:124-164) tokenizes with the dialect's tokenizer and returns '' on TokenError. Both inputs would reach False if `#x` is a leading non-comment token in SQLite and the tokenizer or parser rejects the rest. Whether sqlglot's SQLite tokenizer reads `#x` as a single token (parameter or identifier), and whether `x` plus a newline and `SHOW 'abc` follows the same path under mysql, is unverified without the library source. Not run: reading sqlglot/tokens.py (SQLite tokenizer, MySQL COMMENTS) or executing the two calls.",
+   "file_checked": "tests/unit/test_safety.py:1098-1108",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-110",
+   "claim_signature": "data_format_assumption:test_safety.py:mysql-func-union-comment:1115",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-112",
+   "claim_signature": "dependency_interaction:test_safety.py:mysql-nested-comment-refused:1365",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-114",
+   "category": "data_format_assumption",
+   "claim": "The comment asserts `? c\\nSELECT 1` under `mysql` carries the same leading symbol token as `# c\\nSELECT 1` under `sqlite`/`None`, so `first_sql_keyword` returns `\"\"` for it (a `?` token is not a keyword and does not raise a `TokenError` that changes the outcome).",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# The same leading symbol token in MySQL syntax, where \"#\" would\n            # open a comment.",
+   "source_file": "tests/unit/test_safety_limits.py",
+   "source_line": 235,
+   "source_line_end": 237,
+   "verify_against": "src/sqllens/safety/readonly.py first_sql_keyword and sqlglot's MySQL and SQLite tokenizers",
+   "verify_hint": "Check what token type sqlglot's MySQL tokenizer emits for `?` and SQLite's for `#`, and how `first_sql_keyword` maps a leading non-keyword symbol token to `\"\"`.",
+   "claim_signature": "data_format_assumption:test_safety_limits.py:question-mark-hash-equivalent:235",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-15"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "first_sql_keyword (src/sqllens/safety/readonly.py:124-164) tokenizes with resolved.tokenize(sql), returns \"\" on TokenError (149-150), continues past L_PAREN, returns text for a VAR token or for a word-shaped keyword token, and otherwise returns \"\" (155-163). A leading `?` is not word-shaped (text[:1] is not alpha or `_`), so if sqlglot's MySQL tokenizer emits any single token for `?` (e.g. a symbol or placeholder token) that is not VAR, the function returns \"\", which matches the test comment at tests/unit/test_safety_limits.py:235-237 and the row at line 237. Whether the MySQL tokenizer emits such a token for `?` and raises no TokenError over the rest of '? c\\nSELECT 1' depends on sqlglot's tokenizer internals (sqlglot>=30.22,<31 per pyproject.toml:46). That library source is not in the head view (inventory.json has no sqlglot/tokens entry) and the item supplies no dependency_sources directory, so I did not read it. Not settled: the token type sqlglot's MySQL tokenizer assigns to `?`, and the SQLite/None `#` behavior. Missing evidence: sqlglot/tokens.py and sqlglot/dialects/mysql.py at the installed version, or running first_sql_keyword('? c\\nSELECT 1', 'mysql') in the project's environment (not run). No rejections line covers this claim; the one rejection is about a different test (test_no_dialect_counts_pragma_functions).",
+   "file_checked": "src/sqllens/safety/readonly.py:124-164",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-116",
+   "claim_signature": "test_mock_alignment:test_safety_limits.py:fetchmany-cap-plus-one:104",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-117",
+   "claim_signature": "dependency_interaction:test_safety_limits.py:no-setup-when-writable:357",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-125",
+   "claim_signature": "dependency_interaction:test_safety_limits.py:hash-comment-read-streamed:506",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-126",
+   "category": "dependency_interaction",
+   "claim": "`RunSqlTool` with dialect `mysql` reports `query_type` `SELECT` for `# note\\nSELECT n FROM widgets` and builds a table result from the runner's rows.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_safety_limits.py",
+   "source_line": 548,
+   "verify_against": "src/sqllens/agent/tools/run_sql.py (how `query_type` and the read-shaped branch use the tool's dialect)",
+   "verify_hint": "Check that `RunSqlTool.execute` passes its `dialect` to `first_sql_keyword` and `is_read_shaped` when deriving `metadata['query_type']`.",
+   "claim_signature": "dependency_interaction:test_safety_limits.py:tool-hash-comment-query-type:548",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-19"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Traced the repository side: RunSqlTool.execute (src/sqllens/agent/tools/run_sql.py:75,77) passes self.dialect to both first_sql_keyword and is_read_shaped; the test (tests/unit/test_safety_limits.py:548,560) builds the tool with dialect='mysql'. first_sql_keyword (src/sqllens/safety/readonly.py:124-164) tokenizes with sqlglot's MySQL dialect tokenizer and returns the first non-paren token's text, and is_read_shaped (167-175) checks that keyword against _READ_SHAPED_KEYWORDS; the read branch (run_sql.py:131-187) builds the table result from df rows with metadata query_type, row_count, columns and results. Whether '# note\\nSELECT ...' yields SELECT depends on sqlglot's MySQL tokenizer treating '#' as a line comment. That is third-party library behavior. The review gave no dependency_sources, and no sqlglot source is in the head view (Glob for sqlglot/dialects/mysql.py found none; inventory.json has no sqlglot entries), so I could not read it. I did not run the test. The rejection line (about test_safety.py pragma/mysql.func rows) covers a different subject and does not apply. Missing evidence: sqlglot's MySQL Tokenizer COMMENTS definition, or running tests/unit/test_safety_limits.py::TestRunSqlToolReadShapedResults::test_runner_reads_return_rows.",
+   "file_checked": "src/sqllens/safety/readonly.py:124-164",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-127",
+   "category": "data_format_assumption",
+   "claim": "The comment asserts that `SELECT n FROM widgets /* note` reaches MySQLRunner's write branch because the unterminated comment does not tokenize under `mysql`, so the runner runs it on a `DictCursor`, commits, and the tool reports `row(s) affected` from the fake's `rowcount`.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# read_only off: these reach the runner's write branch. The unterminated\n        # comment does not tokenize, so it is not read-shaped.",
+   "source_file": "tests/unit/test_safety_limits.py",
+   "source_line": 638,
+   "source_line_end": 650,
+   "verify_against": "src/sqllens/safety/readonly.py is_read_shaped (TokenError path) and src/sqllens/agent/integrations/mysql/sql_runner.py (write branch: cursor class, rowcount, commit)",
+   "verify_hint": "Check that `is_read_shaped` returns False on a `TokenError` under `mysql`, and that the runner's write branch uses `pymysql.cursors.DictCursor`, reads `rowcount` and calls `commit`.",
+   "claim_signature": "data_format_assumption:test_safety_limits.py:unterminated-comment-write-branch:638",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-20"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Verified from the head view: (1) src/sqllens/safety/readonly.py:139-150 first_sql_keyword returns \"\" when resolved.tokenize(sql) raises sqlglot.errors.TokenError, and :167-175 is_read_shaped is `first_sql_keyword(...) in _READ_SHAPED_KEYWORDS`, so a TokenError gives False. (2) src/sqllens/agent/integrations/mysql/sql_runner.py:159-186: when is_read_shaped is False the runner uses conn.cursor(pymysql.cursors.DictCursor), executes, calls conn.commit(), reads cursor.rowcount and returns DataFrame({'rows_affected': [rowcount]}). tests/unit/_fake_pymysql.py:93,123-131 gives the cursor class name 'DictCursor' and the server rowcount, and commit sets committed, which matches the test asserts at tests/unit/test_safety_limits.py:647-654. (3) src/sqllens/agent/tools/run_sql.py:77,188-196 takes the non-read branch and prints 'Query executed successfully. {len(df)} row(s) affected.'. What I could not settle: whether the mysql tokenizer raises TokenError on the unterminated `/* note` comment. That is sqlglot library behavior. The item has no dependency_sources, sqlglot source is not in the views, and the only in-repo statements of it are the readonly.py docstring (:136-137) and the test's own parametrization (test_safety_limits.py:286,319), none of which is an implementation. I did not run `is_read_shaped('SELECT n FROM widgets /* note', 'mysql')` or the test. Side note: the tool's count is len(df), which is 1 for the one-row rows_affected frame, not the fake's rowcount of 3. The test only asserts the phrase 'row(s) affected', so the claim's 'from the fake's rowcount' is loose about the number. The test's comment does not make that claim. No rejection line covers this item: the only one concerns the pragma_/mysql.func test row in test_safety.py.",
+   "file_checked": "src/sqllens/safety/readonly.py:139-175",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-128",
+   "category": "data_format_assumption",
+   "claim": "The comment asserts that under every parametrized dialect (`None`, `sqlite`, `mysql`) the statement does not parse and that this is why it is not read-shaped; it covers the mysql case `c\\nSELECT n FROM widgets` as well as the two `# c` cases.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# Under these dialects the statement does not parse, so it is not\n        # read-shaped: it gets the row-count notification even when the runner\n        # returned capped rows, because the tool must classify with the\n        # runner's own dialect (build_agent passes it).",
+   "source_file": "tests/unit/test_safety_limits.py",
+   "source_line": 670,
+   "source_line_end": 673,
+   "verify_against": "src/sqllens/safety/readonly.py is_read_shaped and first_sql_keyword",
+   "verify_hint": "Check whether `is_read_shaped` decides by parsing the statement or by its first keyword token; trace `c\\nSELECT n FROM widgets` under `mysql` and `# c\\nSELECT n FROM widgets` under `None`/`sqlite` to see which reason makes each not read-shaped.",
+   "claim_signature": "data_format_assumption:test_safety_limits.py:does-not-parse-comment:670",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-21"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "tests/unit/test_safety_limits.py:670-673 says that under None/sqlite/mysql 'the statement does not parse, so it is not read-shaped'. src/sqllens/safety/readonly.py:167-175 shows is_read_shaped() does not parse. It returns first_sql_keyword(sql, dialect) in _READ_SHAPED_KEYWORDS (readonly.py:41-43), and first_sql_keyword (readonly.py:124-164) only tokenizes (resolved.tokenize) and inspects the first token. run_sql.py:75-77 also only calls first_sql_keyword and is_read_shaped. Trace: (1) '# c\\nSELECT n FROM widgets' under None/sqlite: sqlglot's base Tokenizer has COMMENTS = ['--', ('/*','*/')] (sqlglot/tokens.py:563) and maps '#' to TokenType.HASH (tokens.py:156), so the first token is the symbol '#'. It is not VAR and not a word, so first_sql_keyword returns '' (readonly.py:160-163), which is not read-shaped. (2) 'c\\nSELECT n FROM widgets' under mysql: the first token is VAR 'c', so the function returns 'C' (readonly.py:156-157), and 'C' is not in _READ_SHAPED_KEYWORDS. In both cases the reason is the first token, not a parse failure. The rule the comment states is false. A statement that does not parse but starts with a read keyword (e.g. 'SELECT FROM WHERE') is still read-shaped, because the parser is never consulted. The comment misstates the mechanism for all three parametrized cases, including the mysql one. The test's assertions still hold. Contrast the accurate wording at test_safety_limits.py:639 ('does not tokenize, so it is not read-shaped'). No rejection line covers this (the only one concerns the mysql.func pragma row in test_safety.py).",
+   "file_checked": "tests/unit/test_safety_limits.py:670-673",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-129",
+   "category": "data_format_assumption",
+   "claim": "The comment asserts `c\\nSELECT n FROM widgets` is the same unparseable statement in MySQL syntax as `# c\\nSELECT n FROM widgets` under `None`/`sqlite`, giving the same row-count notification outcome.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# The same unparseable statement in MySQL syntax, where ``#``\n            # would open a comment.",
+   "source_file": "tests/unit/test_safety_limits.py",
+   "source_line": 662,
+   "source_line_end": 664,
+   "verify_against": "src/sqllens/safety/readonly.py is_read_shaped and sqlglot's default and SQLite tokenizers",
+   "verify_hint": "Check how sqlglot's default and SQLite tokenizers read a leading `# c` (one token, or `#` plus identifier) and whether `is_read_shaped` gives the same False for `c\\nSELECT ...` under `mysql`.",
+   "claim_signature": "data_format_assumption:test_safety_limits.py:unparseable-mysql-equivalent:662",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-22"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Read tests/unit/test_safety_limits.py:656-685 and src/sqllens/safety/readonly.py:124-175. is_read_shaped(sql, dialect) is first_sql_keyword(sql, dialect) in _READ_SHAPED_KEYWORDS. first_sql_keyword tokenizes with the dialect's sqlglot tokenizer, and a TokenError gives \"\". Otherwise it returns the first token's text if that token is a VAR or keyword word, and \"\" for anything else. For the mysql row, `c\\nSELECT n FROM widgets` starts with the identifier `c`. That is an unquoted word, so it returns \"C\", which is not read-shaped. This part follows from the repo source alone. The other half of the claim is how sqlglot's default and SQLite tokenizers read a leading `# c`. It decides whether `# c\\nSELECT ...` is also not read-shaped under None and sqlite. If `#` is a symbol token or a TokenError, the result is also False. If those tokenizers treated `#` as a comment, the first keyword would be SELECT and the statement would be read-shaped. The item has no `dependency_sources`, and sqlglot is not in the head or base view; a Glob for sqlglot/tokens.py under the review directory found nothing. So I could not read the tokenizer source. I did not run the test or the tokenizer. Without that source I cannot confirm that `#` does not open a comment under default/sqlite, or that the two inputs are equivalent for the notification outcome.",
+   "file_checked": "src/sqllens/safety/readonly.py:124-175",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "id": "VC-130",
+   "claim_signature": "api_contract:test_safety_limits.py:empty-sql-message-no-connect:690",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-131",
+   "claim_signature": "absolute_claim:test_safety_limits.py:module-docstring-scope:4",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-132",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:user-statements-cursor-filter",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-133",
+   "claim_signature": "dependency_interaction:test_safety_rls.py:table-subquery-drop-sqlite:366",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-134",
+   "category": "dependency_interaction",
+   "claim": "The removed `(\"SELECT 'unterminated\", \"sqlite\")` case of `test_tokenization_failure_is_a_structured_rls_error` had the same outcome as the kept `mysql` case (RlsError matching `could not parse SQL` whose `__cause__` is a sqlglot TokenError), so its removal drops only a duplicate.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_safety_rls.py",
+   "source_line": 546,
+   "source_line_end": 556,
+   "verify_against": "src/sqllens/safety/rls.py (apply_rls parse/tokenize error handling) and the base view's tests/unit/test_safety_rls.py",
+   "verify_hint": "Check how `apply_rls` in src/sqllens/safety/rls.py wraps a TokenError from sqlglot, and whether sqlglot's sqlite and mysql tokenizers both raise TokenError (not ParseError) on `SELECT 'unterminated`.",
+   "claim_signature": "dependency_interaction:test_safety_rls.py:unterminated-drop-sqlite:546",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch4:VC-2"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Read: base tests/unit/test_safety_rls.py:544-555 had four params (sqlite, mysql, None, backtick-mysql); head tests/unit/test_safety_rls.py:546-556 drops only (\"SELECT 'unterminated\", \"sqlite\"). Both versions use the identical body: pytest.raises(RlsError, match='could not parse SQL') and assert isinstance(exc.value.__cause__, TokenError). src/sqllens/safety/rls.py:239-242 wraps both sqlglot ParseError and TokenError from sqlglot.parse(sql, dialect=dialect) into RlsError('could not parse SQL for row-level security: ...') with `from e`, so the wrapping is dialect-independent. What I could not settle is whether sqlglot's sqlite tokenizer raises TokenError (rather than ParseError or no error) for `SELECT 'unterminated`, the same as the mysql tokenizer. The item has no dependency_sources, and the head view's inventory.json has no sqlglot source (no tokenizer.py or dialects/sqlite.py entry). I did not read sqlglot installed under other worktrees' .venv directories or the working tree, and did not run the test. The base test asserting TokenError for sqlite is only the test's own expectation, not proof of its outcome. Missing evidence: sqlglot tokens.py and dialects/sqlite.py (and mysql.py) source, or a run of the base test.",
+   "file_checked": "tests/unit/test_safety_rls.py:546-556",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-135",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-136",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-137",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-138",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-139",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-140",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-141",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-142",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-143",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "The PR body carries a port/delete map, continued in a PR comment that the body links to when the map does not fit in the body. The map has one row for each test, parametrized case group, helper or fixture under `tests/` that uses SQLite (as the first criterion defines it) at the merge base. A test or case is named by its node ID, and a helper or fixture by `path::name`. Each row gives the node ID or IDs of its MySQL replacement (the same test when only its URL or dialect changed), or `SQLite-only, deleted in #383`. A row for a test whose classification was unclear gives both. A SQLite-only row with no possible MySQL counterpart says so and why. Tests in one file with the same outcome may share a row that names them.",
+   "claim_signature": "issue-acceptance-10",
+   "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-398/local-20261115T051527Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The PR body carries a port/delete map, continued in a PR comment that the body links to when the map does not fit in the body. The map has one row for each test, parametrized case group, helper or fixture under `tests/` that uses SQLite (as the first criterion defines it) at the merge base. A test or case is named by its node ID, and a helper or fixture by `path::name`. Each row gives the node ID or IDs of its MySQL replacement (the same test when only its URL or dialect changed), or `SQLite-only, deleted in #383`. A row for a test whose classification was unclear gives both. A SQLite-only row with no possible MySQL counterpart says so and why. Tests in one file with the same outcome may share a row that names them.",
+   "id": "VC-144",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Graded with criteria.json counted (valid {criterion,text} list; criterion 10 present, read with criterion 1's definition of 'uses SQLite'). The claim is about the PR body and a linked PR comment, which are not repository files and are in neither view. The only PR-body text supplied is the run file pr-body.md (lines 1-8): 'Work in progress — automated review pending. Resolves #381 _(local run)_ Generated via /prflow:implement ...' plus a rejected-finding note. It has no port/delete map, no node-ID rows, no 'SQLite-only, deleted in #383' rows and no link to a continuation comment. Grep for 'deleted in #383' in diff.patch and in the whole head view found no match, so the map is in no committed file either. The body is a pre-review placeholder, so I cannot establish that the final PR body or a linked PR comment lacks the map. Without the map I also cannot check row coverage against the base's SQLite uses. Missing evidence: the final PR body and any linked PR comment (not run: gh pr view / gh api for PR #398 body and comments). If the final body is still this placeholder, the criterion is unmet.",
+   "file_checked": "tests",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "Line coverage does not drop against the merge base. Instrument: coverage.py, installed with `pip install coverage` for the measurement only, `python -m coverage run -m pytest -q`, then `python -m coverage json`, comparing each file's `executed_lines` under all of `src/sqllens/`. Every line that the merge base's default run executes is also executed by this branch's default run with the map's `SQLite-only` tests deselected. Lines are matched through the PR's diff of `src/`: a line the diff deletes needs no match, and every line the diff adds that coverage.py reports as a statement (in `executed_lines` or `missing_lines`) is executed. The one exception is a line that no non-SQLite input can execute. It is defined by where the code is, not by which tests ran: a line in `sqllens.agent.integrations.sqlite` or `sqllens.preflight._probe_sqlite`, or a line inside a branch whose condition holds only for the `sqlite` dialect, a URL whose scheme starts with `sqlite`, or a SQLite database file, or a line in a function whose every caller is such a line (for example `sqllens.safety.relations._sqlite_kind`). When it is unclear whether a line is such a line, a MySQL test executes it. The PR body states the merge-base SHA compared against, and lists each excepted line as `path:line` or a line range with the SQLite-only condition that guards it.",
+   "claim_signature": "issue-acceptance-11",
+   "criteria_file": ".prflow/tmp/review/pr-398/local-20261115T051527Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-398/local-20261115T051527Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Line coverage does not drop against the merge base. Instrument: coverage.py, installed with `pip install coverage` for the measurement only, `python -m coverage run -m pytest -q`, then `python -m coverage json`, comparing each file's `executed_lines` under all of `src/sqllens/`. Every line that the merge base's default run executes is also executed by this branch's default run with the map's `SQLite-only` tests deselected. Lines are matched through the PR's diff of `src/`: a line the diff deletes needs no match, and every line the diff adds that coverage.py reports as a statement (in `executed_lines` or `missing_lines`) is executed. The one exception is a line that no non-SQLite input can execute. It is defined by where the code is, not by which tests ran: a line in `sqllens.agent.integrations.sqlite` or `sqllens.preflight._probe_sqlite`, or a line inside a branch whose condition holds only for the `sqlite` dialect, a URL whose scheme starts with `sqlite`, or a SQLite database file, or a line in a function whose every caller is such a line (for example `sqllens.safety.relations._sqlite_kind`). When it is unclear whether a line is such a line, a MySQL test executes it. The PR body states the merge-base SHA compared against, and lists each excepted line as `path:line` or a line range with the SQLite-only condition that guards it.",
+   "id": "VC-145",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Criterion 11 (criteria.json element 11, matched, graded with the other criteria). It is a measured property: per-file executed_lines from `python -m coverage run -m pytest -q` + `python -m coverage json`, at the merge base (4521a6f) and at head (18f03d7, with SQLite-only tests deselected). This agent has only Read/Grep/Glob and cannot run either measurement, so reading the source cannot settle whether any merge-base executed line is lost. What the diff shows (diff.patch, `diff --git` list): every changed file is under tests/ or docs/internal/; no file under src/ is touched. So no line is added or deleted in src/, and the 'added statement lines must be executed' and 'deleted lines need no match' limbs are vacuous. Coverage drop can then only come from deselecting/replacing tests, which needs the real coverage runs and the map's SQLite-only deselection list. Also the claim requires the PR body to state the merge-base SHA and list each excepted line as path:line with its SQLite-only guard; the PR body is not among the supplied artifacts, so that part is unread. Missing evidence: coverage JSON for base default run and head run with SQLite-only tests deselected (not run: `python -m coverage run -m pytest -q` / `python -m coverage json`), and the PR body.",
+   "file_checked": "tests/unit/_fake_pymysql.py",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-12",
+   "id": "VC-146",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:test_connectors.py:alias-hides-secret-column:131",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "data_format_assumption:test_connectors.py:expression-label-masked:136",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:test_connectors.py:masking-reads-driver-labels-comment:120",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:test_connectors.py:rls-protected-table-filtered:147",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "dependency_interaction:test_connectors.py:rls-cte-shadow:149",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "dependency_interaction:test_connectors.py:rls-in-subquery:150",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "dependency_interaction:test_connectors.py:rls-scalar-subquery:151",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "test_mock_alignment:_fake_pymysql.py:catalog-param-dispatch:70",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "data_format_assumption:_fake_pymysql.py:unnamed-relation-outcome:17",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "test_mock_alignment:_fake_pymysql.py:cursor-surface:65",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-30",
+   "claim_signature": "dependency_interaction:_fake_pymysql.py:fake-module-surface:37",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-39",
+   "claim_signature": "dependency_interaction:_fake_pymysql.py:mysql-runner-ctor-kwargs:173",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-41",
+   "claim_signature": "data_format_assumption:test_cli_claude_desktop.py:stem-strip-scheme-blind:183",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-42",
+   "claim_signature": "data_format_assumption:test_cli_claude_desktop.py:derived-name-demo:841",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-43",
+   "claim_signature": "data_format_assumption:test_cli_claude_desktop.py:apostrophe-url-roundtrip:1228",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-49",
+   "claim_signature": "dependency_interaction:test_cli_claude_desktop.py:install-no-connect:960",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-51",
+   "claim_signature": "dependency_interaction:test_cli_verify_memory.py:no-real-connect:27",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-62",
+   "claim_signature": "api_contract:transport.md:regression-coverage-split:129",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-69",
+   "claim_signature": "dependency_interaction:test_format.py:cte-data-query-mysql:2014",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-71",
+   "claim_signature": "api_contract:test_preflight.py:default-mysql-cfg-no-connect:41",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-107",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:qualified-view-lookup:102",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-108",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:backtick-view-name:102",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-111",
+   "claim_signature": "absolute_claim:test_safety_rls.py:mysql-unaliased-column-label:233",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-113",
+   "claim_signature": "data_format_assumption:test_safety_rls.py:wrong-typed-refusal-message:517",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-115",
+   "claim_signature": "dependency_interaction:test_safety_rls.py:schema-qualified-match-mysql:328",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-118",
+   "claim_signature": "dependency_interaction:test_safety_rls.py:factory-rls-composition-mysql:660",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-119",
+   "claim_signature": "test_mock_alignment:test_sql_runner_cleanup.py:fake-error-class-change:29",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-120",
+   "claim_signature": "test_mock_alignment:test_safety_whole_row.py:refusal-before-connect:391",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-121",
+   "claim_signature": "test_mock_alignment:test_safety_whole_row.py:user-sql-last-statement:401",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-122",
+   "claim_signature": "dependency_interaction:test_safety_whole_row.py:guard-dialect-from-url:456",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-123",
+   "claim_signature": "dependency_interaction:test_safety_whole_row.py:runner-init-real-pymysql:471",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-124",
+   "claim_signature": "absolute_claim:test_safety_masking.py:connector-checks-labels:685",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 2
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "api_contract:cleanup-error-handling.md:install-fake-pymysql-each-test",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "absolute_claim:test_http_transport.py:never-connects",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "api_contract:test_http_transport.py:list-data-sources-output",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "data_format_assumption:_config_builders.py:mysql-url-accepted",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "test_mock_alignment:test_mysql_runner.py:read-only-session-set:28",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "test_mock_alignment:test_mysql_runner.py:statement-timeout-set:50",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "test_mock_alignment:test_mysql_runner.py:write-dict-cursor-commit:105",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "dependency_interaction:test_mysql_runner.py:profile-cap-worker-thread:122",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "dependency_interaction:test_mysql_runner.py:profile-cap-never-widens:148",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "dependency_interaction:test_mysql_runner.py:relation-check-call:168",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "data_format_assumption:test_mysql_runner.py:view-refusal-catalog-sql:200",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-31",
+   "claim_signature": "absolute_claim:test_mysql_runner.py:module-docstring-scope:4",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "test_mock_alignment:test_preflight.py:mysql-probe-connect-close:106",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "absolute_claim:test_preflight.py:probe-runs-no-sql:114",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "dependency_interaction:test_format.py:show-create-table-introspection:1849",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-37",
+   "claim_signature": "dependency_interaction:test_format.py:sys-prefixed-data-table:1932",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-38",
+   "claim_signature": "dependency_interaction:test_format.py:information-schema-oversized:2158",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-40",
+   "claim_signature": "absolute_claim:test_query_database.py:dialect-arrival-docstring:1164",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-44",
+   "claim_signature": "data_format_assumption:test_eval_runner.py:mysql-dialect-threaded:185",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-45",
+   "claim_signature": "api_contract:test_eval_runner.py:async-comparator-args:419",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-46",
+   "claim_signature": "data_format_assumption:test_metadata_bounds.py:rls-missing-metadata-mysql:43",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-47",
+   "claim_signature": "dependency_interaction:test_config_smoke.py:cli-no-db-connect:172",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-48",
+   "claim_signature": "api_contract:repo:ruff-line-length",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-50",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:lower-case-table-names-comment:56",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-52",
+   "claim_signature": "api_contract:test_rls_views.py:view-refusal-message:92",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-53",
+   "claim_signature": "data_format_assumption:test_rls_views.py:rls-rewritten-sql-exact:109",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-54",
+   "claim_signature": "data_format_assumption:test_rls_views.py:rls-subquery-case-rewrite:125",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-55",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:mysql-runner-defaults:145",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-56",
+   "claim_signature": "dependency_interaction:test_rls_views.py:unqualified-lookup-params:165",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-57",
+   "claim_signature": "dependency_interaction:test_rls_views.py:runner-init-no-connect:270",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-58",
+   "claim_signature": "api_contract:test_rls_views.py:update-relation-shape:351",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-59",
+   "claim_signature": "api_contract:test_rls_views.py:denylist-before-connect:700",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-60",
+   "claim_signature": "issue_acceptance:test_rule_set_file.py:non-mysql-url-refusal:266",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-61",
+   "claim_signature": "dependency_interaction:test_run_sql_display_line.py:display-line-dialect:94",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-82",
+   "claim_signature": "dependency_interaction:test_safety_masking.py:masking-over-mysqlrunner:692",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-83",
+   "claim_signature": "dependency_interaction:test_safety_masking.py:relation-executor-mysqlrunner:649",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-85",
+   "claim_signature": "api_contract:test_safety_whole_row.py:runsqltool-columns-metadata:398",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-86",
+   "claim_signature": "data_format_assumption:test_safety_whole_row.py:none-dialect-mysql-catalog:166",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-87",
+   "claim_signature": "data_format_assumption:test_safety_whole_row.py:sys-prefix-not-catalog:182",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-88",
+   "claim_signature": "dependency_interaction:test_safety_whole_row.py:dialects-drop-sqlite:51",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-89",
+   "claim_signature": "dependency_interaction:test_safety_table_shorthand.py:dialects-drop-sqlite:15",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-90",
+   "claim_signature": "dependency_interaction:test_system_prompt.py:prompt-sections-drop-sqlite:461",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-93",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:install-fake-pymysql-call:90",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-94",
+   "claim_signature": "absolute_claim:test_transport_http.py:build-agent-object-graph:202",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  }
+ ]
+}

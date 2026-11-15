@@ -1,0 +1,1149 @@
+{
+  "iter": 1,
+  "loop_role": "fix",
+  "dispatch_mode": "fanned-out",
+  "dispatch_disposition": null,
+  "fix_commit_sha": "0361d6821e055d33c65e34c716d7da85128a97dc",
+  "fix_decisions": [
+    {
+      "finding_id": "F-1",
+      "decision": "applied",
+      "commit": "0361d6821e055d33c65e34c716d7da85128a97dc",
+      "evidence": "test_wrong_typed_dynamic_value_blocks now asserts match='unusable or suspicious value' (the scalar refusal text in src/sqllens/safety/rls.py _resolve_value). Criterion 7 comparison: a moved RlsError test, before: no reason asserted; after: reason asserted. Class sweep: every bare pytest.raises of UnsafeSqlError/RlsError/PreflightError/RuleSetFileError in the 36 touched test files was read; the others are unmoved tests (diff only dropped a duplicate sqlite case or did not touch them) or use 'as info' with a message assertion."
+    },
+    {
+      "finding_id": "VC-101",
+      "decision": "applied",
+      "commit": "0361d6821e055d33c65e34c716d7da85128a97dc",
+      "evidence": "Same fix and class sweep as F-1; the FAIL's only counterexample was test_safety_rls.py test_wrong_typed_dynamic_value_blocks."
+    },
+    {
+      "finding_id": "F-2",
+      "decision": "applied",
+      "commit": "0361d6821e055d33c65e34c716d7da85128a97dc",
+      "evidence": "Criterion 6 comparison. test_no_dialect_counts_pragma_functions (None dialect, pragma_ union entry): before, no MySQL counterpart in the same test; after, a 'SELECT name FROM mysql.func' row asserting the same True outcome from a mysql-schema entry. test_scope_failure_excludes_no_cte: the criterion's stated exception applies (a CTE-shadowing outcome needs a name prefix, MySQL's catalog entry has none) and its map row says so; additionally its MySQL sibling now runs under None and mysql (renamed test_scope_failure_is_logged_for_a_mysql_catalog), so the None-dialect scope-failure path is executed over a MySQL catalog. Port/delete map rows updated in the run scratch map."
+    },
+    {
+      "finding_id": "F-3",
+      "decision": "applied",
+      "commit": "0361d6821e055d33c65e34c716d7da85128a97dc",
+      "evidence": "Deleted the false sentence 'Session setup statements never fetch their row.' from the tests/unit/_fake_pymysql.py docstring (the sql_mode read does fetch); no reader needs it."
+    },
+    {
+      "finding_id": "F-4",
+      "decision": "applied",
+      "commit": "0361d6821e055d33c65e34c716d7da85128a97dc",
+      "evidence": "Same deletion as F-3."
+    },
+    {
+      "finding_id": "VC-6",
+      "decision": "applied",
+      "commit": "0361d6821e055d33c65e34c716d7da85128a97dc",
+      "evidence": "Same deletion as F-3."
+    },
+    {
+      "finding_id": "F-5",
+      "decision": "below-threshold",
+      "skip_category": "below-threshold-parked",
+      "evidence": "parked-origin: below-threshold"
+    },
+    {
+      "finding_id": "F-6",
+      "decision": "applied",
+      "commit": "0361d6821e055d33c65e34c716d7da85128a97dc",
+      "evidence": "tests/integration/conftest.py comment reworded to what holds: a real connect to the unresolvable host fails the same way on every machine (not that the test fails)."
+    },
+    {
+      "finding_id": "F-7",
+      "decision": "below-threshold",
+      "skip_category": "below-threshold-parked",
+      "evidence": "parked-origin: below-threshold"
+    },
+    {
+      "finding_id": "F-8",
+      "decision": "applied",
+      "commit": "0361d6821e055d33c65e34c716d7da85128a97dc",
+      "evidence": "docs/internal/mcp-server/transport.md now credits tests/unit/test_mysql_runner.py (test_profile_row_cap_applies_on_the_sql_worker_thread, test_relation_check_runs_on_the_query_connection_on_the_worker_thread) for the worker-thread cap and relation check."
+    },
+    {
+      "finding_id": "F-9",
+      "decision": "applied",
+      "commit": "0361d6821e055d33c65e34c716d7da85128a97dc",
+      "evidence": "Both CREATE TABLE statements moved inside the try so the finally's DROP TABLE IF EXISTS runs when the second CREATE fails; ran the 5 shape cases against the local MySQL 8.0.46 server: 5 passed. The inline guard stack is not shared with _rls_guard because that helper fixes a different rule table; no defect."
+    },
+    {
+      "finding_id": "D-1",
+      "decision": "pushed_back",
+      "original_severity": "minor",
+      "source_file": "tests/unit/test_safety.py",
+      "claim_text": "The mysql.func row added to test_no_dialect_counts_pragma_functions passes through the schema check, never the pragma_ name-prefix path, so it would still pass if pragma functions stopped being counted and the test name does not describe it.",
+      "skip_category": "claim-quality",
+      "evidence": "tests/unit/test_safety.py test_no_dialect_counts_pragma_functions keeps both pragma_ rows, which fail if pragma_ functions stop being counted; the mysql.func row is the MySQL counterpart the dialect-case criterion requires in the same test, and its comment names its role. Finding rejected line written to the PR 398 body.",
+      "parking_evidence": {
+        "basis": "the pragma_ rows still guard the prefix path; the added row is the criterion-required counterpart",
+        "failing_input": "SELECT name FROM mysql.func",
+        "source": "tests/unit/test_safety.py test_no_dialect_counts_pragma_functions parametrize list",
+        "finding_ref": {
+          "iter": 1,
+          "index": null
+        }
+      }
+    }
+  ],
+  "telemetry": {
+    "phase_1": {
+      "calls": 1,
+      "tokens": 319790,
+      "wall_clock_s": 862
+    }
+  },
+  "phase3_failed_agents": [],
+  "diff_produced_at_head": "1103b10bf1a9418207fb2faa079528faeeb359d5",
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "pushed_back",
+      "reason": null
+    }
+  },
+  "iteration_head": "0361d6821e055d33c65e34c716d7da85128a97dc",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "severity": "important",
+      "defect_signature": {
+        "file": "tests/unit/test_safety_rls.py",
+        "line_range": [
+          517,
+          525
+        ],
+        "kind": "test_gap"
+      },
+      "description": "test_wrong_typed_dynamic_value_blocks was moved from dialect sqlite to mysql but still uses a bare pytest.raises(RlsError) with no match= or message check, so criterion 7 (every moved refusal test asserts the reason) is unmet.",
+      "carve_out": "unmet-decided-criterion",
+      "agent": "prflow:code-reviewer",
+      "corroboration_count": 4,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-2",
+      "severity": "important",
+      "defect_signature": {
+        "file": "tests/unit/test_safety.py",
+        "line_range": [
+          1098,
+          1103
+        ],
+        "kind": "test_gap"
+      },
+      "description": "test_no_dialect_counts_pragma_functions relies on SQLite's pragma_ fallback-union entry under no dialect and has no MySQL counterpart in the same test (criterion 6); test_scope_failure_excludes_no_cte (1002-1014) has only a mysql-dialect sibling that pins the log line, not the None-dialect outcome.",
+      "carve_out": "unmet-decided-criterion",
+      "agent": "prflow:code-reviewer",
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-3",
+      "severity": "suggestion",
+      "defect_signature": {
+        "file": "tests/unit/_fake_pymysql.py",
+        "line_range": [
+          10,
+          18
+        ],
+        "kind": "documented_falsehood"
+      },
+      "description": "The fake driver docstring says session setup statements never fetch their row, but the remove_sql_modes path runs SELECT @@SESSION.sql_mode and fetchone(); the fake answers it with (lower_case_table_names,).",
+      "capped": "suggestion",
+      "agent": "prflow:type-design-analyzer",
+      "corroboration_count": 2,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-4",
+      "severity": "suggestion",
+      "defect_signature": {
+        "file": "tests/unit/_fake_pymysql.py",
+        "line_range": [
+          11,
+          18
+        ],
+        "kind": "comment_drift"
+      },
+      "description": "Same docstring claim filed as comment drift: session setup never fetches a row, while the sql_mode read does.",
+      "capped": "suggestion",
+      "agent": "prflow:requesting-code-review",
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-5",
+      "severity": "suggestion",
+      "defect_signature": {
+        "file": "tests/unit/_fake_pymysql.py",
+        "line_range": [
+          75,
+          76
+        ],
+        "kind": "type_design"
+      },
+      "description": "FakeMySQL.kinds is keyed by relation name only and ignores the schema parameter, so the fake cannot represent schema-qualified catalog state.",
+      "agent": "prflow:type-design-analyzer",
+      "corroboration_count": 1,
+      "fix_decision": "deferred"
+    },
+    {
+      "finding_id": "F-6",
+      "severity": "suggestion",
+      "defect_signature": {
+        "file": "tests/integration/conftest.py",
+        "line_range": [
+          39,
+          39
+        ],
+        "kind": "comment_drift"
+      },
+      "description": "Comment claims a test that reached a real connect would fail, but wrapped paths return the OperationalError as a structured result.",
+      "capped": "suggestion",
+      "agent": "prflow:silent-failure-hunter",
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-7",
+      "severity": "suggestion",
+      "defect_signature": {
+        "file": "src/sqllens/safety/relations.py",
+        "line_range": [
+          168,
+          170
+        ],
+        "kind": "test_gap"
+      },
+      "description": "No test covers the lower_case_table_names 1/2 (mysql_fold, LOWER(...)) branch of the relation check; fails closed.",
+      "agent": "prflow:pr-test-analyzer",
+      "corroboration_count": 1,
+      "fix_decision": "deferred"
+    },
+    {
+      "finding_id": "F-8",
+      "severity": "suggestion",
+      "defect_signature": {
+        "file": "docs/internal/mcp-server/transport.md",
+        "line_range": [
+          129,
+          129
+        ],
+        "kind": "comment_drift"
+      },
+      "description": "Internal doc still says test_sql_runner_event_loop.py checks the profile row cap and relation check on the sqllens-sql thread; the diff moved those tests to test_mysql_runner.py.",
+      "capped": "suggestion",
+      "agent": "prflow:comment-analyzer",
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-9",
+      "severity": "suggestion",
+      "defect_signature": {
+        "file": "tests/connectors/test_connectors.py",
+        "line_range": [
+          162,
+          164
+        ],
+        "kind": "leak"
+      },
+      "description": "test_rls_query_shapes_return_scoped_rows creates both tables before try:, so a failed second CREATE TABLE leaves the first table on the live server; it also duplicates the _rls_guard helper's stack inline.",
+      "agent": "prflow:requesting-code-review",
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    }
+  ],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "file_count": 37,
+    "changed_lines": 1658
+  },
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "checklist": [
+    {
+      "id": "VC-1",
+      "claim_signature": "test_mock_alignment:_fake_pymysql.py:pymysql-attribute-surface",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-2",
+      "claim_signature": "test_mock_alignment:_fake_pymysql.py:cursor-class-argument",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-3",
+      "claim_signature": "test_mock_alignment:_fake_pymysql.py:session-setup-cursor",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-4",
+      "claim_signature": "test_mock_alignment:_fake_pymysql.py:catalog-param-routing",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-5",
+      "claim_signature": "absolute_claim:_fake_pymysql.py:params-not-sql-routing",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-6",
+      "claim_signature": "absolute_claim:_fake_pymysql.py:setup-never-fetches",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "FAIL",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-7",
+      "claim_signature": "test_mock_alignment:_fake_pymysql.py:fetchmany-single-call",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-8",
+      "claim_signature": "test_mock_alignment:_fake_pymysql.py:connect-kwargs-write-path",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-9",
+      "claim_signature": "dependency_interaction:_fake_pymysql.py:mysqlrunner-constructor",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-10",
+      "claim_signature": "api_contract:cleanup-error-handling.md:install-fake-pymysql-each-test",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-11",
+      "claim_signature": "dependency_interaction:test_cli.py:preflight-pymysql-connect",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-12",
+      "claim_signature": "data_format_assumption:test_cli.py:preflight-db-failure-message:212",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-13",
+      "claim_signature": "data_format_assumption:test_cli.py:preflight-db-failure-message:326",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-14",
+      "claim_signature": "test_mock_alignment:test_cli.py:magicmock-connection-accepted",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-15",
+      "claim_signature": "dependency_interaction:test_cli.py:pymysql-installed",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-16",
+      "claim_signature": "api_contract:test_cli.py:no-preflight-skips-connect",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-17",
+      "claim_signature": "absolute_claim:conftest.py:never-connects",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-18",
+      "claim_signature": "absolute_claim:test_http_transport.py:never-connects",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-19",
+      "claim_signature": "api_contract:test_http_transport.py:list-data-sources-output",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-20",
+      "claim_signature": "data_format_assumption:_config_builders.py:mysql-url-accepted",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-21",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-22",
+      "claim_signature": "test_mock_alignment:test_mysql_runner.py:read-only-session-set:28",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-23",
+      "claim_signature": "test_mock_alignment:test_mysql_runner.py:statement-timeout-set:50",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-24",
+      "claim_signature": "test_mock_alignment:test_mysql_runner.py:fetchmany-cap-plus-one:84",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-25",
+      "claim_signature": "test_mock_alignment:test_mysql_runner.py:write-dict-cursor-commit:105",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-26",
+      "claim_signature": "dependency_interaction:test_mysql_runner.py:profile-cap-worker-thread:122",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-27",
+      "claim_signature": "dependency_interaction:test_mysql_runner.py:profile-cap-never-widens:148",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-28",
+      "claim_signature": "dependency_interaction:test_mysql_runner.py:relation-check-call:168",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-29",
+      "claim_signature": "data_format_assumption:test_mysql_runner.py:view-refusal-catalog-sql:200",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-30",
+      "claim_signature": "test_mock_alignment:test_mysql_runner.py:fake-install-target",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-31",
+      "claim_signature": "absolute_claim:test_mysql_runner.py:module-docstring-scope:4",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-32",
+      "claim_signature": "test_mock_alignment:test_preflight.py:mysql-probe-connect-close:106",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-33",
+      "claim_signature": "absolute_claim:test_preflight.py:probe-runs-no-sql:114",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-34",
+      "claim_signature": "dependency_interaction:test_factory_wiring.py:mysql-runner-leaf:490",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-35",
+      "claim_signature": "dependency_interaction:test_factory_wiring.py:mysql-read-only-flag:579",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-36",
+      "claim_signature": "dependency_interaction:test_format.py:show-create-table-introspection:1849",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-37",
+      "claim_signature": "dependency_interaction:test_format.py:sys-prefixed-data-table:1932",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-38",
+      "claim_signature": "dependency_interaction:test_format.py:information-schema-oversized:2158",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-39",
+      "claim_signature": "dependency_interaction:test_query_database.py:hash-led-show-hidden:1147",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "critical"
+    },
+    {
+      "id": "VC-40",
+      "claim_signature": "absolute_claim:test_query_database.py:dialect-arrival-docstring:1164",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-41",
+      "claim_signature": "absolute_claim:test_eval_compare.py:hash-comment-mysql:45",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-42",
+      "claim_signature": "dependency_interaction:test_eval_compare.py:mysql-unterminated-string:106",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-43",
+      "claim_signature": "dependency_interaction:test_eval_compare.py:multi-statement-mysql:140",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "critical"
+    },
+    {
+      "id": "VC-44",
+      "claim_signature": "data_format_assumption:test_eval_runner.py:mysql-dialect-threaded:185",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-45",
+      "claim_signature": "api_contract:test_eval_runner.py:async-comparator-args:419",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-46",
+      "claim_signature": "data_format_assumption:test_metadata_bounds.py:rls-missing-metadata-mysql:43",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-47",
+      "claim_signature": "dependency_interaction:test_config_smoke.py:cli-no-db-connect:172",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-48",
+      "claim_signature": "api_contract:repo:ruff-line-length",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-49",
+      "claim_signature": "test_mock_alignment:test_rls_views.py:fake-catalog-kinds-lookup:60",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-50",
+      "claim_signature": "test_mock_alignment:test_rls_views.py:lower-case-table-names-comment:56",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-51",
+      "claim_signature": "test_mock_alignment:test_rls_views.py:catalog-cursor-label:85",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-52",
+      "claim_signature": "api_contract:test_rls_views.py:view-refusal-message:92",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-53",
+      "claim_signature": "data_format_assumption:test_rls_views.py:rls-rewritten-sql-exact:109",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-54",
+      "claim_signature": "data_format_assumption:test_rls_views.py:rls-subquery-case-rewrite:125",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-55",
+      "claim_signature": "test_mock_alignment:test_rls_views.py:mysql-runner-defaults:145",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-56",
+      "claim_signature": "dependency_interaction:test_rls_views.py:unqualified-lookup-params:165",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-57",
+      "claim_signature": "dependency_interaction:test_rls_views.py:runner-init-no-connect:270",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-58",
+      "claim_signature": "api_contract:test_rls_views.py:update-relation-shape:351",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-59",
+      "claim_signature": "api_contract:test_rls_views.py:denylist-before-connect:700",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-60",
+      "claim_signature": "issue_acceptance:test_rule_set_file.py:non-mysql-url-refusal:266",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-61",
+      "claim_signature": "dependency_interaction:test_run_sql_display_line.py:display-line-dialect:94",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-62",
+      "claim_signature": "api_contract:test_safety.py:root-type-refusal-message:276",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-63",
+      "claim_signature": "api_contract:test_safety.py:root-type-refusal-message:277",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-64",
+      "claim_signature": "issue_acceptance:test_safety.py:none-dialect-load-file-counterpart:239",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-65",
+      "claim_signature": "api_contract:test_safety.py:denylist-lowercase-name:492",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-66",
+      "claim_signature": "dependency_interaction:test_safety.py:none-dialect-mysql-schema:862",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-67",
+      "claim_signature": "dependency_interaction:test_safety.py:qualified-catalog-beside-cte:924",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-68",
+      "claim_signature": "dependency_interaction:test_safety.py:mysql-catalog-cte-shadow:944",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-69",
+      "claim_signature": "dependency_interaction:test_safety.py:scope-failure-mysql-logged:1016",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-70",
+      "claim_signature": "dependency_interaction:test_safety.py:mysql-prefix-is-data:1041",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-71",
+      "claim_signature": "api_contract:test_safety.py:nested-mysql-comment-refusal:1347",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-72",
+      "claim_signature": "test_mock_alignment:test_safety_limits.py:fetchmany-cap-plus-one:95",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-73",
+      "claim_signature": "dependency_interaction:test_safety_limits.py:cte-only-user-sql-executed:342",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-74",
+      "claim_signature": "dependency_interaction:test_safety_limits.py:hash-comment-read-streamed:497",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-75",
+      "claim_signature": "test_mock_alignment:test_safety_limits.py:cursor-class-labels:553",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-76",
+      "claim_signature": "dependency_interaction:test_safety_limits.py:write-branch-dictcursor-commit:626",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-77",
+      "claim_signature": "absolute_claim:test_safety_limits.py:unterminated-comment-not-read-shaped:630",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-78",
+      "claim_signature": "api_contract:test_safety_limits.py:empty-sql-message:670",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-79",
+      "claim_signature": "data_format_assumption:test_safety_limits.py:passwordless-mysql-url:27",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-80",
+      "claim_signature": "test_mock_alignment:test_safety_masking.py:fakemysql-rows-reassignment:687",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-81",
+      "claim_signature": "data_format_assumption:test_safety_masking.py:mysql-column-labels-comment:685",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-82",
+      "claim_signature": "dependency_interaction:test_safety_masking.py:masking-over-mysqlrunner:692",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-83",
+      "claim_signature": "dependency_interaction:test_safety_masking.py:relation-executor-mysqlrunner:649",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-84",
+      "claim_signature": "test_mock_alignment:test_safety_whole_row.py:fake-statements-tuple-shape:396",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-85",
+      "claim_signature": "api_contract:test_safety_whole_row.py:runsqltool-columns-metadata:398",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-86",
+      "claim_signature": "data_format_assumption:test_safety_whole_row.py:none-dialect-mysql-catalog:166",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-87",
+      "claim_signature": "data_format_assumption:test_safety_whole_row.py:sys-prefix-not-catalog:182",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-88",
+      "claim_signature": "dependency_interaction:test_safety_whole_row.py:dialects-drop-sqlite:51",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-89",
+      "claim_signature": "dependency_interaction:test_safety_table_shorthand.py:dialects-drop-sqlite:15",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-90",
+      "claim_signature": "dependency_interaction:test_system_prompt.py:prompt-sections-drop-sqlite:461",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-91",
+      "claim_signature": "data_format_assumption:test_safety_rls.py:printf-mysql-unchanged:233",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-92",
+      "claim_signature": "test_mock_alignment:test_sql_runner_cleanup.py:install-fake-pymysql-signature:26",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-93",
+      "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:install-fake-pymysql-call:90",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-94",
+      "claim_signature": "absolute_claim:test_transport_http.py:build-agent-object-graph:202",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-1",
+      "id": "VC-95",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-2",
+      "id": "VC-96",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-3",
+      "id": "VC-97",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-4",
+      "id": "VC-98",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-5",
+      "id": "VC-99",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-6",
+      "id": "VC-100",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-7",
+      "id": "VC-101",
+      "reused_from_iter_prev": false,
+      "verdict": "FAIL",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-8",
+      "id": "VC-102",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-9",
+      "id": "VC-103",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-10",
+      "id": "VC-104",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-11",
+      "id": "VC-105",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-12",
+      "id": "VC-106",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    }
+  ],
+  "fix_files": [
+    "docs/internal/mcp-server/transport.md",
+    "tests/connectors/test_connectors.py",
+    "tests/integration/conftest.py",
+    "tests/unit/_fake_pymysql.py",
+    "tests/unit/test_safety.py",
+    "tests/unit/test_safety_rls.py"
+  ],
+  "synthesized": false
+}
