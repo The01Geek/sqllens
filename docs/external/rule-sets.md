@@ -297,7 +297,7 @@ Rule sets limit which tables and columns a query can read and, through row rules
   -- SQL Lens applies this server's access rules to queries before running them, so the query that ran can differ from this text.
   ```
 
-  and the `sqllens/query` metadata entry carries `as_written: true`. Its `sql` value is the same note line, a newline and the model's SQL. The rewritten SQL is never shown: it can hold the user ID, the compiled row rules and the names of link tables the role cannot query.
+  and the `sqllens/query` metadata entry carries `as_written: true`. Its `sql` value is the same note line, a newline and the model's SQL.
 - **Conversations are bound to identity.** A follow-up must carry the same rule set, account and user as the turn that started the conversation.
 - **`sqllens verify-memory` is not supported** while a rule-set file is configured.
 - **SQL Lens trusts `_meta`.** It does not check who sent a request. Any caller that can reach `query_database` chooses its own rule set, account and user, so only your application should be able to reach it.
