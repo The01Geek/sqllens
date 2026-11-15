@@ -1,5 +1,7 @@
 # Connector cleanup error handling
 
+<!-- verified-against: e111380 2026-11-14 -->
+
 Why the MySQL `SqlRunner` implementation swallows secondary exceptions raised during `cursor.close()` / `conn.close()`, and what gets logged when it does. Reference for [src/sqllens/agent/integrations/mysql/sql_runner.py](../../../src/sqllens/agent/integrations/mysql/sql_runner.py).
 
 ## The problem
@@ -53,7 +55,7 @@ Regression coverage lives in [`tests/unit/test_sql_runner_cleanup.py`](../../../
 | The read-only session setup raises — connection still closed (no leak) | `test_mysql_runner_closes_conn_when_read_only_session_setup_raises` |
 | `BaseException` raised inside the driver work propagates through cleanup | `test_mysql_runner_propagates_cancellation` (`asyncio.CancelledError`), `test_mysql_runner_propagates_keyboard_interrupt` (`KeyboardInterrupt`) |
 
-Each test installs a fake `pymysql` module via `monkeypatch.setitem(sys.modules, ...)`, so the suite does **not** require the driver to be installed and runs in the default `pytest -q` pass (which does not collect `tests/connectors/`).
+Each test installs a fake `pymysql` module through `install_fake_pymysql` in [`tests/unit/_fake_pymysql.py`](../../../tests/unit/_fake_pymysql.py), which replaces it in `sys.modules` with `monkeypatch.setitem`, so the suite does **not** require the driver to be installed and runs in the default `pytest -q` pass (which does not collect `tests/connectors/`).
 
 ## Why this matters at the architecture level
 
