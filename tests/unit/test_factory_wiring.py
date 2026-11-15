@@ -68,14 +68,16 @@ def test_run_sql_scratch_anchored_to_absolute_tempdir(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("url", "dialect", "query_type"),
+    ("url", "dialect", "sql", "query_type"),
     [
-        ("mysql+pymysql://u:p@db.internal:3306/shop", "mysql", "SELECT"),
-        ("sqlite:///:memory:", "sqlite", ""),
+        ("mysql+pymysql://u:p@db.internal:3306/shop", "mysql", "# c\nSELECT n FROM t", "SELECT"),
+        ("sqlite:///:memory:", "sqlite", "# c\nSELECT n FROM t", ""),
+        # The same symbol-led statement in MySQL syntax, where "#" would open a comment.
+        ("mysql+pymysql://u:p@db.internal:3306/shop", "mysql", "? c\nSELECT n FROM t", ""),
     ],
 )
 async def test_run_sql_classifies_with_database_dialect(
-    tmp_path: Path, url: str, dialect: str, query_type: str
+    tmp_path: Path, url: str, dialect: str, sql: str, query_type: str
 ) -> None:
     """Issue #304: ``RunSqlTool`` must classify with the dialect the runner uses.
 
@@ -109,9 +111,9 @@ async def test_run_sql_classifies_with_database_dialect(
 
     run_sql_tool.sql_runner = _Rows()
     run_sql_tool.file_system = _Files()
-    out = await run_sql_tool.execute(None, RunSqlToolArgs(sql="# c\nSELECT n FROM t"))
+    out = await run_sql_tool.execute(None, RunSqlToolArgs(sql=sql))
     assert out.metadata["query_type"] == query_type
-    assert ("results" in out.metadata) is (dialect == "mysql")
+    assert ("results" in out.metadata) is (query_type == "SELECT")
 
 
 def test_default_max_tool_iterations_is_twenty(tmp_path: Path) -> None:

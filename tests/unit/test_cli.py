@@ -20,8 +20,8 @@ from sqllens.cli import app
 
 runner = CliRunner()
 
-# An unresolvable host: a test whose fake connect was missed fails the same
-# way on every machine instead of reaching a developer's local server.
+# The reserved .invalid domain does not resolve under a conforming resolver, so
+# a test whose fake connect was missed cannot reach a developer's local server.
 _MYSQL_URL = "mysql+pymysql://u@db.invalid/shop"
 
 
@@ -1037,7 +1037,8 @@ def test_validate_check_llm_runs_before_exit_one(
 
     result = runner.invoke(app, ["validate", "-c", str(cfg_path), "--check-llm"])
     assert result.exit_code == 2, result.stdout
-    assert "Preflight failed" in result.stderr
+    stderr = " ".join(result.stderr.split())
+    assert "Preflight failed: llm: llm.api_key is not set" in stderr
 
 
 def test_format_config_error_redacts_plain_str_input() -> None:

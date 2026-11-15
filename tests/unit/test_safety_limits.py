@@ -227,13 +227,22 @@ class TestFirstSqlKeyword:
         assert first_sql_keyword("/* a /* b */ c */ SELECT 1", dialect) == expected
 
     @pytest.mark.parametrize(
-        ("dialect", "expected"),
-        [("mysql", "SELECT"), ("sqlite", ""), (None, "")],
+        ("sql", "dialect", "expected"),
+        [
+            ("# c\nSELECT 1", "mysql", "SELECT"),
+            ("# c\nSELECT 1", "sqlite", ""),
+            ("# c\nSELECT 1", None, ""),
+            # The same leading symbol token in MySQL syntax, where "#" would
+            # open a comment.
+            ("? c\nSELECT 1", "mysql", ""),
+        ],
     )
-    def test_hash_comment_only_on_mysql(self, dialect: str | None, expected: str) -> None:
+    def test_hash_comment_only_on_mysql(
+        self, sql: str, dialect: str | None, expected: str
+    ) -> None:
         from sqllens.safety import first_sql_keyword
 
-        assert first_sql_keyword("# c\nSELECT 1", dialect) == expected
+        assert first_sql_keyword(sql, dialect) == expected
 
     @pytest.mark.parametrize("sql", ["'x' AS a", "1 AS a", '"t"', "|| 'a'", "* FROM t"])
     def test_non_keyword_first_token_is_empty(self, sql: str) -> None:
@@ -645,9 +654,20 @@ class TestRunSqlToolReadShapedResults:
         assert "results" not in out.metadata
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("dialect", [None, "sqlite"])
-    async def test_tool_dialect_alone_decides_the_output(self, dialect: str | None) -> None:
-        # Under these dialects ``#`` is no comment, so the statement is not
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("# c\nSELECT n FROM widgets", None),
+            ("# c\nSELECT n FROM widgets", "sqlite"),
+            # The same unparseable statement in MySQL syntax, where ``#``
+            # would open a comment.
+            ("c\nSELECT n FROM widgets", "mysql"),
+        ],
+    )
+    async def test_tool_dialect_alone_decides_the_output(
+        self, sql: str, dialect: str | None
+    ) -> None:
+        # Under these dialects the statement does not parse, so it is not
         # read-shaped: it gets the row-count notification even when the runner
         # returned capped rows, because the tool must classify with the
         # runner's own dialect (build_agent passes it).
@@ -659,7 +679,7 @@ class TestRunSqlToolReadShapedResults:
         tool = RunSqlTool(
             sql_runner=_StaticRunner(df), file_system=_NoopFileSystem(), dialect=dialect
         )
-        out = await tool.execute(_ctx(), RunSqlToolArgs(sql="# c\nSELECT n FROM widgets"))
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
         assert "row(s) affected" in out.result_for_llm
         assert isinstance(out.ui_component.rich_component, NotificationComponent)
         assert "results" not in out.metadata

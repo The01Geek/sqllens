@@ -1095,9 +1095,17 @@ class TestIsIntrospectionQueryPerDialect:
     def test_unknown_sqlglot_dialect_data_query_is_data(self) -> None:
         assert is_introspection_query("SELECT id FROM widgets", dialect="postgresql") is False
 
-    def test_hash_is_not_a_comment_outside_mysql(self) -> None:
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("#x\nSHOW 'abc", "sqlite"),
+            # The same statement in MySQL syntax, where "#" would open a comment.
+            ("x\nSHOW 'abc", "mysql"),
+        ],
+    )
+    def test_hash_is_not_a_comment_outside_mysql(self, sql: str, dialect: str) -> None:
         # "#" opens a line comment in MySQL but not in SQLite, so this is not a SHOW.
-        assert is_introspection_query("#x\nSHOW 'abc", dialect="sqlite") is False
+        assert is_introspection_query(sql, dialect=dialect) is False
 
     @pytest.mark.parametrize(
         "sql",

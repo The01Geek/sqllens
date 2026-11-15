@@ -36,7 +36,8 @@ from sqllens.config import (
 )
 from sqllens.transport.http import build_asgi_app
 
-# An unresolvable host: a real connect to it fails the same way on every machine.
+# The reserved .invalid domain does not resolve under a conforming resolver, so
+# a real connect cannot reach a developer's local server.
 MYSQL_URL = "mysql+pymysql://u@db.invalid/shop"
 
 
