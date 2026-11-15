@@ -180,6 +180,8 @@ class TestDeriveDefaultName:
             ("sqlite:////absolute/path/db.sqlite", "db"),
             ("sqlite:///./data.sqlite3", "data"),
             ("mysql+pymysql://u:p@h:3306/orders", "orders"),
+            # The file-extension strip does not look at the scheme.
+            ("mysql+pymysql://u:p@h:3306/orders.db", "orders"),
         ],
     )
     def test_derives_from_dsn(self, url: str, expected: str) -> None:
