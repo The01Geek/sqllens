@@ -122,6 +122,8 @@ SQL Lens prints the whole rewritten statement again with its SQL parser. The nam
 
 The same predicate is added in every place the protected table is read — joins, subqueries, and the body of common table expressions. A common table expression that *references* a same-named protected table is correctly left alone, because its rows already came from the filtered body.
 
+The rewritten statement is never shown to the client. With [`show_details`](configuration.md) on, a server with `[[rls]]` rules shows the SQL the agent wrote, before the rewrite, under `**Query as written:**`, with a first line noting that access rules can change the query before it runs. The `sqllens/query` metadata entry carries the same text and `as_written: true`.
+
 ## What gets blocked
 
 SQL Lens blocks a query and surfaces an actionable error to the assistant when:
