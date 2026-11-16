@@ -14,6 +14,7 @@ from pathlib import Path
 from pydantic import SecretStr
 
 from sqllens.config import (
+    AccessRulesConfig,
     AgentRuntimeConfig,
     AuthConfig,
     Config,
@@ -34,6 +35,7 @@ def build_test_config(
     allow_admin_tools: bool = False,
     auth: AuthConfig | None = None,
     profiles_allow_admin_tools: bool = False,
+    access_rules_allow_admin_tools: bool = False,
     llm: LLMConfig | None = None,
 ) -> Config:
     """Build a ``Config`` from kwargs, bypassing env-var resolution.
@@ -55,4 +57,5 @@ def build_test_config(
         auth=auth or AuthConfig(mode="none"),
         agent=agent or AgentRuntimeConfig(),
         profiles=ProfilesConfig(allow_admin_tools=profiles_allow_admin_tools),
+        access_rules=AccessRulesConfig(allow_admin_tools=access_rules_allow_admin_tools),
     )

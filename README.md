@@ -6,7 +6,7 @@ Natural-language SQL analytics over [MCP](https://modelcontextprotocol.io/). Con
 
 ## What it does
 
-A standalone MCP server that wraps a natural-language SQL agent + a vector memory store. It exposes two tools (plus opt-in memory and profile admin tools that an operator must enable):
+A standalone MCP server that wraps a natural-language SQL agent + a vector memory store. It exposes two tools (plus opt-in memory and profile admin tools, and a read-only access-rules admin tool, that an operator must enable):
 
 | Tool | What it does |
 |---|---|

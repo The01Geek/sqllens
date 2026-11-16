@@ -15,6 +15,11 @@ an apps-aware host renders in sandboxed iframes:
   A self-driving panel that *pulls* its own data on mount via the App SDK's
   ``callServerTool(...)`` and drives every admin tool (list / get / delete /
   clear / add / export / stats) directly. No model in the loop.
+- ``config_admin.html`` — registered only inside ``cfg.profiles.allow_admin_tools``.
+  The same self-driving shape over the profile-admin tools.
+- ``access_rules.html`` — registered only inside
+  ``cfg.access_rules.allow_admin_tools``. A read-only self-driving panel that
+  calls ``get_access_rules`` on mount and lists the loaded rules.
 
 The vendored JS bundles are *inlined* into the HTML at load time. MCP App
 hosts only fetch the single ``ui://`` resource — they then ``document.write``
@@ -51,7 +56,7 @@ _ECHARTS_SCRIPT_TAG = '<script src="./vendor/echarts.min.js"></script>'
 _MARKDOWN_IT_SCRIPT_TAG = '<script src="./vendor/markdown-it.min.js"></script>'
 
 # The ext-apps bundle ends with one ESM export block ``export { ... eI as App };``
-# from which we extract the local identifier for ``App``. Used by both widgets.
+# from which we extract the local identifier for ``App``. Used by every widget.
 _BUNDLE_EXPORT_RE = re.compile(r"export\s*\{([^}]*)\}\s*;?\s*$")
 _APP_ALIAS_RE = re.compile(r"(\w+)\s+as\s+App\b")
 
@@ -135,6 +140,9 @@ _RECIPES: dict[str, list[tuple[str, Callable[[str, str], str]]]] = {
     ],
     # No ECharts — the profile-admin widget renders only forms and a list.
     "config_admin.html": [
+        ("app-with-deps.js", _inline_app_sdk),
+    ],
+    "access_rules.html": [
         ("app-with-deps.js", _inline_app_sdk),
     ],
 }
