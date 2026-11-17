@@ -18,8 +18,9 @@ A star is allowed when it cannot return a table's columns:
   star in that list is checked where it stands, so a CTE or derived table
   that itself selects a star from a table is refused at that inner star.
 * Over a ``VALUES`` list: its rows are written out in the query.
-* Over a system catalog (``readonly.is_catalog_table``), for schema lookups,
-  including a catalog function such as SQLite's ``pragma_table_info('t')``.
+* Over a system catalog table (``readonly.is_catalog_table``: a table in the
+  ``information_schema``, ``mysql``, ``sys`` or ``performance_schema``
+  schema), for schema lookups.
 
 Every other star that expands a table or view is refused wherever it
 appears: in the outer projection, a CTE, a derived table, an ``IN`` or scalar
@@ -44,8 +45,7 @@ A ``TABLE s.t`` that does not parse is refused as unparseable SQL.
 Not covered: a whole row reached without a star, such as a bare ``t`` as a
 composite value, or a function that
 returns rows called outside ``FROM``, and an explicit list of every column.
-A table or function whose name ``is_catalog_table`` takes for a catalog, such
-as a SQLite table named with the ``sqlite_`` prefix, counts as one. A catalog
+A catalog
 table that holds credentials, such as MySQL's ``mysql.user``, is a catalog
 too, so a star over it is allowed;
 database grants, not this guard, keep it out of reach. A statement sqlglot
