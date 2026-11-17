@@ -32,7 +32,7 @@ _METADATA_VIEWS: dict[str, frozenset[tuple[str, str]]] = {
 }
 
 # Relation kinds in MySQL's ``information_schema.TABLES.TABLE_TYPE``
-# vocabulary. Anything outside both sets is refused.
+# vocabulary. A kind in neither the view set nor the base-table set is refused.
 _VIEW_KINDS: dict[str, frozenset[str]] = {
     "mysql": frozenset({"VIEW", "SYSTEM VIEW"}),
 }
