@@ -1249,6 +1249,22 @@ class TestCatalogUnionFallback:
         assert not hasattr(readonly_mod, "normalize_identifiers")
         assert not hasattr(readonly_mod, "_ALL_CATALOG_NAME_PREFIXES")
 
+        import sqlglot.optimizer.normalize_identifiers as normalize_mod
+        import sqlglot.optimizer.scope as scope_mod
+
+        def _forbidden(*args, **kwargs):
+            raise AssertionError("catalog checks must not run scope analysis")
+
+        monkeypatch.setattr(scope_mod, "traverse_scope", _forbidden)
+        monkeypatch.setattr(normalize_mod, "normalize_identifiers", _forbidden)
+        sql = "WITH c AS (SELECT 1 AS a) SELECT * FROM c JOIN mysql.user u ON 1 = 1"
+        assert readonly_mod.is_introspection_query(sql, dialect="mysql") is True
+        import sqlglot
+
+        tables = list(sqlglot.parse_one(sql, read="mysql").find_all(sqlglot.exp.Table))
+        catalog = [t for t in tables if readonly_mod.is_catalog_table(t, dialect="mysql")]
+        assert [t.name for t in catalog] == ["user"]
+
     def test_catalogs_by_dialect_keeps_its_mysql_entry(self) -> None:
         from sqllens.safety.readonly import _CATALOGS_BY_DIALECT
 

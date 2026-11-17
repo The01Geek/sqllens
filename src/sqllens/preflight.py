@@ -61,8 +61,8 @@ def probe_database(cfg: Config) -> None:
     ``information_schema`` on that connection to confirm every listed table
     and column exists as listed (``sqllens.rule_sets.check_catalog``); a
     mismatch, or a catalog read that fails, raises ``PreflightError``. The
-    connect timeout is bounded by ``_DB_CONNECT_TIMEOUT_SECONDS`` so a wedged
-    host can't extend startup indefinitely. A URL scheme other than MySQL's
+    connect is bounded by ``_DB_CONNECT_TIMEOUT_SECONDS``; the catalog read
+    sets no read timeout. A URL scheme other than MySQL's
     raises ``PreflightError``.
 
     Raises:

@@ -66,7 +66,7 @@ See [claude-desktop-installer.md](claude-desktop-installer.md) for the installer
 ## Verify
 
 - Bottom-right of the chat input → MCP indicator should show your configured server name (e.g. `chinook`) with 2 tools (`query_database`, `list_data_sources`).
-- New chat: *"Using sqllens, how many albums did AC/DC release in the chinook database?"*
+- New chat: *"Using sqllens, how many albums did AC/DC release in the chinook database?"* The expected answer is 2 albums.
 - Approve the tool call when prompted. **First query takes 30–60 seconds** — ChromaDB downloads ~80 MB of embedding model weights into `C:\Users\USERNAME\sqllens\chroma\`. Subsequent queries are fast.
 - After success, a `C:\Users\USERNAME\sqllens\<16-hex-chars>\` directory will appear containing `query_results_*.csv`. That's the agent's scratch space — harmless, safe to delete periodically.
 

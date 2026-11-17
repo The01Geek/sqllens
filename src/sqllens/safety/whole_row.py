@@ -27,8 +27,8 @@ appears: in the outer projection, a CTE, a derived table, an ``IN`` or scalar
 subquery, or a function argument such as ``f(t.*)``.
 A bare ``*`` is refused when any source it expands is not one of the above.
 A star over a table-valued function, such as ``generate_series(...)`` or
-``UNNEST(...)``, is refused whatever the function returns, directly or through ``LATERAL``: the
-query does not name its columns, and a function can return a table's whole
+``UNNEST(...)``, is refused, directly or through ``LATERAL``: the query
+does not name its columns, and a function can return a table's whole
 rows. So is a star over a parenthesized table or join, such as ``(t) x``:
 sqlglot gives it a scope of its own, as it does a derived table, but its
 columns are the table's. A star over an expression, such as
