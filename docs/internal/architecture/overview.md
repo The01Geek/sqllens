@@ -9,9 +9,58 @@ A standalone MCP server that exposes a single configured database to MCP-aware A
 - `query_database(question)` — natural-language → SQL → executed → Markdown, backed on apps-aware hosts by a single interactive widget that renders the agent's ordered list of text/table/chart blocks (the agent emits any combination of `run_sql`, `emit_chart`, and `emit_text` calls, in any order, any number of times; the widget draws one container per block in stream order).
 - `list_data_sources()` — describes the configured database.
 
-An opt-in third tool, `import_memory`, is registered only when `cfg.memory.allow_import` is set.
+Four groups of opt-in tools are registered only when their switch is on, all checked in `build_server` in `src/sqllens/server.py`:
+
+- `import_memory`, when `memory.allow_import` is true.
+- The memory-admin tools (`list_memories`, `get_memory`, `delete_memory`, `clear_memories`, `add_memories`, `export_memories`, `get_memory_stats`) and their widget, when `memory.allow_admin_tools` is true.
+- The profile-admin tools (`list_profiles`, `get_profile`, `upsert_profile`, `delete_profile`) and the config-admin widget, when `profiles.allow_admin_tools` is true. See [setup/profiles.md](../setup/profiles.md).
+- The read-only `get_access_rules` tool and its widget, when `access_rules.allow_admin_tools` is true.
 
 One database per running instance. Read-only by default. Anthropic-only LLM in v1, with a pluggable seam for later providers.
+
+## Source-tree map
+
+Where things live, one line per top-level entry in the repository:
+
+| Path | What lives there |
+|---|---|
+| `src/sqllens/` | The Python package. The next table maps its subpackages. |
+| `tests/` | `unit/` (fast, no live database), `integration/` (end-to-end MCP calls, mostly against a real uvicorn HTTP server started in a thread), `connectors/` (live MySQL; not collected by a plain `pytest -q`). |
+| `docs/` | `internal/` (this tree, for maintainers) and `external/` (for operators and users). |
+| `changelog.d/` | One release-note fragment per pull request and category, consumed by `scripts/changelog.py` at release time. |
+| `CHANGELOG.md` | The generated changelog. Written only during release preparation. |
+| `scripts/` | `changelog.py` (release-note tooling) and two HTML preview pages for the result and memory-admin widgets. |
+| `docker/` | `Dockerfile` for the published container image. |
+| `mcpb/` | `build.sh`, `manifest.json` and `launcher.py` for the per-platform `.mcpb` bundles. |
+| `examples/` | `mcp-clients/` (client configuration snippets for Claude Desktop, Cursor and Windsurf) and `sqlite-demo/` (legacy SQLite demo, due for removal). |
+| `.github/` | Workflows (see [operations/ci-and-distribution.md](../operations/ci-and-distribution.md)), composite actions, workflow helper scripts, the security-audit workflow tests, issue and pull-request templates, and the Dependabot configuration. |
+| `.prflow/` | Configuration and skill extensions for the PRFlow automation. |
+| `LICENSES/` | `THIRD-PARTY.txt`, the license notice for the vendored agent code. |
+| `AGENTS.md` | Rules for AI coding assistants. `CLAUDE.md` only imports it. |
+| `demo.db` | Legacy SQLite demo database at the repository root. |
+
+Inside `src/sqllens/`:
+
+| Path | What lives there |
+|---|---|
+| `cli.py`, `__main__.py` | The `sqllens` Typer CLI and `python -m sqllens`. |
+| `config.py` | The `Config` model: TOML plus `SQLLENS_*` environment variables. |
+| `server.py` | `build_server` (tool and widget registration) and `run` (transport dispatch). |
+| `preflight.py` | Startup checks run by `sqllens serve`. |
+| `profiles.py`, `runtime.py` | Named per-request profiles and the request-local `EffectiveSettings`. |
+| `conversation_store.py` | `BoundedConversationStore`, the in-process LRU store behind `conversation_id`. |
+| `rule_sets.py`, `access_rules.py` | The per-role rule-set file model and the read-only listing behind `get_access_rules`. |
+| `_atomic.py`, `_bounded_json.py`, `_errors.py`, `_memory_consistency.py`, `_table_payload.py` | Private shared helpers. |
+| `tools/` | MCP tool implementations, the shared agent singleton (`_agent.py`) and the result formatter (`_format.py`). |
+| `agent/` | The vendored NL-to-SQL agent. `factory.py` is its only public entry point. |
+| `safety/` | The SQL guards and the `SqlRunner` decorators that apply them. |
+| `auth/` | The `Authenticator` protocol, the `none`, `bearer` and `jwt` modes, and the bind policy in `policy.py`. |
+| `transport/` | `http.py`: the Streamable HTTP app, its middleware and the health probes. |
+| `memory/` | First-party memory import, export and admin code over the ChromaDB store. |
+| `eval/` | The golden-set runner behind `sqllens verify-memory`. |
+| `installers/` | `claude_desktop.py`, behind `sqllens claude-desktop install`. |
+| `ui/` | The MCP App widget HTML files and their vendored JavaScript. |
+| `connectors/` | A package holding only a docstring, reserved for future SQLAlchemy-backed adapters. The live MySQL runner is in `agent/integrations/mysql/`. |
 
 ## Layering
 
@@ -111,4 +160,7 @@ What was dropped, and why we might regret it:
 - Debugging the agent? Read [agent/memory.md](../agent/memory.md) and [agent/tool-scratch-storage.md](../agent/tool-scratch-storage.md), then diff against upstream.
 - Working on transport / clients? Read [mcp-server/transport.md](../mcp-server/transport.md) and [authentication/overview.md](../authentication/overview.md).
 - Working on safety / SQL execution? Read [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md), and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the opt-in per-request row scoping.
+- Changing per-request settings? Read [setup/profiles.md](../setup/profiles.md).
+- Changing CI, a release workflow, the Docker image or the `.mcpb` bundles? Read [operations/ci-and-distribution.md](../operations/ci-and-distribution.md) and [releasing.md](../releasing.md).
+- Meeting an unfamiliar term? Check [glossary.md](../glossary.md).
 - Setting up a fresh install? See [installation/claude-desktop-installer.md](../installation/claude-desktop-installer.md) or [installation/claude-desktop-windows-install.md](../installation/claude-desktop-windows-install.md).
