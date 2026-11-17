@@ -55,7 +55,7 @@ In a new conversation, try a natural-language question. For the Chinook demo:
 
 > Using sqllens, how many albums did AC/DC release?
 
-When prompted, approve the tool call.
+When prompted, approve the tool call. The expected answer is 2 albums.
 
 The first time SQL Lens runs, it downloads roughly 80 MB of embedding model weights and connects to your database, which takes 30 to 60 seconds. When you run SQL Lens over HTTP, this one-time cost is paid while `sqllens serve` is starting up, so your first question answers quickly. In stdio mode (the recommended setup for Claude Desktop on macOS) the same cost is paid on the first query instead, so that first answer takes 30 to 60 seconds. Either way, subsequent queries are fast.
 
