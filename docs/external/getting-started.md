@@ -1,11 +1,12 @@
 # Getting Started With SQL Lens
 
-This guide walks you through installing SQL Lens, pointing it at the bundled Chinook demo database, and asking your first question. Expected time: under a minute on a machine that already has Python.
+This guide walks you through installing SQL Lens, starting the Chinook MySQL demo database in Docker, and asking your first question. Expect the first run to take a few minutes: Docker pulls the `mysql:8.0` image and loads the Chinook sample data before the database is ready. Later starts take seconds.
 
 ## Prerequisites
 
 - **Python 3.11 or newer** on your PATH. Verify with `python --version`.
 - **An Anthropic API key**. Generate one at [console.anthropic.com](https://console.anthropic.com/).
+- **Docker with Compose** for the demo database (Docker Desktop on Windows and macOS). Verify with `docker compose version`.
 - **An MCP-aware assistant**. Examples include Claude Desktop, Cursor, and Windsurf.
 
 ## 1. Install the CLI
@@ -22,18 +23,21 @@ Confirm the install:
 sqllens --version
 ```
 
-## 2. Run the bundled demo
+## 2. Run the Chinook MySQL demo
 
-The repository ships with the Chinook SQLite database and a working configuration. Clone the repository and start the server:
+The repository ships a Docker Compose file that starts MySQL 8.0 loaded with the Chinook sample music store, and a configuration that connects to it read-only. Clone the repository, start the database, and start the server:
 
 ```bash
 git clone https://github.com/The01Geek/sqllens.git
 cd sqllens
+docker compose -f examples/mysql-demo/compose.yaml up -d --wait
 export SQLLENS_LLM__API_KEY=sk-ant-...
-sqllens serve -c examples/sqlite-demo/sqllens.toml
+sqllens serve -c examples/mysql-demo/sqllens.toml
 ```
 
-The server starts on standard input and output and waits for an MCP client to connect.
+`--wait` returns once the database answers queries. The demo configuration connects through `mysql+pymysql://chinook_reader:chinook_reader@127.0.0.1:3306/Chinook`, a demo user that can only read the `Chinook` database. The server starts on standard input and output and waits for an MCP client to connect.
+
+To stop the database, how to change its port when 3306 is taken, and more sample questions, see `examples/mysql-demo/README.md`.
 
 ## 3. Wire up your assistant
 
@@ -69,7 +73,7 @@ A very large result can be shortened for display. Each table is limited in size,
 
 ### Asking for a chart
 
-To get an interactive chart, phrase the question so the result is aggregated or temporal. For example, against the bundled Chinook demo:
+To get an interactive chart, phrase the question so the result is aggregated or temporal. For example, against the Chinook demo:
 
 > Using sqllens, chart total invoice revenue per billing country.
 
@@ -89,18 +93,15 @@ Note: Conversations are kept in memory only and are cleared when the server rest
 
 ## 5. Switch to your own database
 
-Edit `sqllens.toml` and replace the value of `database.url` with your own connection string. Quit and relaunch your assistant. SQL Lens connects to the new database during start-up (over HTTP) or on the first question (in stdio mode), so expect the same short one-time delay described in step 4 when you point it at a new database.
+SQL Lens needs a MySQL 8.0+ server. Edit `sqllens.toml` and replace the value of `database.url` with your own connection string. Quit and relaunch your assistant. SQL Lens connects to the new database during start-up (over HTTP) or on the first question (in stdio mode), so expect the same short one-time delay described in step 4 when you point it at a new database.
 
 Keep `read_only = true` unless you specifically need to allow writes.
 
 | Dialect | URL format |
 |---|---|
 | MySQL 8.0+ | `mysql+pymysql://user:password@host:3306/dbname` (or `mysql://...`) |
-| SQLite | `sqlite:///data/app.db` (relative), `sqlite:////var/data/app.db` (absolute), `sqlite:///C:/data/app.db` (Windows) |
 
 [Database URL formats](configuration.md#database-url-formats) lists every URL scheme SQL Lens accepts; any other fails at config load.
-
-For SQLite, three slashes followed by a path (`sqlite:///data/app.db`) is a path relative to the directory the server was started from; four slashes (`sqlite:////var/data/app.db`) is an absolute path. On Windows, write the drive after three slashes (`sqlite:///C:/data/app.db`). A SQLite URL must not contain a host, user, password, port or `?...` query parameters; SQL Lens rejects such a URL. With `read_only = true` (the default), SQL Lens opens the file read-only and never creates it: if the file does not exist, `sqllens serve` stops at startup with an error naming the path.
 
 ## Switching to HTTP transport
 

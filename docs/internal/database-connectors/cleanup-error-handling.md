@@ -39,10 +39,6 @@ Three deliberate properties:
 2. **`logger.warning(..., exc_info=True)`.** Cleanup failures are noisy enough to indicate a real teardown problem (misconfigured proxy, host-firewall RST storm) but never fatal to the request, so they log at WARNING with a full traceback for diagnostics. We deliberately avoid `contextlib.suppress(Exception)` here — that would silence the secondary completely, which is the wrong tradeoff for a server-side observability story.
 3. **The connection is closed whatever fails first.** The outer `finally:` covers everything after `connect()`, so the connection is closed when the read-only session setup raises or when `conn.cursor()` itself raises, not only when `execute()` does.
 
-## What about SQLite?
-
-The SQLite runner is intentionally **not** changed. SQLite's `sqlite3` driver runs in-process, holds no socket, and its `cursor.close()` / `connection.close()` paths are effectively no-ops that don't raise on a degraded connection (because there is no connection — it's a file handle). The masking failure mode requires a networked driver. If a future SQLite cleanup path starts raising in production, mirror the pattern here.
-
 ## Tests
 
 Regression coverage lives in [`tests/unit/test_sql_runner_cleanup.py`](../../../tests/unit/test_sql_runner_cleanup.py):

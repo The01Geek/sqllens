@@ -15,17 +15,22 @@ A standalone MCP server that wraps a natural-language SQL agent + a vector memor
 
 One database per running instance. Read-only by default — generated SQL is parsed with [sqlglot](https://github.com/tobymao/sqlglot) and rejected if it isn't a `SELECT`. ChromaDB stores per-question memory locally so the agent learns from corrections.
 
-## Quick start (60 seconds, with the bundled SQLite Chinook DB)
+## Quick start (with the Chinook MySQL demo)
+
+You need Python 3.11+, Docker with Compose (Docker Desktop on Windows and macOS) and an Anthropic API key. The first run takes a few minutes: Docker pulls the `mysql:8.0` image and loads the Chinook sample data before the database is ready.
 
 ```bash
 git clone https://github.com/The01Geek/sqllens.git
 cd sqllens
 pip install -e ".[all]"
+docker compose -f examples/mysql-demo/compose.yaml up -d --wait
 export SQLLENS_LLM__API_KEY=sk-ant-...
-sqllens serve -c examples/sqlite-demo/sqllens.toml
+sqllens serve -c examples/mysql-demo/sqllens.toml
 ```
 
-The server is now live on **stdio**. Point an MCP client at the process and ask: *"How many albums did AC/DC release?"*
+The demo config connects read-only through `mysql+pymysql://chinook_reader:chinook_reader@127.0.0.1:3306/Chinook`. The server is now live on **stdio**. Point an MCP client at the process and ask: *"How many albums did AC/DC release?"* The answer is 2. More sample questions, and how to stop the container or change its port, are in [`examples/mysql-demo/README.md`](examples/mysql-demo/README.md).
+
+To use your own database instead, point `database.url` at a MySQL 8.0+ server.
 
 Prefer HTTP? Edit the config:
 
@@ -56,9 +61,8 @@ Env vars beat TOML — the convention containerized deploys expect.
 | Dialect | Example |
 |---|---|
 | MySQL 8.0+ | `mysql+pymysql://user:pw@host:3306/dbname` (or `mysql://...`) |
-| SQLite | `sqlite:///./demo.db` |
 
-Only a URL whose scheme is `mysql`, starts with `mysql+` (any driver) or starts with `sqlite` loads. Any other URL scheme, or a URL with no `://`, fails every `sqllens` command that loads the config, `validate` and `serve` included.
+SQL Lens supports MySQL 8.0+ only. Only a URL whose scheme is `mysql` or starts with `mysql+` (any driver) loads. Any other URL scheme, or a URL with no `://`, fails every `sqllens` command that loads the config, `validate` and `serve` included.
 
 ### Auth modes
 
@@ -112,7 +116,7 @@ sqllens/
 │   ├── auth/               # none | bearer | jwt
 │   └── safety/             # Read-only SQL guard
 ├── examples/
-│   ├── sqlite-demo/        # Bundled Chinook DB + working config
+│   ├── mysql-demo/         # Docker Compose Chinook MySQL database + working config
 │   └── mcp-clients/        # Drop-in config snippets per IDE
 └── tests/
     ├── unit/               # Config, auth, safety

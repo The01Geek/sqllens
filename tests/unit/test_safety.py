@@ -1163,7 +1163,6 @@ class TestDenylistUnionFallback:
 
         denied = _denied_funcs(dialect)
         assert denied == _SIDE_EFFECT_FUNCS["mysql"] | _ALWAYS_DENIED_FUNCS
-        assert "load_extension" not in denied
 
     def test_side_effect_funcs_keeps_its_mysql_entry(self) -> None:
         from sqllens.safety.readonly import _SIDE_EFFECT_FUNCS
@@ -1225,9 +1224,9 @@ class TestCatalogUnionFallback:
             ("SELECT * FROM performance_schema.threads", True),
             ("SELECT * FROM shop.orders", False),
             ("SELECT * FROM orders", False),
-            ("SELECT * FROM sqlite_master", False),
+            ("SELECT * FROM sys_users", False),
             ("SELECT * FROM information_schema_backup", False),
-            ("SELECT * FROM pragma_table_info('t')", False),
+            ("SELECT * FROM table_info('t')", False),
         ],
     )
     def test_is_catalog_table_is_schema_only(

@@ -43,7 +43,7 @@ There are four jobs. `build` runs first and `pypi-publish` waits for it. `smoke`
 
 1. `build` runs `python scripts/changelog.py release --tag "$GITHUB_REF_NAME"` first. That command fails the run when the tag does not match a prepared release. The job then runs `python -m build` and uploads `dist/`.
 2. `pypi-publish` publishes `dist/` with `pypa/gh-action-pypi-publish` in the `pypi` environment. It uses OIDC Trusted Publishing, so no API token is stored. The PyPI publisher is bound to the file name `release.yml`; do not rename it.
-3. `smoke` installs `sqllens==<version>` from PyPI into a clean virtual environment (up to six attempts, 15 seconds apart), then runs `sqllens --version` and `sqllens validate -c examples/sqlite-demo/sqllens.toml` with a placeholder API key. The SQLite demo here is legacy and is due for removal with the rest of the SQLite code.
+3. `smoke` installs `sqllens==<version>` from PyPI into a clean virtual environment (up to six attempts, 15 seconds apart), then runs `sqllens --version`, writes a config with the published `sqllens init` into a temporary directory, checks that its `database.url` is a `mysql+pymysql://` URL, runs `sqllens validate` on it with a placeholder API key (no `--check-db`, so no database server is needed), and runs `python -c "import pymysql"` in the same venv. It reads no file from the repository.
 4. `github-release` writes the release notes with `python scripts/changelog.py release --tag ... --output release-notes.md` and creates the release with the wheel and sdist attached. A version containing `-` is marked as a pre-release.
 
 ## `docker.yml`: the container image

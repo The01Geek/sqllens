@@ -33,7 +33,6 @@ Connection probes catch the driver / SDK exception base for the subsystem they v
 
 | Probe | Caught (re-labelled as `PreflightError`) | Propagated as-is |
 |---|---|---|
-| `probe_database` (sqlite) | `sqlite3.Error`, `ValueError` (URL rejected by `sqlite_path_from_url`, or raised while opening) | everything else |
 | `probe_database` (mysql) | `pymysql.MySQLError`; URL-parser `ValueError` before connecting | everything else (the explicit `ImportError` branch above this catch reports a broken install: PyMySQL is a core dependency, so its absence raises a `PreflightError` asking to reinstall `sqllens`) |
 | `probe_llm` | `anthropic.AnthropicError` | everything else, including `ImportError` from `import anthropic` or `from sqllens.agent.integrations import AnthropicLlmService` — these imports are deliberately kept **outside** the `try` block so a packaging breakage doesn't masquerade as an "llm" subsystem failure |
 | `probe_auth` | `ValueError` (and a residual `Exception` catch for parity with `build_authenticator`'s historic surface) | n/a |
@@ -44,18 +43,17 @@ Connection probes catch the driver / SDK exception base for the subsystem they v
 
 ### `probe_database`
 
-Opens and immediately closes a connection to `cfg.database.url`. **Runs no query of its own** (except the SQLite read-only schema-header read described below and, on MySQL with `[rule_sets] file` set, the rule-set catalog check; on MySQL the driver's connect still sends its own session setup statements, such as `SET NAMES`) — that would burn a round-trip and could trigger permission errors unrelated to reachability.
+Opens and immediately closes a connection to `cfg.database.url`. **Runs no query of its own** (except, with `[rule_sets] file` set, the rule-set catalog check; the driver's connect still sends its own session setup statements, such as `SET NAMES`) — that would burn a round-trip and could trigger permission errors unrelated to reachability.
 
 Scheme handling:
 
 | URL prefix | Driver | Timeout |
 |---|---|---|
-| `sqlite://`, `sqlite+...://` | `connect_sqlite(path, read_only=cfg.database.read_only, timeout=5)` — the same open the query runner uses, with the path from `sqlite_path_from_url` (three slashes relative to the working directory, four absolute; a URL with query parameters or a host/user/password/port fails with the helper's message). With `read_only = true` the file opens through the `mode=ro` URI and the probe reads `PRAGMA schema_version`, so a missing file, a directory or a non-empty non-database file fails with `could not open SQLite database <path> (resolved to <absolute path>)` instead of being created (a zero-byte file opens as an empty database). With `read_only = false` it is a plain open, which creates a missing file. | `timeout` is lock-wait, **not** connect-timeout. The `open()` call is the only blocking step and is effectively instant for local files. |
 | `mysql://`, `mysql+...://` | `pymysql.connect(connect_timeout=5)` | `mysql_connect_kwargs` in `src/sqllens/rule_sets.py` parses the URL with `urllib.parse.urlparse` into `host/port/user/password/database`. A missing user or host, or a non-numeric port, raises a `PreflightError` with the fixed text `invalid MySQL URL; it must name a user and host and a numeric port` before connecting. `urllib.parse.unquote` is applied to the username and password, matching SQLAlchemy's `make_url` — so a password containing `/` written as `%2F` authenticates correctly. With a rule-set file configured, `_check_rule_set_catalog` runs `check_catalog`, the rule-set existence check, on the open connection: a mismatch raises `PreflightError` with the mismatch list, a catalog read that fails raises one asking to check the user's privileges, and a pass marks the catalog confirmed so requests skip the check (see [database-connectors/rule-sets.md](../database-connectors/rule-sets.md)). |
 
-A URL with no `://` separator fails fast with `database.url is missing the '://' separator`, and a scheme that starts with neither `sqlite` nor `mysql` with `unsupported database scheme (expected sqlite/mysql)`, rather than reaching the driver. Any scheme starting with `mysql`, `mysqlx` included, goes to the MySQL branch. Config loading refuses all of these except `mysql`/`mysql+…` and `sqlite…` first (see [config-loading.md](config-loading.md)), so the probe meets the others only from a programmatic caller that built the config without validation.
+A URL with no `://` separator fails fast with `database.url is missing the '://' separator`, and a scheme that does not start with `mysql` (`sqlite` included) with `unsupported database scheme (expected mysql)`, rather than reaching the driver. Any scheme starting with `mysql`, `mysqlx` included, goes to the MySQL branch. Config loading refuses all of these except `mysql`/`mysql+…` first (see [config-loading.md](config-loading.md)), so the probe meets the others only from a programmatic caller that built the config without validation.
 
-The 5-second connect timeout (`_DB_CONNECT_TIMEOUT_SECONDS`) bounds how long a wedged host can extend startup. SQLite gets the same value passed for completeness even though it doesn't apply — the file open is unbounded on a wedged remote mount, but operators using SQLite over NFS already know what they signed up for.
+The 5-second connect timeout (`_DB_CONNECT_TIMEOUT_SECONDS`) bounds how long a wedged host can extend startup.
 
 ### `probe_llm`
 

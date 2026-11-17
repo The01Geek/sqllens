@@ -173,7 +173,7 @@ def test_allowed_dialect_specific_shapes(sql: str, dialect: str | None) -> None:
         ("SELECT `u`.* FROM `users` AS `u`", "mysql"),
         ("SELECT * FROM shop.users", "mysql"),
         # A table is a catalog only through its schema, whatever its name.
-        ("SELECT * FROM sqlite_stuff", None),
+        ("SELECT * FROM performance_schema_copy", None),
         # A name merely starting with a MySQL catalog schema's name is no catalog.
         ("SELECT * FROM sys_users", "mysql"),
         # UNNEST is a table-valued function too, whatever its argument.

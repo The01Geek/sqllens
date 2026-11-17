@@ -29,7 +29,7 @@ The widget reports its own size so the assistant can fit it to the result. On ho
 
 ## Documentation map
 
-- **[Getting started](getting-started.md)** — Install SQL Lens, point it at the bundled demo database, and run your first question.
+- **[Getting started](getting-started.md)** — Install SQL Lens, start the Chinook MySQL demo database in Docker, and run your first question.
 - **[Configuration](configuration.md)** — All configurable fields in `sqllens.toml`, environment variables, and database URL formats.
 - **[Row-Level Security](row-level-security.md)** — Narrow every answer to the rows a particular request is allowed to see using static or per-request dynamic rules.
 - **[Per-role rule sets](rule-sets.md)** — Mirror your application's roles in SQL Lens, so each question is limited to the tables and columns its role may read (MySQL only).
@@ -60,4 +60,4 @@ For full details on the boot-time safety guard and the closed-network override, 
 ## See also
 
 - **[Release notes](release-notes.md)** for what changed in each version.
-- The **[getting started guide](getting-started.md)** for a 60-second first run against the bundled demo database.
+- The **[getting started guide](getting-started.md)** for a first run against the Chinook MySQL demo database, which starts in Docker.
