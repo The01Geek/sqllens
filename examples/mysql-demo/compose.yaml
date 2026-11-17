@@ -1,0 +1,34 @@
+# Chinook demo database for SQL Lens: MySQL 8.0 loaded with the Chinook sample
+# data and a SELECT-only demo user. See README.md in this folder.
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: chinook-demo-root  # demo only; never reuse
+    ports:
+      # Bound to loopback only. Change the left-hand port if 3306 is taken.
+      - "127.0.0.1:3306:3306"
+    volumes:
+      # Scripts run once, in file-name order, when the data volume is empty.
+      - ./Chinook_MySql.sql:/docker-entrypoint-initdb.d/01-chinook.sql:ro
+      - ./demo-user.sql:/docker-entrypoint-initdb.d/02-demo-user.sql:ro
+      - chinook-data:/var/lib/mysql
+    healthcheck:
+      # Over TCP and against Chinook: during first-start loading the image runs
+      # a temporary server with no TCP listener, so a socket ping would report
+      # healthy before the data and the demo user exist.
+      test:
+        - CMD
+        - mysql
+        - -h127.0.0.1
+        - -uchinook_reader
+        - -pchinook_reader
+        - -e
+        - SELECT 1 FROM Chinook.Album LIMIT 1
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+volumes:
+  chinook-data:
