@@ -20,7 +20,7 @@ One database per running instance. Read-only by default. Anthropic-only LLM in v
 
 ## Source-tree map
 
-Where things live, one line per top-level entry in the repository:
+Where things live. The table covers the main top-level directories and files. It leaves out standard project files such as `README.md`, `pyproject.toml`, `requirements.txt`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE`, `NOTICE`, the dotfiles, and the `.claude/` and `.claude-plugin/` directories.
 
 | Path | What lives there |
 |---|---|
@@ -31,7 +31,7 @@ Where things live, one line per top-level entry in the repository:
 | `CHANGELOG.md` | The generated changelog. Written only during release preparation. |
 | `scripts/` | `changelog.py` (release-note tooling) and two HTML preview pages for the result and memory-admin widgets. |
 | `docker/` | `Dockerfile` for the published container image. |
-| `mcpb/` | `build.sh`, `manifest.json` and `launcher.py` for the per-platform `.mcpb` bundles. |
+| `mcpb/` | `build.sh`, `manifest.json`, `launcher.py` and a `README.md` for the per-platform `.mcpb` bundles. |
 | `examples/` | `mcp-clients/` (client configuration snippets for Claude Desktop, Cursor and Windsurf) and `sqlite-demo/` (legacy SQLite demo, due for removal). |
 | `.github/` | Workflows (see [operations/ci-and-distribution.md](../operations/ci-and-distribution.md)), composite actions, workflow helper scripts, the security-audit workflow tests, issue and pull-request templates, and the Dependabot configuration. |
 | `.prflow/` | Configuration and skill extensions for the PRFlow automation. |

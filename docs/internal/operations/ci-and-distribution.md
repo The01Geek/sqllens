@@ -33,13 +33,13 @@ The `unit` job runs once per Python version in a matrix of 3.11, 3.12, 3.13 and 
 
 Two more jobs run the connector tests against a real MySQL service container: `connectors` (check name `Connector tests (MySQL)`, image `mysql:8.0`) and `connectors-mysql84` (check name `Connector tests (MySQL 8.4)`, image `mysql:8.4`). Each sets `SQLLENS_TEST_MYSQL_URL`, turns on `log_bin_trust_function_creators` so the RLS test can create a stored function, creates a second database `sqllens_other` for the rule-set catalog tests, and runs `pytest -q tests/connectors -v`.
 
-The `request-review` job posts a PRFlow review request after all three jobs pass. It runs only on non-draft, same-repository pull requests, and only when the `DEVFLOW_APP_ID` variable is set.
+The `request-review` job posts a PRFlow review request after all three jobs pass. It runs only on a `pull_request` event, and only when all of these hold: the pull request is not a draft, its head branch is in this repository, the actor is not `dependabot[bot]`, and the `DEVFLOW_APP_ID` variable is set.
 
 Check names are load-bearing. The `main-protected` ruleset requires some of them by name; AGENTS.md lists which ones. Renaming a job means updating the ruleset too.
 
 ## `release.yml`: PyPI and the GitHub release
 
-Four jobs run in order:
+There are four jobs. `build` runs first and `pypi-publish` waits for it. `smoke` and `github-release` both wait only for `build` and `pypi-publish`, so they run at the same time. The GitHub release is created even if the smoke test fails.
 
 1. `build` runs `python scripts/changelog.py release --tag "$GITHUB_REF_NAME"` first. That command fails the run when the tag does not match a prepared release. The job then runs `python -m build` and uploads `dist/`.
 2. `pypi-publish` publishes `dist/` with `pypa/gh-action-pypi-publish` in the `pypi` environment. It uses OIDC Trusted Publishing, so no API token is stored. The PyPI publisher is bound to the file name `release.yml`; do not rename it.

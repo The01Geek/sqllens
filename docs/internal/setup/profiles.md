@@ -55,11 +55,13 @@ Writes:
 - `upsert` and `delete` hold an `asyncio.Lock`, change the in-memory copy, then write the file with `atomic_write_text` from `src/sqllens/_atomic.py` on a worker thread.
 - If the file write fails, the in-memory change is undone, so memory and disk stay the same.
 
-Load failures do not turn into an empty store reported as success:
+Most load failures leave the store degraded and flagged, instead of reporting an empty store as success:
 
-- An unreadable file, invalid JSON, or a top-level value that is not an object sets `load_error` to a message that starts with `Warning:`, logs it, and leaves the store with no profiles. The bad file stays on disk.
-- A single entry that fails validation is skipped, and `load_error` names every skipped entry.
-- An entry whose name fails `validate_profile_name` is skipped, and all writes are refused until an operator renames it in the file and restarts. This stops a save from deleting the entries that were skipped.
+- A file that cannot be read (an `OSError`), invalid JSON, or a top-level value that is not an object sets `load_error` to a message that starts with `Warning:`, logs it, and leaves the store with no profiles. The bad file stays on disk.
+- A single entry that fails validation is skipped and logged on its own line. When every entry name is valid, `load_error` names every skipped entry.
+- An entry whose name fails `validate_profile_name` is skipped, and all writes are refused until an operator renames it in the file and restarts. This stops a save from deleting the entries that were skipped. In this case `load_error` reports only the count of invalid names. Any entries skipped for a bad body are named only in their per-entry log lines.
+
+One failure is not handled this way. A file that exists but is not valid UTF-8 raises `UnicodeDecodeError` from `read_text`. Only `OSError` is caught around that call, so the error escapes the `ProfileStore` constructor and stops `build_server`.
 
 ## The profile-admin tools
 
@@ -72,11 +74,11 @@ When `profiles.allow_admin_tools` is true, `build_server` registers four tools a
 | `upsert_profile` | Yes | Validates the body with `Profile.model_validate`; an invalid body is an `isError` result. |
 | `delete_profile` | Yes | Refuses the reserved `default` name and unknown names with `isError`. |
 
-The two write tools call `_require_write_auth("profile")`, the same check the memory-admin tools use. It refuses to run when `auth.mode` is `none` unless `auth.insecure` is true.
+The two write tools call `_require_write_auth("profile")`, the same check `import_memory` and the memory-admin write tools use. It refuses to run when `auth.mode` is `none` unless `auth.insecure` is true.
 
 ## Other callers
 
-`verification_config` in `src/sqllens/eval/runner.py` (used by `sqllens verify-memory`) resolves the stored `default` profile with `resolve_effective_settings(cfg, None, store=ProfileStore(cfg))` and copies the result into its own config, so a verification run uses the same defaults as the server.
+`verification_config` in `src/sqllens/eval/runner.py` (used by `sqllens verify-memory`) resolves the stored `default` profile with `resolve_effective_settings(cfg, None, store=ProfileStore(cfg))` and builds a copy of the config from it. The copy takes `similarity_threshold` from the profile. It takes `max_tool_iterations` and `max_rows` as the lower of the base value and the profile value. It always sets `show_details` to true and turns off both memory-saving settings (`save_queries` and `save_text_memories`). The stored profile and the caller's config are not changed.
 
 ## Tests
 
