@@ -43,12 +43,10 @@ refusal: an unquoted ``table`` alias or a ``TABLE(...)`` call is refused too.
 A ``TABLE s.t`` that does not parse is refused as unparseable SQL.
 
 Not covered: a whole row reached without a star, such as a bare ``t`` as a
-composite value, or a function that
-returns rows called outside ``FROM``, and an explicit list of every column.
-A catalog
-table that holds credentials, such as MySQL's ``mysql.user``, is a catalog
-too, so a star over it is allowed;
-database grants, not this guard, keep it out of reach. A statement sqlglot
+composite value, or a function that returns rows called outside ``FROM``,
+and an explicit list of every column. A system catalog table that holds
+credentials, such as MySQL's ``mysql.user``, is allowed like any other
+catalog table; database grants, not this guard, keep it out of reach. A statement sqlglot
 keeps as opaque text (an ``exp.Command``, such as MySQL's
 ``PREPARE s FROM '...'``) has no star node, so a star inside it is not seen;
 the read-only guard refuses such a statement while ``database.read_only`` is

@@ -310,13 +310,13 @@ def test_unexpected_catalog_failure_is_logged(caplog) -> None:
     ("SELECT * FROM generate_series(1, 3)", "mysql", "relation shape"),
     ("UPDATE orders SET tenant_id = 'beta'", "mysql", "relation shape"),
     ("SELECT * FROM orders", "duckdb", "dialect"),
+    ("SELECT a FROM t", "sqlite", "dialect"),
 ])
 def test_unverifiable_relations_fail_closed(sql, dialect, message) -> None:
     connection = Mock()
     with pytest.raises(RlsError, match=message):
         verify_base_tables(connection, sql, dialect=dialect)
-    if message == "relation shape":
-        connection.cursor.assert_not_called()
+    connection.cursor.return_value.execute.assert_not_called()
 
 
 def _fresh_connections():
