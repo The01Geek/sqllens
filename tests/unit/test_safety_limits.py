@@ -5,16 +5,12 @@
 
 from __future__ import annotations
 
-import sqlite3
-import time
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pytest
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
-from sqllens.agent.integrations.sqlite import SqliteRunner
 from sqllens.safety.limits import (
     MAX_ROWS_ATTR,
     TRUNCATED_ATTR,
@@ -230,7 +226,6 @@ class TestFirstSqlKeyword:
         ("sql", "dialect", "expected"),
         [
             ("# c\nSELECT 1", "mysql", "SELECT"),
-            ("# c\nSELECT 1", "sqlite", ""),
             ("# c\nSELECT 1", None, ""),
             # The same leading symbol token in MySQL syntax, where "#" would
             # open a comment.
@@ -367,53 +362,6 @@ class TestMySQLRunnerCteRowCap:
         assert len(df) == 10
         assert df.attrs[TRUNCATED_ATTR] is True
         assert df.attrs[MAX_ROWS_ATTR] == 10
-
-
-class TestSqliteRunnerTimeout:
-    @pytest.mark.asyncio
-    async def test_progress_handler_interrupts_long_query(self, tmp_path: Path) -> None:
-        """A query that must materialise many rows before yielding must be interrupted.
-
-        ``fetchmany(max_rows + 1)`` only pulls a handful of rows, so a query
-        whose first row is cheap (e.g. a streaming recursive CTE under LIMIT)
-        wouldn't exercise the handler. Aggregating over a recursive CTE forces
-        SQLite to walk the whole sequence before producing the single output
-        row, which keeps the VM busy past the deadline.
-        """
-        db_path = tmp_path / "to.db"
-        sql = (
-            "WITH RECURSIVE x(n) AS ("
-            "  SELECT 1 UNION ALL SELECT n + 1 FROM x WHERE n < 10000000"
-            ") SELECT COUNT(*) AS c FROM x"
-        )
-        # read_only=False: exercises the timeout primitive, not read-only.
-        runner = SqliteRunner(
-            database_path=str(db_path),
-            statement_timeout_ms=200,
-            max_rows=10,
-            read_only=False,
-        )
-        start = time.monotonic()
-        with pytest.raises(sqlite3.OperationalError, match="interrupted"):
-            await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
-        elapsed = time.monotonic() - start
-        assert elapsed < 2.0, f"timeout fired too slowly ({elapsed:.2f}s)"
-
-    @pytest.mark.asyncio
-    async def test_handler_disabled_when_timeout_zero(self, tmp_path: Path) -> None:
-        """statement_timeout_ms=0 must not register a progress handler."""
-        db_path = tmp_path / "no-to.db"
-        # read_only=False: exercises the timeout-disabled path, not read-only.
-        runner = SqliteRunner(
-            database_path=str(db_path),
-            statement_timeout_ms=0,
-            max_rows=10,
-            read_only=False,
-        )
-        # A trivial query must complete — if the deadline check were always firing
-        # we'd see "interrupted" here.
-        df = await runner.run_sql(RunSqlToolArgs(sql="SELECT 1 AS n"), _ctx())
-        assert df.iloc[0]["n"] == 1
 
 
 class _NoopFileSystem:
@@ -658,7 +606,6 @@ class TestRunSqlToolReadShapedResults:
         ("sql", "dialect"),
         [
             ("# c\nSELECT n FROM widgets", None),
-            ("# c\nSELECT n FROM widgets", "sqlite"),
             # The same unparseable statement in MySQL syntax, where ``#``
             # would open a comment.
             ("c\nSELECT n FROM widgets", "mysql"),
@@ -703,108 +650,17 @@ class TestRunSqlToolReadShapedResults:
         assert "SQL is empty" in out.result_for_llm
         assert server.connections == []
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("sql", "query_type"),
-        [
-            ("WITH w AS (SELECT n FROM widgets) SELECT n FROM w", "WITH"),
-            ("-- note\nSELECT n FROM widgets", "SELECT"),
-            ("/* note */ SELECT n FROM widgets", "SELECT"),
-            ("SELECT n FROM widgets", "SELECT"),
-        ],
-    )
-    async def test_sqlite_reads_return_rows(
-        self, tmp_path: Path, sql: str, query_type: str
-    ) -> None:
-        from sqllens.agent.tools.run_sql import RunSqlTool
-
-        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 3), max_rows=100)
-        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
-        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
-        self._assert_table(out, query_type, [{"n": 0}, {"n": 1}, {"n": 2}])
-        assert out.result_for_llm.startswith("n\n0\n1\n2\n")
-
-    @pytest.mark.asyncio
-    async def test_sqlite_touching_symbol_read_returns_rows(self, tmp_path: Path) -> None:
-        from sqllens.agent.tools.run_sql import RunSqlTool
-
-        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 2), max_rows=100)
-        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
-        out = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT*FROM widgets"))
-        self._assert_table(out, "SELECT", [{"n": 0, "label": "w0"}, {"n": 1, "label": "w1"}])
-
-    @pytest.mark.asyncio
-    async def test_sqlite_empty_read_reports_no_rows(self, tmp_path: Path) -> None:
-        from sqllens.agent.tools.run_sql import RunSqlTool
-
-        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 3), max_rows=100)
-        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
-        sql = "WITH w AS (SELECT n FROM widgets WHERE n > 99) SELECT n FROM w"
-        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
-        assert out.success is True
-        assert "No rows returned" in out.result_for_llm
-        assert "row(s) affected" not in out.result_for_llm
-        assert out.metadata["row_count"] == 0
-        assert out.metadata["query_type"] == "WITH"
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "sql",
-        ["UPDATE widgets SET n = n + 1", "SELECT n FROM widgets /* note"],
-    )
-    async def test_sqlite_not_read_shaped_gets_rows_affected(
-        self, tmp_path: Path, sql: str
-    ) -> None:
-        # read_only off: these reach the runner's write branch. The unterminated
-        # comment does not tokenize, so it is not read-shaped though SQLite runs it.
-        from sqllens.agent.components import NotificationComponent
-        from sqllens.agent.tools.run_sql import RunSqlTool
-
-        runner = SqliteRunner(
-            database_path=_widgets_db(tmp_path, 3), max_rows=100, read_only=False
-        )
-        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
-        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
-        assert out.success is True
-        assert "row(s) affected" in out.result_for_llm
-        assert isinstance(out.ui_component.rich_component, NotificationComponent)
-        assert "results" not in out.metadata
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("read_only", [True, False])
-    @pytest.mark.parametrize("sql", ["", "   \n\t"])
-    async def test_sqlite_empty_sql_fails(self, tmp_path: Path, sql: str, read_only: bool) -> None:
-        from sqllens.agent.tools.run_sql import RunSqlTool
-        from sqllens.safety import ReadOnlyGuardRunner
-
-        runner: SqlRunner = SqliteRunner(
-            database_path=_widgets_db(tmp_path, 1), max_rows=10, read_only=read_only
-        )
-        if read_only:
-            runner = ReadOnlyGuardRunner(runner, dialect="sqlite")
-        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
-        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
-        assert out.success is False
-
 
 class TestRunnerNegativeTimeoutRejection:
     """Symmetric with ``RowCapRunner``'s ``max_rows < 1`` rejection: a negative
     ``statement_timeout_ms`` is a configuration error (most likely a unit-confusion
     typo), not a request to disable the guard. Disabling uses 0.
 
-    Both runners (SQLite / MySQL) carry the same guard; each
+    The MySQL runner carries this guard and
     must reject negatives independently of the pydantic ``ge=0`` constraint on
     ``DatabaseConfig`` so programmatic embedders and tests that construct a
     runner directly (bypassing config validation) still get the check.
     """
-
-    def test_sqlite_rejects_negative_timeout(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="statement_timeout_ms must be"):
-            SqliteRunner(database_path=str(tmp_path / "x.db"), statement_timeout_ms=-1)
-
-    def test_sqlite_zero_timeout_accepted(self, tmp_path: Path) -> None:
-        # The disable path stays a valid configuration.
-        SqliteRunner(database_path=str(tmp_path / "x.db"), statement_timeout_ms=0)
 
     def test_mysql_rejects_negative_timeout(self) -> None:
         pymysql = pytest.importorskip("pymysql")
@@ -855,112 +711,3 @@ class TestDatabaseConfigTimeoutUpperBound:
         assert cfg.statement_timeout_ms == 86_400_000
 
 
-class TestSqliteRunnerCap:
-    @pytest.mark.asyncio
-    async def test_fetchmany_caps_at_max_rows_and_marks_truncation(
-        self, tmp_path: Path
-    ) -> None:
-        db_path = tmp_path / "rows.db"
-        # Populate 50 rows so a cap of 10 must truncate.
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE t (n INTEGER)")
-        conn.executemany("INSERT INTO t (n) VALUES (?)", [(i,) for i in range(50)])
-        conn.commit()
-        conn.close()
-
-        runner = SqliteRunner(database_path=str(db_path), max_rows=10)
-        df = await runner.run_sql(RunSqlToolArgs(sql="SELECT n FROM t"), _ctx())
-        assert len(df) == 10
-        assert df.attrs[TRUNCATED_ATTR] is True
-        assert df.attrs[MAX_ROWS_ATTR] == 10
-
-    @pytest.mark.asyncio
-    async def test_no_truncation_when_under_cap(self, tmp_path: Path) -> None:
-        db_path = tmp_path / "rows.db"
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE t (n INTEGER)")
-        conn.executemany("INSERT INTO t (n) VALUES (?)", [(i,) for i in range(5)])
-        conn.commit()
-        conn.close()
-
-        runner = SqliteRunner(database_path=str(db_path), max_rows=10)
-        df = await runner.run_sql(RunSqlToolArgs(sql="SELECT n FROM t"), _ctx())
-        assert len(df) == 5
-        assert df.attrs[TRUNCATED_ATTR] is False
-        assert df.attrs[MAX_ROWS_ATTR] == 10
-
-
-class TestSqliteRunnerCteRowCap:
-    """Regression: CTE queries (`WITH ... SELECT`) must honor max_rows.
-
-    Before the fix, the runner classified by first keyword == "SELECT" only,
-    so a CTE fell through to the non-streaming branch and returned a
-    rows_affected DataFrame instead of capped rows.
-    """
-
-    @pytest.mark.asyncio
-    async def test_cte_row_cap_truncates(self, tmp_path: Path) -> None:
-        db_path = tmp_path / "cte.db"
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE t (n INTEGER)")
-        conn.executemany("INSERT INTO t (n) VALUES (?)", [(i,) for i in range(50)])
-        conn.commit()
-        conn.close()
-
-        sql = "WITH src AS (SELECT n FROM t) SELECT n FROM src"
-        runner = SqliteRunner(database_path=str(db_path), max_rows=10)
-        df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
-
-        # The streaming branch produced an "n" column, not a rows_affected DF.
-        assert "n" in df.columns
-        assert "rows_affected" not in df.columns
-        assert len(df) == 10
-        assert df.attrs[TRUNCATED_ATTR] is True
-        assert df.attrs[MAX_ROWS_ATTR] == 10
-
-    @pytest.mark.asyncio
-    async def test_recursive_cte_row_cap_truncates(self, tmp_path: Path) -> None:
-        """The exact attack shape from issue #37: WITH RECURSIVE with no LIMIT."""
-        db_path = tmp_path / "rcte.db"
-        sql = (
-            "WITH RECURSIVE x(n) AS ("
-            "  SELECT 1 UNION ALL SELECT n + 1 FROM x WHERE n < 100"
-            ") SELECT n FROM x"
-        )
-        # read_only=False: exercises the row-cap primitive, not read-only.
-        # The default mode=ro URI can't open a not-yet-created temp DB file.
-        runner = SqliteRunner(database_path=str(db_path), max_rows=10, read_only=False)
-        df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
-
-        assert "n" in df.columns
-        assert len(df) == 10
-        assert df.attrs[TRUNCATED_ATTR] is True
-
-
-def _widgets_db(tmp_path: Path, rows: int) -> str:
-    db_path = tmp_path / "widgets.db"
-    conn = sqlite3.connect(db_path)
-    conn.execute("CREATE TABLE widgets (n INTEGER, label TEXT)")
-    conn.executemany(
-        "INSERT INTO widgets (n, label) VALUES (?, ?)", [(i, f"w{i}") for i in range(rows)]
-    )
-    conn.commit()
-    conn.close()
-    return str(db_path)
-
-
-class TestSqliteRunnerCommentLedRowCap:
-    """Issue #304: a comment-led or touching-symbol read used to take the write
-    branch and return a one-row ``rows_affected`` frame."""
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "sql", ["-- note\nSELECT n, label FROM widgets", "SELECT*FROM widgets"]
-    )
-    async def test_read_is_streamed_and_capped(self, tmp_path: Path, sql: str) -> None:
-        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 50), max_rows=10)
-        df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
-        assert list(df.columns) == ["n", "label"]
-        assert list(df["n"]) == list(range(10))
-        assert df.attrs[TRUNCATED_ATTR] is True
-        assert df.attrs[MAX_ROWS_ATTR] == 10

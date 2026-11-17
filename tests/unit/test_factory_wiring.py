@@ -71,7 +71,6 @@ def test_run_sql_scratch_anchored_to_absolute_tempdir(tmp_path: Path) -> None:
     ("url", "dialect", "sql", "query_type"),
     [
         ("mysql+pymysql://u:p@db.internal:3306/shop", "mysql", "# c\nSELECT n FROM t", "SELECT"),
-        ("sqlite:///:memory:", "sqlite", "# c\nSELECT n FROM t", ""),
         # The same symbol-led statement in MySQL syntax, where "#" would open a comment.
         ("mysql+pymysql://u:p@db.internal:3306/shop", "mysql", "? c\nSELECT n FROM t", ""),
     ],
@@ -81,8 +80,8 @@ async def test_run_sql_classifies_with_database_dialect(
 ) -> None:
     """Issue #304: ``RunSqlTool`` must classify with the dialect the runner uses.
 
-    ``#`` opens a comment on MySQL and not on SQLite, so a ``#``-led statement is read-shaped
-    there (a result table) and not on SQLite (a row count).
+    ``#`` opens a comment on MySQL, so a ``#``-led statement is read-shaped there
+    (a result table); a symbol-led statement is not (a row count).
     """
     import pandas as pd
 
@@ -309,16 +308,6 @@ async def _prompt_from_agent_tools(agent: Agent) -> str:
                 "- The connected database is MySQL. Write every query, catalog lookups"
                 " included, in MySQL's SQL dialect.",
                 "- MySQL has no ILIKE operator. For a case-insensitive match, use"
-                " LOWER(column) LIKE LOWER('pattern').",
-            ],
-        ),
-        (
-            "sqlite:///:memory:",
-            None,
-            [
-                "- The connected database is SQLite. Write every query, catalog lookups"
-                " included, in SQLite's SQL dialect.",
-                "- SQLite has no ILIKE operator. For a case-insensitive match, use"
                 " LOWER(column) LIKE LOWER('pattern').",
             ],
         ),
@@ -610,15 +599,19 @@ def test_build_sql_runner_mysql_percent_decodes_credentials() -> None:
         "postgresql://u:p@h:5432/db",
         "postgres://u:p@h:5432/db",
         "postgresql+psycopg2://u:p@h:5432/db",
+        "sqlite:///:memory:",
+        "sqlite:///./demo.db",
+        "sqlite+pysqlite:///x.db",
     ],
 )
-def test_build_sql_runner_refuses_postgresql_url(url: str) -> None:
-    """Called directly, bypassing config validation, a PostgreSQL URL is an
-    unsupported scheme: a ``ValueError``, never an import or driver error."""
+def test_build_sql_runner_refuses_non_mysql_url(url: str) -> None:
+    """Called directly, bypassing config validation, a PostgreSQL or SQLite URL
+    is an unsupported scheme: a ``ValueError`` whose expected list names only
+    MySQL, never an import or driver error."""
     from sqllens.agent.factory import build_sql_runner
 
     with pytest.raises(
-        ValueError, match=r"unsupported database scheme: .* \(expected sqlite/mysql\)"
+        ValueError, match=r"unsupported database scheme: .* \(expected mysql\)$"
     ):
         build_sql_runner(url)
 

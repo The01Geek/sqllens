@@ -3,7 +3,7 @@
 
 """A slow query must not stall the event loop.
 
-The database drivers (``sqlite3``, PyMySQL) are synchronous. Each
+The database driver, PyMySQL, is synchronous. The
 runner's ``run_sql`` is a coroutine, so calling the driver directly inside it
 would freeze every other request the server handles until the query returned.
 The runner tests make the driver deliberately slow and count how often a concurrent
@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
 import threading
 import time
 from collections.abc import Iterator
@@ -57,29 +56,6 @@ def _slow_cursor() -> MagicMock:
     cursor.execute.side_effect = lambda *_a, **_k: time.sleep(SLOW_S)
     cursor.fetchmany.return_value = [{"x": 1}]
     return cursor
-
-
-async def test_sqlite_runner_does_not_block_event_loop(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
-) -> None:
-    from sqllens.agent.integrations.sqlite import sql_runner as module
-
-    db = tmp_path / "t.db"
-    sqlite3.connect(db).close()
-
-    def slow_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
-        time.sleep(SLOW_S)
-        return sqlite3.connect(*args, **kwargs)
-
-    fake = SimpleNamespace(
-        connect=slow_connect, Row=sqlite3.Row, OperationalError=sqlite3.OperationalError
-    )
-    monkeypatch.setattr(module, "sqlite3", fake)
-
-    df, ticks = await _run_with_heartbeat(module.SqliteRunner(str(db)))
-
-    assert df.to_dict(orient="records") == [{"x": 1}]
-    assert ticks >= MIN_TICKS
 
 
 async def test_mysql_runner_does_not_block_event_loop(
@@ -459,69 +435,3 @@ async def test_sql_pool_is_not_the_default_executor() -> None:
     assert name.startswith("sqllens-sql")
 
 
-async def test_profile_row_cap_reaches_the_sql_worker_thread(tmp_path: Any) -> None:
-    from sqllens.agent.integrations.sqlite.sql_runner import SqliteRunner
-    from sqllens.runtime import (
-        EffectiveSettings,
-        reset_effective_settings,
-        set_effective_settings,
-    )
-
-    db = tmp_path / "t.db"
-    conn = sqlite3.connect(db)
-    conn.execute("CREATE TABLE t (x INTEGER)")
-    conn.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(20)])
-    conn.commit()
-    conn.close()
-
-    runner = SqliteRunner(str(db), max_rows=100)
-    token = set_effective_settings(
-        EffectiveSettings(
-            show_details=False,
-            max_tool_iterations=20,
-            max_rows=5,
-            similarity_threshold=0.7,
-        )
-    )
-    try:
-        df = await runner.run_sql(RunSqlToolArgs(sql="SELECT x FROM t"), context=MagicMock())
-    finally:
-        reset_effective_settings(token)
-
-    assert len(df) == 5
-    assert df.attrs["truncated"] is True
-
-
-@pytest.mark.parametrize("require", [True, False])
-async def test_relation_check_runs_on_the_sql_worker_thread(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, require: bool
-) -> None:
-    """``require_base_tables`` reaches the worker and is checked on its connection."""
-    from sqllens.agent.integrations.sqlite import sql_runner as module
-    from sqllens.safety.rls import RlsError
-
-    db = tmp_path / "t.db"
-    with sqlite3.connect(db) as conn:
-        conn.executescript("CREATE TABLE t (x INTEGER); CREATE VIEW v AS SELECT x FROM t;")
-    conn.close()
-
-    real_check = module.verify_base_tables
-    seen: list[str] = []
-
-    def check(connection: Any, sql: str, *, dialect: str) -> None:
-        seen.append(threading.current_thread().name)
-        real_check(connection, sql, dialect=dialect)
-
-    monkeypatch.setattr(module, "verify_base_tables", check)
-    run = module.SqliteRunner(str(db)).run_sql(
-        RunSqlToolArgs(sql="SELECT x FROM v"), MagicMock(), require_base_tables=require
-    )
-    if require:
-        with pytest.raises(RlsError, match="view"):
-            await run
-        [thread] = seen
-        assert thread.startswith("sqllens-sql")
-    else:
-        df = await run
-        assert df.empty
-        assert seen == []

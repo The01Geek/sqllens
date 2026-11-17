@@ -4,14 +4,12 @@
 """RLS must not delegate database views that hide protected relations."""
 
 import logging
-import sqlite3
 from unittest.mock import MagicMock, Mock
 
 import pytest
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
-from sqllens.agent.integrations.sqlite.sql_runner import SqliteRunner
 from sqllens.config import RlsRule
 from sqllens.safety import (
     ReadOnlyGuardRunner,
@@ -28,32 +26,7 @@ from ._fake_pymysql import FakeMySQL, install_fake_pymysql, mysql_runner
 _RULE = RlsRule(table="orders", column="tenant_id", value="alpha")
 
 
-@pytest.fixture
-def database(tmp_path):
-    path = tmp_path / "test.db"
-    with sqlite3.connect(path) as conn:
-        conn.executescript(
-            "CREATE TABLE orders(id INTEGER, tenant_id TEXT);"
-            "INSERT INTO orders VALUES (1, 'alpha'), (2, 'beta');"
-            "CREATE TABLE public_values(id INTEGER);"
-            "INSERT INTO public_values VALUES (1), (2);"
-            "CREATE VIEW all_orders AS SELECT * FROM orders;"
-            "CREATE VIEW nested_orders AS SELECT * FROM all_orders;"
-            'CREATE VIEW "all orders" AS SELECT * FROM orders;'
-        )
-    return path
-
-
-def _guard(database, *, read_only=True):
-    runner = RowCapRunner(SqliteRunner(str(database), read_only=read_only), max_rows=10)
-    if read_only:
-        runner = ReadOnlyGuardRunner(runner, dialect="sqlite")
-    return RlsGuardRunner(
-        runner, [RlsRule(table="orders", column="tenant_id", value="alpha")], dialect="sqlite"
-    )
-
-
-# The objects of ``database`` as a MySQL server reports them. The upper-case
+# The test schema's objects as a MySQL server reports them. The upper-case
 # names are separate entries: with lower_case_table_names = 0, MySQL looks a
 # name up as written, so these rows pin what the guard does with the type the
 # catalog reports, not how MySQL resolves letter case.
@@ -306,19 +279,6 @@ async def test_execution_type_errors_are_not_relabelled_as_rls_failures() -> Non
         )
 
 
-async def test_sqlite_virtual_tables_cannot_hide_protected_content(database) -> None:
-    with sqlite3.connect(database) as conn:
-        if not conn.execute("SELECT sqlite_compileoption_used('ENABLE_FTS5')").fetchone()[0]:
-            pytest.skip("SQLite build does not include FTS5")
-        conn.execute(
-            "CREATE VIRTUAL TABLE searchable_orders USING fts5(tenant_id, content='orders')"
-        )
-    with pytest.raises(RlsError, match="base table"):
-        await _guard(database).run_sql(
-            RunSqlToolArgs(sql="SELECT * FROM searchable_orders"), ToolContext.model_construct()
-        )
-
-
 def test_postgres_dialect_apply_rls_does_not_fold_unquoted_identifiers() -> None:
     """Dialect ``postgres`` has no identifier folding: the unquoted ``ORDERS``
     resolves to the quoted CTE ``"ORDERS"`` as written, so no base-table
@@ -357,20 +317,6 @@ def test_unverifiable_relations_fail_closed(sql, dialect, message) -> None:
         verify_base_tables(connection, sql, dialect=dialect)
     if message == "relation shape":
         connection.cursor.assert_not_called()
-
-
-async def test_sqlite_transaction_failure_is_sanitized(monkeypatch) -> None:
-    connection = MagicMock()
-    connection.execute.side_effect = sqlite3.OperationalError("synthetic-begin-failure")
-    monkeypatch.setattr(sqlite3, "connect", lambda *_a, **_k: connection)
-    runner = SqliteRunner("unused.db", read_only=False)
-    with pytest.raises(RlsError, match="read transaction") as error:
-        await runner.run_sql(
-            RunSqlToolArgs(sql="SELECT 1"), ToolContext.model_construct(),
-            require_base_tables=True,
-        )
-    assert "synthetic-begin-failure" not in str(error.value)
-    connection.cursor.return_value.execute.assert_not_called()
 
 
 def _fresh_connections():
@@ -419,14 +365,6 @@ async def test_mysql_runner_checks_relations_on_its_connection(monkeypatch, requ
     else:
         await run
         assert calls == []
-
-
-def test_sqlite_missing_table_list_capability_blocks_execution() -> None:
-    connection = Mock()
-    cursor = connection.cursor.return_value
-    cursor.execute.side_effect = sqlite3.OperationalError("no such table: pragma_table_list")
-    with pytest.raises(RlsError, match="could not verify relation types"):
-        verify_base_tables(connection, "SELECT * FROM main.orders", dialect="sqlite")
 
 
 @pytest.mark.parametrize("sql", [
@@ -597,20 +535,6 @@ def test_untokenizable_or_unparsable_sql_fails_closed(sql) -> None:
     connection.cursor.assert_not_called()
 
 
-def test_sqlite_lookup_failure_names_relation_types_only() -> None:
-    # SQLite runs no function-call check, so its refusal does not name one.
-    connection = Mock()
-    connection.cursor.side_effect = sqlite3.OperationalError("synthetic")
-    with pytest.raises(RlsError, match=r"could not verify relation types; query blocked$"):
-        verify_base_tables(connection, "SELECT * FROM orders", dialect="sqlite")
-
-
-def test_sqlite_runs_no_routine_lookup(database) -> None:
-    connection = Mock(wraps=sqlite3.connect(database))
-    verify_base_tables(connection, "SELECT upper('a'), count(*)", dialect="sqlite")
-    connection.cursor.assert_not_called()
-
-
 def _catalog_connections(catalog: _FakeCatalog):
     # Each connection returns the fake catalog for unnamed cursors and a
     # recording cursor for the query itself.
@@ -671,7 +595,6 @@ class _RecordingRunner:
     ("mysql", "SELECT `sleep`(1) FROM orders"),
     ("mysql", "SELECT * FROM public_values WHERE id IN (SELECT generate_series(1, 3))"),
     ("mysql", "SELECT SLEEP(1)"),
-    ("sqlite", "SELECT load_extension('x')"),
 ])
 async def test_denylisted_function_refused_under_rules_with_read_only_off(dialect, sql) -> None:
     inner = _RecordingRunner()
@@ -679,22 +602,6 @@ async def test_denylisted_function_refused_under_rules_with_read_only_off(dialec
     with pytest.raises(UnsafeSqlError, match="refused by the read-only guard"):
         await guard.run_sql(RunSqlToolArgs(sql=sql), ToolContext.model_construct())
     assert inner.calls == []
-
-
-async def test_denylist_under_rules_reaches_a_real_read_write_runner(database) -> None:
-    with pytest.raises(UnsafeSqlError, match="load_extension"):
-        await _guard(database, read_only=False).run_sql(
-            RunSqlToolArgs(sql="SELECT load_extension('x') FROM public_values"),
-            ToolContext.model_construct(),
-        )
-
-
-async def test_denylisted_function_refused_under_rules_with_read_only_on(database) -> None:
-    with pytest.raises(UnsafeSqlError, match="load_extension"):
-        await _guard(database).run_sql(
-            RunSqlToolArgs(sql="SELECT load_extension('x') FROM public_values"),
-            ToolContext.model_construct(),
-        )
 
 
 @pytest.mark.parametrize("read_only", [False, True])
@@ -741,67 +648,3 @@ async def test_unexpected_denylist_error_fails_closed(monkeypatch) -> None:
     assert inner.calls == []
 
 
-@pytest.mark.parametrize("sql", [
-    "SELECT id FROM all_orders",
-    "SELECT id FROM nested_orders",
-    'SELECT id FROM "all orders"',
-    "WITH q AS (SELECT * FROM all_orders) SELECT id FROM q",
-    "SELECT v.id FROM main.all_orders v JOIN public_values p ON v.id=p.id",
-    "SELECT id FROM ALL_ORDERS",
-    "SELECT (SELECT max(id) FROM all_orders) AS id FROM public_values",
-    "SELECT id FROM public_values WHERE id IN (SELECT id FROM all_orders)",
-])
-async def test_views_blocked_when_rls_is_active_on_sqlite(database, sql) -> None:
-    with pytest.raises(RlsError, match="view"):
-        await _guard(database).run_sql(RunSqlToolArgs(sql=sql), ToolContext.model_construct())
-
-
-async def test_base_tables_remain_scoped_and_unprotected_tables_readable_on_sqlite(
-    database,
-) -> None:
-    guard = _guard(database)
-    context = ToolContext.model_construct()
-    protected = await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM orders"), context)
-    public = await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM public_values"), context)
-    shadow = await guard.run_sql(
-        RunSqlToolArgs(sql="WITH orders AS (SELECT 3 AS id) SELECT id FROM orders"), context
-    )
-    assert protected["id"].tolist() == [1]
-    assert public["id"].tolist() == [1, 2]
-    assert shadow["id"].tolist() == [3]
-
-
-@pytest.mark.parametrize(("sql", "expected"), [
-    ("SELECT id FROM PUBLIC_VALUES", [1, 2]),
-    ("SELECT id FROM public_values WHERE id IN (SELECT id FROM orders)", [1]),
-    ("SELECT (SELECT max(id) FROM orders) AS id FROM public_values", [1, 1]),
-])
-async def test_base_table_subquery_and_case_shapes_pass_on_sqlite(database, sql, expected) -> None:
-    result = await _guard(database).run_sql(RunSqlToolArgs(sql=sql), ToolContext.model_construct())
-    assert result["id"].tolist() == expected
-
-
-async def test_view_reads_without_rls_are_unchanged_on_sqlite(database) -> None:
-    result = await SqliteRunner(str(database)).run_sql(
-        RunSqlToolArgs(sql="SELECT id FROM all_orders"), ToolContext.model_construct()
-    )
-    assert result["id"].tolist() == [1, 2]
-
-
-async def test_view_check_is_independent_of_read_only_setting_on_sqlite(database) -> None:
-    with pytest.raises(RlsError, match="view"):
-        await _guard(database, read_only=False).run_sql(
-            RunSqlToolArgs(sql="SELECT * FROM all_orders"), ToolContext.model_construct()
-        )
-
-
-async def test_catalog_results_are_not_cached_between_queries_on_sqlite(database) -> None:
-    guard = _guard(database)
-    context = ToolContext.model_construct()
-    await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM public_values"), context)
-    with sqlite3.connect(database) as conn:
-        conn.executescript(
-            "DROP TABLE public_values; CREATE VIEW public_values AS SELECT * FROM orders;"
-        )
-    with pytest.raises(RlsError, match="view"):
-        await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM public_values"), context)

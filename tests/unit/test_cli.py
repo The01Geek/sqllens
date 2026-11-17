@@ -114,6 +114,61 @@ def test_config_load_failure_goes_to_stderr(tmp_path, command: str, expected: st
     assert result.stdout == ""
 
 
+def test_init_writes_a_mysql_placeholder_that_validates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tomllib
+
+    monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-test")
+    path = tmp_path / "sqllens.toml"
+    assert runner.invoke(app, ["init", "--path", str(path)]).exit_code == 0
+    url = tomllib.loads(path.read_text(encoding="utf-8"))["database"]["url"]
+    assert url.startswith("mysql+pymysql://")
+    result = runner.invoke(app, ["validate", "-c", str(path)])
+    assert result.exit_code == 0, result.output
+
+
+def _write_stand_in_config(path: Path, rls_block: str) -> Path:
+    path.write_text(
+        '[database]\nurl = "mysql+pymysql://ci@127.0.0.1/ci"\n\n'
+        '[auth]\nmode = "none"\n\n' + rls_block,
+        encoding="utf-8",
+    )
+    return path
+
+
+_VALID_RLS = '[[rls]]\ntable = "orders"\ncolumn = "tenant_id"\nvalue = "acme"\n'
+
+
+def test_validate_mysql_stand_in_url_opens_no_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A MySQL URL with no server behind it is a valid stand-in for checking
+    config and ``[[rls]]`` rules: without ``--check-db`` nothing connects."""
+    import socket
+
+    monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-test")
+    attempts: list[object] = []
+
+    def refuse(self: socket.socket, address: object) -> None:
+        attempts.append(address)
+        raise OSError("network connect attempted")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket.socket, "connect_ex", refuse)
+    cfg = _write_stand_in_config(tmp_path / "sqllens.toml", _VALID_RLS)
+    result = runner.invoke(app, ["validate", "-c", str(cfg)])
+    assert result.exit_code == 0, result.output
+    assert attempts == []
+
+    bad = _write_stand_in_config(
+        tmp_path / "bad.toml", '[[rls]]\ntable = "orders"\ncolumn = "tenant_id"\n'
+    )
+    result = runner.invoke(app, ["validate", "-c", str(bad)])
+    assert result.exit_code == 2
+    assert attempts == []
+
+
 def test_init_already_exists_error_goes_to_stderr(tmp_path) -> None:
     # Same stdio-safety contract: the `init` "already exists" error must
     # land on stderr, never on stdout.
@@ -217,16 +272,24 @@ def test_serve_preflight_blocks_on_bad_database(
 
 
 @pytest.mark.parametrize(
+    "db_url",
+    [
+        "postgresql://u:CANARY-PW@h/db",
+        "sqlite:///CANARY-PW.db",
+        "sqlite+pysqlite:///CANARY-PW.db",
+    ],
+)
+@pytest.mark.parametrize(
     ("command", "prefix"), [("validate", "Invalid:"), ("serve", "Config error:")]
 )
-def test_postgresql_url_refused_at_config_load_without_echoing_password(
-    tmp_path: Path, command: str, prefix: str
+def test_non_mysql_url_refused_at_config_load_without_echoing_it(
+    tmp_path: Path, command: str, prefix: str, db_url: str
 ) -> None:
-    """A PostgreSQL URL fails config loading with the fixed scheme message,
-    before any preflight runs, and the URL's password never reaches output."""
+    """A PostgreSQL or SQLite URL fails config loading with the fixed scheme
+    message, before any preflight runs, and the URL never reaches output."""
     cfg_path = _write_config(
         tmp_path / "sqllens.toml",
-        db_url="postgresql://u:CANARY-PW@h/db",
+        db_url=db_url,
         memory_dir=str(tmp_path / "chroma"),
     )
 

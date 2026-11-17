@@ -87,20 +87,20 @@ def test_probe_database_unsupported_scheme() -> None:
         "postgresql://user:pw@localhost:5432/db",
         "postgres://user:pw@localhost:5432/db",
         "postgresql+psycopg2://user:pw@localhost:5432/db",
+        "sqlite:///:memory:",
+        "sqlite:///./demo.db",
+        "sqlite+pysqlite:///x.db",
     ],
 )
-def test_probe_database_refuses_postgresql_url_as_unsupported(db_url: str) -> None:
-    """A PostgreSQL URL that bypassed config validation is refused as an
-    unsupported scheme, not as a missing driver or a driver error."""
+def test_probe_database_refuses_non_mysql_url_as_unsupported(db_url: str) -> None:
+    """A PostgreSQL or SQLite URL that bypassed config validation is refused as
+    an unsupported scheme whose expected list names only MySQL, not as a
+    missing driver, a driver error or an opened file."""
     with pytest.raises(PreflightError) as exc_info:
         probe_database(_cfg_unvalidated_url(db_url))
     assert exc_info.value.subsystem == "database"
-    assert exc_info.value.detail == "unsupported database scheme (expected sqlite/mysql)"
+    assert exc_info.value.detail == "unsupported database scheme (expected mysql)"
     assert exc_info.value.__cause__ is None
-
-
-def test_probe_database_sqlite_memory_passes() -> None:
-    probe_database(_cfg(db_url="sqlite:///:memory:"))  # does not raise
 
 
 def test_probe_database_mysql_passes_and_closes_its_connection() -> None:
@@ -114,14 +114,6 @@ def test_probe_database_mysql_passes_and_closes_its_connection() -> None:
     # Without a rule-set file the probe runs no SQL of its own.
     connection.cursor.assert_not_called()
     connection.close.assert_called_once()
-
-
-def test_probe_database_sqlite_chains_cause(tmp_path: Path) -> None:
-    target = tmp_path / "missing" / "x.db"
-    with pytest.raises(PreflightError) as exc_info:
-        probe_database(_cfg(db_url=f"sqlite:///{target}"))
-    assert exc_info.value.subsystem == "database"
-    assert exc_info.value.__cause__ is not None
 
 
 def test_probe_database_mysql_url_requires_user_and_host() -> None:
@@ -208,7 +200,6 @@ def test_probe_database_mysql_wraps_driver_error_with_cause() -> None:
 @pytest.mark.parametrize(
     ("driver_module", "db_url"),
     [
-        ("sqlite3", "sqlite:///:memory:"),
         ("pymysql", "mysql://user:pw@localhost:3306/db"),
     ],
 )

@@ -1849,7 +1849,6 @@ def test_introspection_dataframe_adds_no_table_block() -> None:
 @pytest.mark.parametrize(
     ("dialect", "sql"),
     [
-        ("sqlite", "SELECT sql FROM sqlite_master WHERE name = 'widgets'"),
         ("mysql", "SHOW CREATE TABLE widgets"),
     ],
 )
@@ -1913,36 +1912,6 @@ def test_mysql_database_function_introspection_does_not_clear_error() -> None:
     _markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect="mysql")
     assert is_error is True
     assert blocks == []
-
-
-def test_sqlite_pragma_introspection_does_not_clear_error() -> None:
-    stream = [
-        *_sql_call("SELECT order_dt FROM orders", ok=False),
-        *_sql_call("SELECT name FROM pragma_table_info('orders')"),
-    ]
-    _markdown, is_error, _blocks, _qi, _mi = components_to_blocks(stream, dialect="sqlite")
-    assert is_error is True
-
-
-@pytest.mark.parametrize(
-    ("sql", "dialect"),
-    [
-        ("SELECT amount FROM sqlite_payments", "mysql"),
-        ("SELECT amount FROM sys.payments", "sqlite"),
-        ("SELECT amount FROM sys_payments", "mysql"),
-    ],
-)
-def test_other_engine_catalog_name_data_query_shown_and_clears_error(
-    sql: str, dialect: str
-) -> None:
-    stream = [
-        *_sql_call("SELECT amount FROM payments", ok=False),
-        *_sql_call(sql),
-        _ui(DataFrameComponent(rows=[{"amount": 1}, {"amount": 2}], columns=["amount"])),
-    ]
-    _markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect=dialect)
-    assert is_error is False
-    assert [b["type"] for b in blocks] == ["table"]
 
 
 @pytest.mark.parametrize("dialect", ["mysql"])
@@ -2012,7 +1981,6 @@ def _widgets_df() -> UiComponent:
     ("sql", "dialect"),
     [
         ("WITH w AS (SELECT n FROM widgets) SELECT n FROM w", "mysql"),
-        ("WITH sqlite_recent AS (SELECT n FROM widgets) SELECT n FROM sqlite_recent", "sqlite"),
     ],
 )
 def test_cte_data_query_result_is_shown(sql: str, dialect: str) -> None:
@@ -2158,7 +2126,6 @@ def test_payload_build_failure_emits_could_not_be_displayed_text(monkeypatch) ->
 @pytest.mark.parametrize(
     ("dialect", "sql"),
     [
-        ("sqlite", "SELECT name FROM sqlite_master"),
         ("mysql", "SELECT table_name FROM information_schema.tables"),
     ],
 )

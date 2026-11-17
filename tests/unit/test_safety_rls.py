@@ -225,11 +225,6 @@ class TestApplyRlsStatic:
             "SELECT `MyFunc`(name) FROM orders WHERE orders.tenant_id = 'acme'",
         ),
         (
-            "sqlite",
-            'SELECT "MyFunc"(name) FROM orders',
-            "SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
-        ),
-        (
             # MySQL names an unaliased result column after the call's text.
             "mysql",
             "SELECT printf('%s', name) FROM orders",

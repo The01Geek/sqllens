@@ -72,7 +72,6 @@ def _minimal_toml(tmp_path: Path, extra: str = "") -> Path:
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
-        ("sqlite:///demo.db", "sqlite"),
         ("mysql://u:p@h/db", "mysql"),
         ("mysql+pymysql://u:p@h/db", "mysql"),
         # Pins current (case-sensitive, no normalization) behavior — a future
@@ -104,8 +103,6 @@ _ACCEPTED_URLS = [
     "mysql+mysqlconnector://u:p@h/db",
     "MYSQL+PyMySQL://u:p@h/db",
     "mysql+pymysql://app:p%2Fw@db.internal:3306/shop",
-    "sqlite:///:memory:",
-    "sqlite+pysqlite:///x.db",
 ]
 
 @pytest.mark.parametrize("url", _ACCEPTED_URLS)
@@ -122,6 +119,10 @@ def test_url_scheme_accepted(url: str) -> None:
         "postgresql+psycopg2://u:SECRET-PW@h/db",
         "mysqlx://u:SECRET-PW@h/db",
         "mariadb://u:SECRET-PW@h/db",
+        "sqlite:///SECRET-PW.db",
+        "sqlite:///:memory:",
+        "sqlite+pysqlite:///SECRET-PW.db",
+        "SQLite:///SECRET-PW.db",
         "",
         "no-separator-SECRET-PW",
     ],
@@ -129,7 +130,7 @@ def test_url_scheme_accepted(url: str) -> None:
 def test_url_scheme_refused_with_fixed_message(
     url: str, source: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """PostgreSQL, mysqlx and other unsupported URLs are refused at load."""
+    """PostgreSQL, SQLite, mysqlx and other unsupported URLs are refused at load."""
     with pytest.raises(ValidationError) as exc_info:
         if source == "model":
             DatabaseConfig(url=url)

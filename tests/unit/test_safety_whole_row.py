@@ -10,7 +10,6 @@ sources), so each is pinned here against the locked sqlglot version.
 
 from __future__ import annotations
 
-import sqlite3
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -22,7 +21,6 @@ from pydantic import SecretStr
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
 from sqllens.agent.factory import build_agent
 from sqllens.agent.integrations.mysql import MySQLRunner
-from sqllens.agent.integrations.sqlite import SqliteRunner
 from sqllens.agent.tools.run_sql import RunSqlTool
 from sqllens.config import (
     AgentRuntimeConfig,
@@ -154,18 +152,13 @@ def test_allowed_shapes(sql: str, dialect: str | None) -> None:
         ("SELECT * FROM (VALUES (1), (2)) AS v(x)", "mysql"),
         ("SELECT x FROM list_users() AS t(x)", "mysql"),
         ("SELECT * FROM performance_schema.threads", "mysql"),
-        ("SELECT * FROM sqlite_master", "sqlite"),
-        ("SELECT * FROM pragma_table_info('users')", "sqlite"),
         ("SELECT `table` FROM t", "mysql"),
         # MySQL SHOW statements carry no star, and sqlglot keeps their subkind
         # as a string, not a name TABLE.
         ("SHOW TABLES", "mysql"),
         ("SHOW COLUMNS FROM users", "mysql"),
         ("SHOW CREATE TABLE users", "mysql"),
-        # Documented limit: a table whose name has the dialect's catalog
-        # prefix counts as a catalog, and with no dialect every prefix counts.
-        ("SELECT * FROM sqlite_stuff", None),
-        # Likewise, with no dialect a table in MySQL's catalog schemas counts.
+        # With no dialect a table in MySQL's catalog schemas counts.
         ("SELECT * FROM mysql.users", None),
     ],
 )
@@ -179,8 +172,8 @@ def test_allowed_dialect_specific_shapes(sql: str, dialect: str | None) -> None:
         ("SELECT * FROM `users`", "mysql"),
         ("SELECT `u`.* FROM `users` AS `u`", "mysql"),
         ("SELECT * FROM shop.users", "mysql"),
-        # Under mysql, sqlite_ is not a catalog prefix.
-        ("SELECT * FROM sqlite_users_backup", "mysql"),
+        # A table is a catalog only through its schema, whatever its name.
+        ("SELECT * FROM sqlite_stuff", None),
         # A name merely starting with a MySQL catalog schema's name is no catalog.
         ("SELECT * FROM sys_users", "mysql"),
         # UNNEST is a table-valued function too, whatever its argument.
@@ -503,24 +496,3 @@ def test_setting_loads_from_toml_and_env(tmp_path: Path, monkeypatch) -> None:
     assert Config.load(path).database.refuse_whole_row_selects is True
 
 
-def _users_db(tmp_path: Path) -> str:
-    path = tmp_path / "people.db"
-    with sqlite3.connect(path) as conn:
-        conn.execute("CREATE TABLE users (id INTEGER, name TEXT, password_hash TEXT)")
-        conn.execute("INSERT INTO users VALUES (1, 'Ada', 'x1'), (2, 'Lin', 'x2')")
-    return str(path)
-
-
-async def test_run_sql_returns_the_refusal_as_a_tool_error_on_sqlite(tmp_path: Path) -> None:
-    runner = WholeRowSelectGuardRunner(SqliteRunner(_users_db(tmp_path)), dialect="sqlite")
-    tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
-
-    refused = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT * FROM users"))
-    assert refused.success is False
-    assert refused.result_for_llm.startswith("Error executing query: refusing to execute query:")
-    assert "selects every column" in refused.result_for_llm
-    assert "password_hash" not in refused.result_for_llm
-
-    answered = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT id, name FROM users"))
-    assert answered.success is True
-    assert answered.metadata["columns"] == ["id", "name"]
