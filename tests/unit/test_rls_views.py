@@ -317,6 +317,8 @@ def test_unverifiable_relations_fail_closed(sql, dialect, message) -> None:
     with pytest.raises(RlsError, match=message):
         verify_base_tables(connection, sql, dialect=dialect)
     connection.cursor.return_value.execute.assert_not_called()
+    if message == "relation shape":
+        connection.cursor.assert_not_called()
 
 
 def _fresh_connections():
