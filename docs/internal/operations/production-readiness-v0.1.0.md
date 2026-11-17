@@ -311,7 +311,7 @@ lockfile-drift / wheel-content guard is tracked separately in issue #114.
 ### Safety / security
 
 #### S-1. Read-only guard bypass: `SELECT … INTO new_table` — **RESOLVED**
-**File:** [`src/sqllens/safety/readonly.py`](../../src/sqllens/safety/readonly.py) ·
+**File:** [`src/sqllens/safety/readonly.py`](../../../src/sqllens/safety/readonly.py) ·
 **CWE:** 89/284 · **Category:** Bug / Bypass · **Status:** Fixed in #41
 
 In Postgres, `SELECT * INTO new_tbl FROM users` is semantically a DDL/DML
@@ -327,18 +327,18 @@ The check fires for root-level statements, CTE-nested forms, set-operation
 operands (`SELECT ... INTO ... UNION ...`), `INTO TEMP` / `INTO UNLOGGED`
 variants (same node shape), and MySQL `SELECT ... INTO @var` (session-variable
 write). Regression corpus added to
-[`tests/unit/test_safety.py`](../../tests/unit/test_safety.py) as
+[`tests/unit/test_safety.py`](../../../tests/unit/test_safety.py) as
 `TestSelectIntoRejected`, parametrised over Postgres + T-SQL × {base, TEMP,
 UNLOGGED} plus the CTE-nested, UNION-operand, and MySQL `@var` cases. See
-[`docs/internal/database-connectors/read-only-safety.md`](database-connectors/read-only-safety.md)
+[`docs/internal/database-connectors/read-only-safety.md`](../database-connectors/read-only-safety.md)
 rule 6.
 
 **Tracking:** #35 (closed by #41)
 
 #### S-2. Docker image defaults to `0.0.0.0` + `auth=none` — **resolved by #48**
-**File:** [`docker/Dockerfile:65-67`](../../docker/Dockerfile) ·
-[`src/sqllens/config.py`](../../src/sqllens/config.py) ·
-[`src/sqllens/cli.py`](../../src/sqllens/cli.py) ·
+**File:** [`docker/Dockerfile:65-67`](../../../docker/Dockerfile) ·
+[`src/sqllens/config.py`](../../../src/sqllens/config.py) ·
+[`src/sqllens/cli.py`](../../../src/sqllens/cli.py) ·
 **CWE:** 1188 · **Category:** Deployment / Auth
 
 A `docker run -p 8765:8765 ghcr.io/the01geek/sqllens:latest` with no further
@@ -357,12 +357,12 @@ fires the CLI logs a yellow `Warning:` breadcrumb. Loopback detection uses
 `::1`, and `localhost` (case-insensitive). The README Docker quick-start
 now seeds `SQLLENS_AUTH__MODE=bearer` plus
 `SQLLENS_AUTH__BEARER_TOKEN=$(openssl rand -hex 32)`. See
-[authentication/overview.md](authentication/overview.md#none--srcsqllensauthnonepy).
+[authentication/overview.md](../authentication/overview.md#none--srcsqllensauthnonepy).
 
 **Tracking:** #36 (closed by #48)
 
 #### S-3. No DB query timeout, no row cap, full materialisation to pandas
-**Files:** [`src/sqllens/agent/integrations/postgres/sql_runner.py:88`](../../src/sqllens/agent/integrations/postgres/sql_runner.py) ·
+**Files:** [`src/sqllens/agent/integrations/postgres/sql_runner.py:88`](../../../src/sqllens/agent/integrations/postgres/sql_runner.py) ·
 sqlite + mysql runners · `tools/query_database.py` ·
 **CWE:** 770 · **Category:** DoS / Reliability
 
@@ -384,7 +384,7 @@ template.
 **Tracking:** #37
 
 #### S-4. Bad database URL crashes only at first tool call, not startup — **resolved by #38**
-**File:** [`src/sqllens/tools/query_database.py:18-25`](../../src/sqllens/tools/query_database.py#L18-L25) ·
+**File:** [`src/sqllens/tools/query_database.py:18-25`](../../../src/sqllens/tools/query_database.py#L18-L25) ·
 **Category:** Reliability / DX
 
 `build_agent` was lazy. A typo, wrong port, or missing password produced a
@@ -393,7 +393,7 @@ process that started cleanly, printed nothing, and returned an opaque
 fail fast on.
 
 **Resolution (PR #38, merged for v0.1.0):**
-[`src/sqllens/preflight.py`](../../src/sqllens/preflight.py) adds
+[`src/sqllens/preflight.py`](../../../src/sqllens/preflight.py) adds
 `probe_database`, `probe_llm`, `probe_memory`, `probe_auth`, and a
 `run_preflight` orchestrator that `sqllens serve` calls before binding the
 transport. Failures exit 2 with `Preflight failed: <subsystem>: <detail>`.
@@ -402,7 +402,7 @@ container orchestrators where dependencies come up after the server; the
 skip is announced in yellow so the safety net isn't lost silently.
 `sqllens validate` exposes the same probes via `--check-db`, `--check-llm`,
 `--check-memory`, `--check-auth`. Full reference:
-[docs/internal/setup/preflight.md](setup/preflight.md).
+[docs/internal/setup/preflight.md](../setup/preflight.md).
 
 Out of scope (separate issue): replacing the agent's blanket exception
 handler at `agent.py:166-213`, which still collapses post-startup tool
@@ -413,8 +413,8 @@ errors into a generic message.
 ### Code correctness
 
 #### C-2. Private `mcp._session_manager` access kills the server on SDK refactor — **FIXED in PR #43**
-**File:** [`src/sqllens/transport/http.py`](../../src/sqllens/transport/http.py) ·
-[`tests/integration/conftest.py`](../../tests/integration/conftest.py) ·
+**File:** [`src/sqllens/transport/http.py`](../../../src/sqllens/transport/http.py) ·
+[`tests/integration/conftest.py`](../../../tests/integration/conftest.py) ·
 **Category:** Bug / Edge case
 
 `mcp` SDK's pre-1.0 stability guarantees are weak. If they rename
@@ -428,19 +428,19 @@ it raises a `RuntimeError` whose message names this file as the place to
 update. The integration fixture no longer makes any direct SDK-attribute
 reach — it calls `build_asgi_app(cfg)` and hands the result to uvicorn.
 Regression pinned by
-[`tests/unit/test_transport_http.py`](../../tests/unit/test_transport_http.py)::`test_build_asgi_app_raises_runtimeerror_when_session_manager_missing`.
+[`tests/unit/test_transport_http.py`](../../../tests/unit/test_transport_http.py)::`test_build_asgi_app_raises_runtimeerror_when_session_manager_missing`.
 
 ### Test coverage
 
 #### T-1. Zero coverage of `tools/_format.py` — **RESOLVED**
-**File:** [`src/sqllens/tools/_format.py`](../../src/sqllens/tools/_format.py) ·
+**File:** [`src/sqllens/tools/_format.py`](../../../src/sqllens/tools/_format.py) ·
 **Category:** No-test area · **Status:** Fixed by #71
 
 The `is_error` detection drives whether the MCP tool returns `isError: true`,
 dataframe rendering truncates at `_MAX_ROWS_RENDERED` rows with a footer note,
 and the empty-component case returns `"(no answer)"`. None of this was tested.
 
-**Resolution:** [`tests/unit/test_format.py`](../../tests/unit/test_format.py)
+**Resolution:** [`tests/unit/test_format.py`](../../../tests/unit/test_format.py)
 pins every branch of `components_to_markdown` and `_render_dataframe`:
 
 - Error-card precedence (error wins over text and tables; surfaces
@@ -464,7 +464,7 @@ pins every branch of `components_to_markdown` and `_render_dataframe`:
 **Tracking:** #71
 
 #### T-2. Zero coverage of `tools/query_database.py` (+ exposes a singleton bug)
-**File:** [`src/sqllens/tools/query_database.py`](../../src/sqllens/tools/query_database.py) ·
+**File:** [`src/sqllens/tools/query_database.py`](../../../src/sqllens/tools/query_database.py) ·
 **Category:** No-test area / Bug
 
 Two things are untested: (a) the module-level `_AGENT` singleton at line 18
@@ -480,19 +480,19 @@ and the error-surfacing path. Add an autouse fixture in
 `tests/integration/conftest.py` that resets `_AGENT = None` between tests.
 
 **Status:** Test coverage landed in PR #81 (issue #72) —
-[`tests/unit/test_query_database.py`](../../tests/unit/test_query_database.py)
+[`tests/unit/test_query_database.py`](../../../tests/unit/test_query_database.py)
 adds 9 cases: singleton lifecycle (first call builds, second reuses,
 changed-`cfg` ignored, build failure leaves singleton `None`), error
 surfacing (`send_message` raises → `RuntimeError` with chained cause,
 `is_error` status card → `RuntimeError`), happy path (TEXT + DATAFRAME
 markdown), concurrent cold-start race, and async-generator `aclose()` on
 exception. Shared agent stubs live in
-[`tests/unit/_agent_stubs.py`](../../tests/unit/_agent_stubs.py); the
+[`tests/unit/_agent_stubs.py`](../../../tests/unit/_agent_stubs.py); the
 shared `Config` builder moved to
-[`tests/unit/_config_builders.py`](../../tests/unit/_config_builders.py)
+[`tests/unit/_config_builders.py`](../../../tests/unit/_config_builders.py)
 (imported by `test_factory_wiring.py`). The autouse `_AGENT = None` reset
 fixture landed in
-[`tests/unit/conftest.py`](../../tests/unit/conftest.py) (unit, not
+[`tests/unit/conftest.py`](../../../tests/unit/conftest.py) (unit, not
 integration — the new tests are unit-level). The tests *characterize*
 current behavior; they assert the changed-`cfg` value is silently ignored
 rather than warned-on. The production singleton fix (`asyncio.Lock`,
@@ -502,10 +502,10 @@ the unguarded module-global `_AGENT`. That part remains tracked by C-3.
 **Tracking:** #72 (test coverage — done via #81); production fix tracked by C-3
 
 #### T-3. No mock-LLM fixture; integration conftest doesn't scrub `SQLLENS_LLM__API_KEY` — *resolved*
-**Files:** [`tests/conftest.py`](../../tests/conftest.py) ·
-[`tests/integration/conftest.py`](../../tests/integration/conftest.py) ·
-[`tests/integration/test_scrub_inherited.py`](../../tests/integration/test_scrub_inherited.py) ·
-[`pyproject.toml`](../../pyproject.toml)
+**Files:** [`tests/conftest.py`](../../../tests/conftest.py) ·
+[`tests/integration/conftest.py`](../../../tests/integration/conftest.py) ·
+[`tests/integration/test_scrub_inherited.py`](../../../tests/integration/test_scrub_inherited.py) ·
+[`pyproject.toml`](../../../pyproject.toml)
 **Category:** Test infrastructure / Safety
 
 Unit conftest scrubbed the env var, integration conftest did not. If a future
@@ -515,7 +515,7 @@ Anthropic SDK's canonical `ANTHROPIC_API_KEY` fallback was never scrubbed at
 all, so the project-specific scrub could be bypassed entirely.
 
 **Resolution (#74):** The autouse `_scrub_leaky_env` fixture was promoted to a
-new top-level [`tests/conftest.py`](../../tests/conftest.py) so both the unit
+new top-level [`tests/conftest.py`](../../../tests/conftest.py) so both the unit
 and integration suites inherit it; the duplicated `tests/unit/conftest.py` was
 deleted. The scrub tuple gained `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,
 `ANTHROPIC_MODEL`, and `SQLLENS_AUTH__BEARER_TOKEN`. A shared
@@ -550,8 +550,8 @@ paste. Bundle `chinook.db` as package data or fetch-on-first-run with
 checksum verification.
 
 #### P-2. JWT mode is reachable in config but always 401s — ⛔ **escalated to P0 (2026-05-18)**
-**Files:** [`src/sqllens/config.py:81`](../../src/sqllens/config.py#L81) ·
-[`src/sqllens/auth/jwt.py:37-41`](../../src/sqllens/auth/jwt.py#L37) ·
+**Files:** [`src/sqllens/config.py:81`](../../../src/sqllens/config.py#L81) ·
+[`src/sqllens/auth/jwt.py:37-41`](../../../src/sqllens/auth/jwt.py#L37) ·
 **Category:** Trust signal / Confusing UX
 
 `AuthConfig.mode: Literal["none", "bearer", "jwt"]` accepts `"jwt"`, and
@@ -564,7 +564,7 @@ have `build_authenticator` raise at startup with an actionable message. At
 minimum, `validate` should refuse `mode == "jwt"`.
 
 #### P-3. `list_data_sources` returns marketing copy, not schema
-**File:** [`src/sqllens/tools/list_data_sources.py:13-18`](../../src/sqllens/tools/list_data_sources.py) ·
+**File:** [`src/sqllens/tools/list_data_sources.py:13-18`](../../../src/sqllens/tools/list_data_sources.py) ·
 **Category:** Missing feature / Confusing UX
 
 Today the tool returns `"**Data Sources** (1 total)\n\n- **primary**
@@ -578,7 +578,7 @@ column types, or add a `describe_schema(table?: str)` tool. Cache for the
 process lifetime; surface a `sqllens refresh-schema` CLI in 0.1.x.
 
 #### P-4. `query_database` 50-row cap is silent to the calling LLM
-**File:** [`src/sqllens/tools/_format.py:18,75-80`](../../src/sqllens/tools/_format.py#L75) ·
+**File:** [`src/sqllens/tools/_format.py:18,75-80`](../../../src/sqllens/tools/_format.py#L75) ·
 **Category:** Result rendering
 
 50 rows is too small for "list all customers in CA"; the footer is plain
@@ -592,7 +592,7 @@ scratch CSV `RunSqlTool` already writes is the natural seam — repurpose
 rather than delete it).
 
 #### P-5. Markdown cells don't format None, Decimal, datetime, NaN
-**File:** [`src/sqllens/tools/_format.py:76`](../../src/sqllens/tools/_format.py#L76) ·
+**File:** [`src/sqllens/tools/_format.py:76`](../../../src/sqllens/tools/_format.py#L76) ·
 **Category:** Result rendering
 
 `str(row.get(c, ""))` renders Python `None` as `"None"`, datetimes as repr,
@@ -604,7 +604,7 @@ datetime → ISO 8601, Decimal/float → `format(v, ',')`, escape `|` in
 strings.
 
 #### P-6. `claude-desktop install` writes API key in plaintext JSON
-**File:** [`src/sqllens/installers/claude_desktop.py:300-311`](../../src/sqllens/installers/claude_desktop.py) ·
+**File:** [`src/sqllens/installers/claude_desktop.py:300-311`](../../../src/sqllens/installers/claude_desktop.py) ·
 **Category:** Trust signal
 
 Documented in `docs/internal/installation/claude-desktop-windows-install.md:222`
@@ -624,62 +624,62 @@ file on POSIX.
 
 | # | File:line | Issue | Direction |
 |---|---|---|---|
-| S-5 ⛔**P0** | [`safety/readonly.py`](../../src/sqllens/safety/readonly.py) | **Escalated to release blocker (2026-05-18).** Side-effect / DoS functions pass unchecked: `pg_sleep`, `pg_terminate_backend`, `pg_read_file`, `dblink_exec`, `load_extension` (SQLite — **RCE on the default deployment**!), `SLEEP()`, `generate_series(1, 1e9)`. Verified OPEN — no denylist exists. | Add per-dialect function-name denylist; for SQLite, refuse `load_extension` explicitly. |
-| S-6 | [`safety/readonly.py:64-65`](../../src/sqllens/safety/readonly.py#L64) | sqlglot tuple/non-tuple version shim is fragile — one branch is dead in any given version. | Pin `sqlglot>=25.0,<26` in `pyproject.toml`, remove the shim, add CI assertion that the bypass corpus stays rejected on bumps. |
-| S-7 | [`safety/__init__.py`](../../src/sqllens/safety/__init__.py) + connector runners | When `database.read_only=False` is set, runner write paths (`conn.commit()`) cheerfully execute mutations. SQLite has no DB role to fall back on. | Open SQLite read-only when `cfg.database.read_only` (`file:{path}?mode=ro`). Set `SET TRANSACTION READ ONLY` on Postgres/MySQL regardless of role. |
-| S-8 | [`transport/http.py:48-95`](../../src/sqllens/transport/http.py#L48) | No `TrustedHostMiddleware`; DNS-rebinding risk against `127.0.0.1` dev servers if the bundled MCP SDK's Host check isn't wired. | Add `TrustedHostMiddleware(allowed_hosts=[...])` in `build_asgi_app`. |
-| S-9 | [`transport/http.py:95`](../../src/sqllens/transport/http.py#L95) | TLS termination is delegated and never warned about. Bearer over plain HTTP = compromise. | Warn at startup if `mode in {"bearer","jwt"}` and host is non-loopback. |
-| S-10 | [`tools/query_database.py:38-40`](../../src/sqllens/tools/query_database.py#L38) | `RuntimeError(f"query_database failed: {e}")` leaks driver exception strings (host, port, DB, role). | Log full traceback (already done); return stable `"internal error; see server logs"` to the MCP client for everything except `UnsafeSqlError`. |
-| S-11 | [`cli.py:83-88,99-103`](../../src/sqllens/cli.py#L83) | `validate` echoes `ValidationError.__str__` which can include the failing env-var value. | Format `e.errors(include_url=False)` showing locations only, not values. |
-| S-12 | [`pyproject.toml`](../../pyproject.toml) + [`requirements.txt`](../../requirements.txt) | ~~Every dep is `>=` only. A sqlglot 27 release could silently re-open guard bypasses.~~ Upper bounds were pinned in Wave-1 Track A. Lockfile half **Fixed by #112 (issue #108)**: a committed root `requirements.txt` records the fully-resolved transitive closure of the *core* `[project.dependencies]` (no dev/postgres/mysql extras; `uvicorn[standard]`'s extra deps are in-closure since it is a core dep), every pin within pyproject.toml's existing upper bounds (no bound loosened). A `[tool.hatch.build.targets.wheel.force-include]` block maps it to `sqllens/requirements.txt` so it ships inside the published wheel (the sdist already carries it via hatchling's VCS-tracked-files default). The header documents the regeneration procedure. It is a point-in-time snapshot, **not** a CI-verified guarantee — a drift/wheel-content guard is deferred to issue #114. | Pin upper bounds (`<26`, `<3.0`, etc.); ship a `requirements.txt` lockfile for the published wheel. |
-| S-12 | [`pyproject.toml:25-44`](../../pyproject.toml) | Every dep is `>=` only. A sqlglot 27 release could silently re-open guard bypasses. **Verification half landed in PR #115 (issue #114):** [`tests/unit/test_lockfile_guard.py`](../../tests/unit/test_lockfile_guard.py) asserts the shipped lockfile stays within `pyproject.toml`'s upper bounds and that the wheel force-includes it. 10 `test_logic_*` tests run unconditionally against synthetic fixtures; the 3 `test_real_*` integration tests skip via `pytest.mark.skipif(not LOCKFILE.exists())` until the lockfile + `[tool.hatch.build.targets.wheel.force-include]` glue lands (PR #112, issue #108), then auto-activate. The bounds-pinning + lockfile remediation itself is still tracked by PR #112. | Pin upper bounds (`<26`, `<3.0`, etc.); ship a `requirements.txt` lockfile for the published wheel. |
-| S-13 | [`auth/bearer.py:24-29`](../../src/sqllens/auth/bearer.py#L24) | No minimum length on bearer token; 1-char tokens accepted. | Require ≥16 chars at construction; document `>=32` random bytes in `init` template. |
+| S-5 ⛔**P0** | [`safety/readonly.py`](../../../src/sqllens/safety/readonly.py) | **Escalated to release blocker (2026-05-18).** Side-effect / DoS functions pass unchecked: `pg_sleep`, `pg_terminate_backend`, `pg_read_file`, `dblink_exec`, `load_extension` (SQLite — **RCE on the default deployment**!), `SLEEP()`, `generate_series(1, 1e9)`. Verified OPEN — no denylist exists. | Add per-dialect function-name denylist; for SQLite, refuse `load_extension` explicitly. |
+| S-6 | [`safety/readonly.py:64-65`](../../../src/sqllens/safety/readonly.py#L64) | sqlglot tuple/non-tuple version shim is fragile — one branch is dead in any given version. | Pin `sqlglot>=25.0,<26` in `pyproject.toml`, remove the shim, add CI assertion that the bypass corpus stays rejected on bumps. |
+| S-7 | [`safety/__init__.py`](../../../src/sqllens/safety/__init__.py) + connector runners | When `database.read_only=False` is set, runner write paths (`conn.commit()`) cheerfully execute mutations. SQLite has no DB role to fall back on. | Open SQLite read-only when `cfg.database.read_only` (`file:{path}?mode=ro`). Set `SET TRANSACTION READ ONLY` on Postgres/MySQL regardless of role. |
+| S-8 | [`transport/http.py:48-95`](../../../src/sqllens/transport/http.py#L48) | No `TrustedHostMiddleware`; DNS-rebinding risk against `127.0.0.1` dev servers if the bundled MCP SDK's Host check isn't wired. | Add `TrustedHostMiddleware(allowed_hosts=[...])` in `build_asgi_app`. |
+| S-9 | [`transport/http.py:95`](../../../src/sqllens/transport/http.py#L95) | TLS termination is delegated and never warned about. Bearer over plain HTTP = compromise. | Warn at startup if `mode in {"bearer","jwt"}` and host is non-loopback. |
+| S-10 | [`tools/query_database.py:38-40`](../../../src/sqllens/tools/query_database.py#L38) | `RuntimeError(f"query_database failed: {e}")` leaks driver exception strings (host, port, DB, role). | Log full traceback (already done); return stable `"internal error; see server logs"` to the MCP client for everything except `UnsafeSqlError`. |
+| S-11 | [`cli.py:83-88,99-103`](../../../src/sqllens/cli.py#L83) | `validate` echoes `ValidationError.__str__` which can include the failing env-var value. | Format `e.errors(include_url=False)` showing locations only, not values. |
+| S-12 | [`pyproject.toml`](../../../pyproject.toml) + [`requirements.txt`](../../../requirements.txt) | ~~Every dep is `>=` only. A sqlglot 27 release could silently re-open guard bypasses.~~ Upper bounds were pinned in Wave-1 Track A. Lockfile half **Fixed by #112 (issue #108)**: a committed root `requirements.txt` records the fully-resolved transitive closure of the *core* `[project.dependencies]` (no dev/postgres/mysql extras; `uvicorn[standard]`'s extra deps are in-closure since it is a core dep), every pin within pyproject.toml's existing upper bounds (no bound loosened). A `[tool.hatch.build.targets.wheel.force-include]` block maps it to `sqllens/requirements.txt` so it ships inside the published wheel (the sdist already carries it via hatchling's VCS-tracked-files default). The header documents the regeneration procedure. It is a point-in-time snapshot, **not** a CI-verified guarantee — a drift/wheel-content guard is deferred to issue #114. | Pin upper bounds (`<26`, `<3.0`, etc.); ship a `requirements.txt` lockfile for the published wheel. |
+| S-12 | [`pyproject.toml:25-44`](../../../pyproject.toml) | Every dep is `>=` only. A sqlglot 27 release could silently re-open guard bypasses. **Verification half landed in PR #115 (issue #114):** [`tests/unit/test_lockfile_guard.py`](../../../tests/unit/test_lockfile_guard.py) asserts the shipped lockfile stays within `pyproject.toml`'s upper bounds and that the wheel force-includes it. 10 `test_logic_*` tests run unconditionally against synthetic fixtures; the 3 `test_real_*` integration tests skip via `pytest.mark.skipif(not LOCKFILE.exists())` until the lockfile + `[tool.hatch.build.targets.wheel.force-include]` glue lands (PR #112, issue #108), then auto-activate. The bounds-pinning + lockfile remediation itself is still tracked by PR #112. | Pin upper bounds (`<26`, `<3.0`, etc.); ship a `requirements.txt` lockfile for the published wheel. |
+| S-13 | [`auth/bearer.py:24-29`](../../../src/sqllens/auth/bearer.py#L24) | No minimum length on bearer token; 1-char tokens accepted. | Require ≥16 chars at construction; document `>=32` random bytes in `init` template. |
 
 ### Code correctness
 
 | # | File:line | Issue | Direction |
 |---|---|---|---|
-| C-1 | [`transport/http.py`](../../src/sqllens/transport/http.py) | **FIXED in PR #43 (issue #39).** `build_asgi_app` now returns the fully lifespan-wrapped, mount-ready app; a private `_build_asgi_app_bare` returns the auth + path-normalized stack plus the `FastMCP` handle for the single in-tree guarded SDK-attribute access. `run()` and the integration fixture both delegate to `build_asgi_app`. The broken `session_manager_for` stub has been deleted. C-2 (private `_session_manager` access) is also addressed by this PR's switch to the public `mcp.session_manager` property. Regression pinned by [`tests/unit/test_transport_http.py`](../../tests/unit/test_transport_http.py). |
-| C-3 | [`tools/query_database.py:18-25`](../../src/sqllens/tools/query_database.py#L18) | `_AGENT` global singleton: non-atomic check-then-set races under HTTP load; also silently binds first-caller `cfg`. | `asyncio.Lock` around init; compare config identity / hash and reject mismatched calls. |
-| C-4 | [`auth/__init__.py:36-41`](../../src/sqllens/auth/__init__.py) | `mode="jwt"` passes `None` fields to `JwtAuthenticator` with no validation. | `model_validator` on `AuthConfig` rejecting `mode="jwt"` until implemented (see P-2). |
-| C-5 | [`config.py:165-172`](../../src/sqllens/config.py#L165) | BOM check re-opens the TOML after a failed parse — TOCTOU window can drop the BOM-specific error. | Cache `_resolved_toml_path()` before the inner `try`. |
-| C-6 | [`transport/http.py:209-210`](../../src/sqllens/transport/http.py#L209) | Header decoding hard-codes `latin-1`; under HTTP/2 (HPACK UTF-8) bearer tokens with non-ASCII chars get corrupted. | Try UTF-8 first, fall back to latin-1, mirroring Starlette `Headers`. |
-| C-7 | duplicated in [`cli.py:105`](../../src/sqllens/cli.py#L105) + [`tools/list_data_sources.py:13`](../../src/sqllens/tools/list_data_sources.py#L13) | Dialect-from-DSN parse is duplicated; both return full driver string (`mysql+pymysql`). | Extract a `DatabaseConfig.dialect` property that strips the `+driver` suffix. |
+| C-1 | [`transport/http.py`](../../../src/sqllens/transport/http.py) | **FIXED in PR #43 (issue #39).** `build_asgi_app` now returns the fully lifespan-wrapped, mount-ready app; a private `_build_asgi_app_bare` returns the auth + path-normalized stack plus the `FastMCP` handle for the single in-tree guarded SDK-attribute access. `run()` and the integration fixture both delegate to `build_asgi_app`. The broken `session_manager_for` stub has been deleted. C-2 (private `_session_manager` access) is also addressed by this PR's switch to the public `mcp.session_manager` property. Regression pinned by [`tests/unit/test_transport_http.py`](../../../tests/unit/test_transport_http.py). |
+| C-3 | [`tools/query_database.py:18-25`](../../../src/sqllens/tools/query_database.py#L18) | `_AGENT` global singleton: non-atomic check-then-set races under HTTP load; also silently binds first-caller `cfg`. | `asyncio.Lock` around init; compare config identity / hash and reject mismatched calls. |
+| C-4 | [`auth/__init__.py:36-41`](../../../src/sqllens/auth/__init__.py) | `mode="jwt"` passes `None` fields to `JwtAuthenticator` with no validation. | `model_validator` on `AuthConfig` rejecting `mode="jwt"` until implemented (see P-2). |
+| C-5 | [`config.py:165-172`](../../../src/sqllens/config.py#L165) | BOM check re-opens the TOML after a failed parse — TOCTOU window can drop the BOM-specific error. | Cache `_resolved_toml_path()` before the inner `try`. |
+| C-6 | [`transport/http.py:209-210`](../../../src/sqllens/transport/http.py#L209) | Header decoding hard-codes `latin-1`; under HTTP/2 (HPACK UTF-8) bearer tokens with non-ASCII chars get corrupted. | Try UTF-8 first, fall back to latin-1, mirroring Starlette `Headers`. |
+| C-7 | duplicated in [`cli.py:105`](../../../src/sqllens/cli.py#L105) + [`tools/list_data_sources.py:13`](../../../src/sqllens/tools/list_data_sources.py#L13) | Dialect-from-DSN parse is duplicated; both return full driver string (`mysql+pymysql`). | Extract a `DatabaseConfig.dialect` property that strips the `+driver` suffix. |
 
 ### Operational readiness
 
 | # | File:line | Issue | Direction |
 |---|---|---|---|
-| O-1 | [`transport/http.py:95`](../../src/sqllens/transport/http.py#L95) + `config.py` | `log_level` hard-coded `"info"`; no `SQLLENS_LOG_LEVEL`. | Add `ServerConfig.log_level: Literal[...]`; thread into `uvicorn.run()` and `logging.basicConfig` in `cli.serve`. |
-| O-2 | [`tools/query_database.py:34`](../../src/sqllens/tools/query_database.py#L34) | No latency instrumentation around the agent stream or DB queries. | `time.perf_counter` bracket; structured log line `{duration_ms, component_count, row_count}` on completion. |
+| O-1 | [`transport/http.py:95`](../../../src/sqllens/transport/http.py#L95) + `config.py` | `log_level` hard-coded `"info"`; no `SQLLENS_LOG_LEVEL`. | Add `ServerConfig.log_level: Literal[...]`; thread into `uvicorn.run()` and `logging.basicConfig` in `cli.serve`. |
+| O-2 | [`tools/query_database.py:34`](../../../src/sqllens/tools/query_database.py#L34) | No latency instrumentation around the agent stream or DB queries. | `time.perf_counter` bracket; structured log line `{duration_ms, component_count, row_count}` on completion. |
 | O-3 | `agent/factory.py:build_agent` | `LoggingAuditLogger` exists at `agent/integrations/local/audit.py` and `AuditConfig` is fully scaffolded — but never wired. All audit events silently drop. | Instantiate `LoggingAuditLogger()` in `build_agent` and pass it; expose `AuditConfig` fields through `AgentRuntimeConfig`. |
-| O-4 | [`docker/Dockerfile:71-74`](../../docker/Dockerfile) | HEALTHCHECK probes `/mcp/` (POST-only SSE endpoint) and swallows all errors with `\|\| exit 0` — always reports healthy. | Add a dedicated `GET /healthz` route in `transport/http.py` (200 + `{"status":"ok"}`). Probe `/healthz`; remove the escape hatch. |
+| O-4 | [`docker/Dockerfile:71-74`](../../../docker/Dockerfile) | HEALTHCHECK probes `/mcp/` (POST-only SSE endpoint) and swallows all errors with `\|\| exit 0` — always reports healthy. | Add a dedicated `GET /healthz` route in `transport/http.py` (200 + `{"status":"ok"}`). Probe `/healthz`; remove the escape hatch. |
 | O-5 | `transport/http.py` + `tools/query_database.py` | ChromaDB init + first 80 MB embedding-model download happen on first request, not at startup — load-balancer routes traffic before the server is actually ready. | Eagerly call `build_agent(cfg)` in the lifespan handler; expose `GET /readyz` returning 503 until that completes. |
 | O-6 | `agent/integrations/postgres/sql_runner.py` | Per-query `psycopg2.connect`; no pool; SIGTERM mid-query leaves dangling DB-side connections. | `psycopg2.pool.ThreadedConnectionPool`; expose `database.pool_max_connections`. |
-| O-7 | [`cli.py:221-246`](../../src/sqllens/cli.py#L221) | `_SAMPLE_CONFIG` has no `[agent]` section, so `sqllens init` users never see `max_tool_iterations` (just added in #32). | Add `[agent]\nmax_tool_iterations = 20  # raise if agent truncates on complex schemas`. |
-| O-8 | [`cli.py:106`](../../src/sqllens/cli.py#L106) | `validate` exits 0 when `api_key NOT SET` (prints warning only). Scripts can't distinguish "would fail to start" from "config unreadable". | Exit code 1 for warnings; reserve exit 2 for parse errors. |
-| O-9 | [`.github/workflows/release.yml`](../../.github/workflows/release.yml) | ~~No post-publish smoke test. A broken `__init__.py` import would ship silently.~~ **Fixed by #145 (issue #111):** added a `smoke` job (`needs: [build, pypi-publish]`, `timeout-minutes: 10`) that installs `sqllens==<needs.build.outputs.version>` from PyPI in a clean venv (bounded retry for CDN lag) and runs `sqllens --version` + `sqllens validate -c examples/sqlite-demo/sqllens.toml`. The exercise step sets a placeholder `SQLLENS_LLM__API_KEY` because `validate` exits 1 when the key is unset (the demo config omits it) and makes no network call without `--check-llm` — so a genuine import/parse regression still fails the job. | Add a `smoke` job that `pip install sqllens==<version>` then runs `sqllens validate -c examples/sqlite-demo/sqllens.toml`. |
-| O-10 | [`.github/workflows/docker.yml`](../../.github/workflows/docker.yml) | ~~`cosign` downloaded from GitHub at runtime with no checksum verification.~~ **Fixed by #145 (issue #111):** replaced the `curl\|chmod` install with `sigstore/cosign-installer` pinned to commit `d58896d6a1865668819e1d91763c7751a165e159` (verified == tag `v3.9.2`). The keyless signing loop is unchanged and now echoes each tag before signing. | Replace with `sigstore/cosign-installer` action (pinned by version, verifies checksums). |
+| O-7 | [`cli.py:221-246`](../../../src/sqllens/cli.py#L221) | `_SAMPLE_CONFIG` has no `[agent]` section, so `sqllens init` users never see `max_tool_iterations` (just added in #32). | Add `[agent]\nmax_tool_iterations = 20  # raise if agent truncates on complex schemas`. |
+| O-8 | [`cli.py:106`](../../../src/sqllens/cli.py#L106) | `validate` exits 0 when `api_key NOT SET` (prints warning only). Scripts can't distinguish "would fail to start" from "config unreadable". | Exit code 1 for warnings; reserve exit 2 for parse errors. |
+| O-9 | [`.github/workflows/release.yml`](../../../.github/workflows/release.yml) | ~~No post-publish smoke test. A broken `__init__.py` import would ship silently.~~ **Fixed by #145 (issue #111):** added a `smoke` job (`needs: [build, pypi-publish]`, `timeout-minutes: 10`) that installs `sqllens==<needs.build.outputs.version>` from PyPI in a clean venv (bounded retry for CDN lag) and runs `sqllens --version` + `sqllens validate -c examples/sqlite-demo/sqllens.toml`. The exercise step sets a placeholder `SQLLENS_LLM__API_KEY` because `validate` exits 1 when the key is unset (the demo config omits it) and makes no network call without `--check-llm` — so a genuine import/parse regression still fails the job. | Add a `smoke` job that `pip install sqllens==<version>` then runs `sqllens validate -c examples/sqlite-demo/sqllens.toml`. |
+| O-10 | [`.github/workflows/docker.yml`](../../../.github/workflows/docker.yml) | ~~`cosign` downloaded from GitHub at runtime with no checksum verification.~~ **Fixed by #145 (issue #111):** replaced the `curl\|chmod` install with `sigstore/cosign-installer` pinned to commit `d58896d6a1865668819e1d91763c7751a165e159` (verified == tag `v3.9.2`). The keyless signing loop is unchanged and now echoes each tag before signing. | Replace with `sigstore/cosign-installer` action (pinned by version, verifies checksums). |
 | O-11 | CLAUDE.md / repo conventions | No documented emergency hotfix path for the protected `main` branch. | Document the temporary-bypass-actor procedure in CLAUDE.md or a `RUNBOOK.md`. |
-| O-12 | [`README.md:75`](../../README.md#L75) | Links to `docs/internal/claude-desktop-windows-install.md` which moved to `docs/internal/installation/...` — broken on GitHub. | Fix the link; add a CI check for broken internal links. |
-| O-13 | [`README.md:136`](../../README.md#L136) | ~~Phase 4 line names the extracted-from parent product, violating CLAUDE.md's brand-cleanliness rule.~~ Fixed by #93 (issue #89): Phase 4 rewritten with no parent-product reference; remaining brand-name occurrences scrubbed from CLAUDE.md, this doc, and a test. | Rewrite Phase 4 as "JWT verifier (JWKS + shared-secret) and permission scopes" with no parent-product reference. |
+| O-12 | [`README.md:75`](../../../README.md#L75) | Links to `docs/internal/claude-desktop-windows-install.md` which moved to `docs/internal/installation/...` — broken on GitHub. | Fix the link; add a CI check for broken internal links. |
+| O-13 | [`README.md:136`](../../../README.md#L136) | ~~Phase 4 line names the extracted-from parent product, violating CLAUDE.md's brand-cleanliness rule.~~ Fixed by #93 (issue #89): Phase 4 rewritten with no parent-product reference; remaining brand-name occurrences scrubbed from CLAUDE.md, this doc, and a test. | Rewrite Phase 4 as "JWT verifier (JWKS + shared-secret) and permission scopes" with no parent-product reference. |
 | O-14 | `config.py` | No `config_version` field; no migration story for 0.0.x → 0.1.0. `extra="forbid"` means any new required field silently breaks existing TOMLs. | Add `config_version: int = 1` (ignored for now); document in CHANGELOG that 0.1.0 is the first stable config schema. |
-| O-15 | [`.github/dependabot.yml`](../../.github/dependabot.yml) | ~~No `dependabot.yml`, no Renovate config. Wide ranges + no update bot = breaking changes ship undetected.~~ **Fixed by #112 (issue #108):** added a Dependabot v2 config with weekly grouped updates for the `pip` ecosystem (root) and the `github-actions` ecosystem. Each ecosystem's catch-all `patterns: ["*"]` group folds its weekly updates into one consolidated PR per ecosystem; `open-pull-requests-limit: 5` caps the total open update PRs per ecosystem. | Add `.github/dependabot.yml` with weekly pip + Actions groups. |
-| O-16 | [`src/sqllens/agent/factory.py:1`](../../src/sqllens/agent/factory.py) | ~~Missing SPDX header. Every other first-party file has it; this one is the public seam, not lifted code.~~ Fixed by #93 (issue #89): two-line SPDX block added. | Add the two-line SPDX block. |
+| O-15 | [`.github/dependabot.yml`](../../../.github/dependabot.yml) | ~~No `dependabot.yml`, no Renovate config. Wide ranges + no update bot = breaking changes ship undetected.~~ **Fixed by #112 (issue #108):** added a Dependabot v2 config with weekly grouped updates for the `pip` ecosystem (root) and the `github-actions` ecosystem. Each ecosystem's catch-all `patterns: ["*"]` group folds its weekly updates into one consolidated PR per ecosystem; `open-pull-requests-limit: 5` caps the total open update PRs per ecosystem. | Add `.github/dependabot.yml` with weekly pip + Actions groups. |
+| O-16 | [`src/sqllens/agent/factory.py:1`](../../../src/sqllens/agent/factory.py) | ~~Missing SPDX header. Every other first-party file has it; this one is the public seam, not lifted code.~~ Fixed by #93 (issue #89): two-line SPDX block added. | Add the two-line SPDX block. |
 | O-17 | `mcpb/build.sh:59` | ~~Vendors `.[postgres,mysql]` not `.[all]` — future connectors added to `[all]` would silently miss MCPB.~~ Fixed by #93 (issue #89): now vendors `.[all]`. | Change to `".[all]"`. |
 
 ### Test coverage
 
 | # | File | Gap | Direction |
 |---|---|---|---|
-| T-4 | [`tests/unit/test_safety.py`](../../tests/unit/test_safety.py) | ~~No `SELECT … INTO` bypass test (pairs with S-1).~~ Closed by #41 (`TestSelectIntoRejected`). Still no `pg_sleep`/`dblink_exec`/`load_extension` rejection tests; still no `WITH x AS (UPDATE/DELETE ...) ...` CTE coverage. | Add the remaining bypass-corpus parametrised tests. |
-| T-5 | [`tests/unit/test_safety.py`](../../tests/unit/test_safety.py) | `ReadOnlyGuardRunner.run_sql` has no unit test — only the connector-marked integration tests exercise it. | Unit test with a stub `SqlRunner`: assert `assert_select_only` called with correct dialect, `UnsafeSqlError` raised before inner runner, passing SELECT reaches inner unchanged. |
-| T-6 | [`tests/unit/test_auth.py`](../../tests/unit/test_auth.py) | `_AuthMiddleware` has no direct unit test; only HTTP integration happy/401 paths. Missing: lifespan/websocket scope passthrough, `scope['state']['auth']` contract, `WWW-Authenticate` header on 401, whitespace-only bearer payload. | Unit-test the middleware in isolation with mock authenticators. |
-| T-7 | [`tests/integration/test_http_transport.py`](../../tests/integration/test_http_transport.py) | No regression test for FastMCP Host-header rejection (CLAUDE.md gotcha #4) — silent regressions possible on `mcp` SDK bumps. No agent-failure → `isError: true` end-to-end test. No `POST /mcp/` companion to the `POST /mcp` test. No OPTIONS-preflight behavior pinned. | Add each as a parametrised integration test. |
-| T-8 | [`tests/unit/test_cli.py`](../../tests/unit/test_cli.py) | `sqllens init` has zero coverage — writes file, `--path`, `--force`, round-trip-through-`Config.load`. `sqllens serve` happy path has no test either. | Cover both. |
-| T-9 | [`tests/unit/test_factory_wiring.py`](../../tests/unit/test_factory_wiring.py) | No test asserting `ReadOnlyGuardRunner` wraps the runner iff `database.read_only=True`. A refactor flipping the default silently disables the guard. | Two parametrised cases: `read_only=True` → wrapped; `read_only=False` → bare. |
-| T-10 | [`pyproject.toml`](../../pyproject.toml) | ~~`pytest -q` runs the `connectors`-marked tests by default; skip logic lives inside each test, not in `addopts`.~~ Fixed by #93 (issue #89) with `addopts = "-m 'not connectors'"`; superseded by #296, which moved the connector tests to `tests/connectors/` (run with `pytest -q tests/connectors`). | Add `addopts = "-m 'not connectors'"`. |
-| T-11 | [`tests/unit/test_lockfile_guard.py`](../../tests/unit/test_lockfile_guard.py) | ~~Nothing asserted the shipped `requirements.txt` lockfile stays within `pyproject.toml`'s conservative upper bounds (the S-12 source of truth), or that the wheel ships `sqllens/requirements.txt`. A Dependabot bump or hand edit could silently drift past a bound or the wheel could stop shipping the lock.~~ Closed by #115 (issue #114): 10 unconditional `test_logic_*` tests exercise the parse/compare logic against synthetic fixtures; 3 `test_real_*` integration tests skip via `pytest.mark.skipif(not LOCKFILE.exists())` until the lockfile + `force-include` glue lands (PR #112, issue #108), then auto-activate. Adds `packaging>=23` to the `dev` extra. | Drift/wheel-content guard under `tests/` (not a `ci.yml` job — the GitHub App lacks the `workflows` scope). |
+| T-4 | [`tests/unit/test_safety.py`](../../../tests/unit/test_safety.py) | ~~No `SELECT … INTO` bypass test (pairs with S-1).~~ Closed by #41 (`TestSelectIntoRejected`). Still no `pg_sleep`/`dblink_exec`/`load_extension` rejection tests; still no `WITH x AS (UPDATE/DELETE ...) ...` CTE coverage. | Add the remaining bypass-corpus parametrised tests. |
+| T-5 | [`tests/unit/test_safety.py`](../../../tests/unit/test_safety.py) | `ReadOnlyGuardRunner.run_sql` has no unit test — only the connector-marked integration tests exercise it. | Unit test with a stub `SqlRunner`: assert `assert_select_only` called with correct dialect, `UnsafeSqlError` raised before inner runner, passing SELECT reaches inner unchanged. |
+| T-6 | [`tests/unit/test_auth.py`](../../../tests/unit/test_auth.py) | `_AuthMiddleware` has no direct unit test; only HTTP integration happy/401 paths. Missing: lifespan/websocket scope passthrough, `scope['state']['auth']` contract, `WWW-Authenticate` header on 401, whitespace-only bearer payload. | Unit-test the middleware in isolation with mock authenticators. |
+| T-7 | [`tests/integration/test_http_transport.py`](../../../tests/integration/test_http_transport.py) | No regression test for FastMCP Host-header rejection (CLAUDE.md gotcha #4) — silent regressions possible on `mcp` SDK bumps. No agent-failure → `isError: true` end-to-end test. No `POST /mcp/` companion to the `POST /mcp` test. No OPTIONS-preflight behavior pinned. | Add each as a parametrised integration test. |
+| T-8 | [`tests/unit/test_cli.py`](../../../tests/unit/test_cli.py) | `sqllens init` has zero coverage — writes file, `--path`, `--force`, round-trip-through-`Config.load`. `sqllens serve` happy path has no test either. | Cover both. |
+| T-9 | [`tests/unit/test_factory_wiring.py`](../../../tests/unit/test_factory_wiring.py) | No test asserting `ReadOnlyGuardRunner` wraps the runner iff `database.read_only=True`. A refactor flipping the default silently disables the guard. | Two parametrised cases: `read_only=True` → wrapped; `read_only=False` → bare. |
+| T-10 | [`pyproject.toml`](../../../pyproject.toml) | ~~`pytest -q` runs the `connectors`-marked tests by default; skip logic lives inside each test, not in `addopts`.~~ Fixed by #93 (issue #89) with `addopts = "-m 'not connectors'"`; superseded by #296, which moved the connector tests to `tests/connectors/` (run with `pytest -q tests/connectors`). | Add `addopts = "-m 'not connectors'"`. |
+| T-11 | [`tests/unit/test_lockfile_guard.py`](../../../tests/unit/test_lockfile_guard.py) | ~~Nothing asserted the shipped `requirements.txt` lockfile stays within `pyproject.toml`'s conservative upper bounds (the S-12 source of truth), or that the wheel ships `sqllens/requirements.txt`. A Dependabot bump or hand edit could silently drift past a bound or the wheel could stop shipping the lock.~~ Closed by #115 (issue #114): 10 unconditional `test_logic_*` tests exercise the parse/compare logic against synthetic fixtures; 3 `test_real_*` integration tests skip via `pytest.mark.skipif(not LOCKFILE.exists())` until the lockfile + `force-include` glue lands (PR #112, issue #108), then auto-activate. Adds `packaging>=23` to the `dev` extra. | Drift/wheel-content guard under `tests/` (not a `ci.yml` job — the GitHub App lacks the `workflows` scope). |
 
 ### Product / UX
 

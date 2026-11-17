@@ -156,7 +156,7 @@ Three artifact types, all driven by tag pushes (`vX.Y.Z`):
 |---|---|---|---|
 | **PyPI** | tag `v*` | `release.yml` | https://pypi.org/project/sqllens/ via OIDC Trusted Publishing — no API tokens. The `pypi` GitHub environment exists; the matching pending publisher is configured on PyPI (project=`sqllens`, owner=`The01Geek`, workflow=`release.yml`, environment=`pypi`). |
 | **Docker** | tag `v*`, push to `main` | `docker.yml` | `ghcr.io/the01geek/sqllens:{X.Y.Z, X.Y, latest}` for tags; `:edge` and `:git-<sha>` for main. Multi-arch (amd64 + arm64), cosign-signed (keyless OIDC), SBOM (SPDX) and build provenance attached. |
-| **MCPB** | tag `v*` | `mcpb.yml` | Per-platform `.mcpb` bundles (macOS x86_64/arm64, Linux x86_64, Win32 x86_64) attached as GitHub Release assets. |
+| **MCPB** | tag `v*` | `mcpb.yml` | Per-platform `.mcpb` bundles (macOS arm64, Linux x86_64, Win32 x86_64) attached as GitHub Release assets. There is no Intel macOS bundle (GitHub retired its free Intel macOS runners); Intel Mac users install with `pip install sqllens`. |
 
 **Release notes:** Write one `changelog.d/<PR>.<category>.md` fragment per applicable
 category (`security`, `fixed`, `added`, `changed`, `deprecated`, `removed`). Do not
