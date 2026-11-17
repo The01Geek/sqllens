@@ -1,0 +1,114 @@
+[
+  {
+    "criterion": 1,
+    "text": "A config whose `database.url` scheme is `sqlite` or starts with `sqlite+` fails to load. #382's `DatabaseConfig.url` validator refuses it with its fixed unsupported-scheme message, which does not echo the URL. - `sqllens validate -c <file>` and `sqllens serve -c <file>` on such a config each exit 2. - A non-dry-run `sqllens claude-desktop install --db \"sqlite:///…\"` exits non-zero. It leaves `claude_desktop_config.json` unchanged and leaves no `sqllens.toml` or launcher from the attempt."
+  },
+  {
+    "criterion": 2,
+    "text": "`build_sql_runner` raises `ValueError` for a `sqlite…://` URL, and `probe_database` raises `PreflightError` with subsystem `database` for one. In each message, the list of expected schemes names only MySQL."
+  },
+  {
+    "criterion": 3,
+    "text": "`sqlglot_dialect_for_url` keeps its `-> str | None` signature. It returns `\"mysql\"` for `mysql://`, `mysql+pymysql://` and `mysql+mysqldb://` URLs, and `None` for a `sqlite:///x.db` URL."
+  },
+  {
+    "criterion": 4,
+    "text": "For every dialect, `_denied_funcs` returns the `mysql` entry's functions plus the always-denied functions, and `_catalog_names` returns `information_schema` plus the `mysql` entry's catalog schemas. Neither holds a SQLite function or name."
+  },
+  {
+    "criterion": 5,
+    "text": "Under dialect `None`, and under a dialect name sqlglot resolves but SQL Lens has no entry for (for example `\"oracle\"`), tests assert these outcomes: - `assert_select_only` still refuses, at minimum, `SELECT SLEEP(1)` and `SELECT load_file('/etc/passwd')` as denied functions. Each refusal is asserted with `pytest.raises(UnsafeSqlError, match=…)` naming the denied function. - `is_introspection_query` still returns `True` for `SELECT * FROM mysql.user` and `SELECT * FROM performance_schema.threads`."
+  },
+  {
+    "criterion": 6,
+    "text": "`is_catalog_table` returns `True` only for a table whose schema qualifier, lower-cased with `str.lower()`, is `information_schema`, `mysql`, `sys` or `performance_schema`. It returns `False` for every other table, under every dialect: an unqualified table-valued function, an unqualified table, and a table whose name merely starts with some prefix. `is_introspection_query` and `is_catalog_table` call neither `traverse_scope` nor `normalize_identifiers`, and `src/sqllens/safety/readonly.py` defines no catalog name prefix and no `_cte_reference_ids`."
+  },
+  {
+    "criterion": 7,
+    "text": "The tests that existed only to check one of the following are deleted, not renamed or re-pointed: - a catalog name prefix; - a catalog-prefixed CTE; - another engine's catalog name being data; - a SQLite catalog or function under the union fallback; - `is_introspection_query`'s scope-analysis failure path. This covers whole tests and parametrized rows. At minimum it covers these, under whatever dialect or name #382 and #381 left them: - `test_scope_failure_excludes_no_cte`; - `test_catalog_prefixed_cte_is_data`; - `test_other_engine_catalogs_are_data`; - `test_no_dialect_counts_pragma_functions`; - the prefix rows of `test_own_engine_catalogs_detected`, `test_no_dialect_counts_every_engine` and `test_unknown_sqlglot_dialect_counts_every_engine` in `tests/unit/test_safety.py`; - the catalog-prefix \"documented limit\" rows (`sqlite_stuff`, and any `pg_` row left) in `test_allowed_dialect_specific_shapes` in `tests/unit/test_safety_whole_row.py`; - `test_other_engine_catalog_name_data_query_shown_and_clears_error` in `tests/unit/test_format.py`."
+  },
+  {
+    "criterion": 8,
+    "text": "`test_with_widgets_hides_introspection_result_under_configured_dialect` in `tests/unit/test_query_database.py` runs under a `mysql+pymysql://` URL. Its catalog statement is one only the `mysql` dialect classifies as introspection, for example `# note\\nSHOW TABLES`, which `is_introspection_query` classifies `True` under `\"mysql\"` and `False` under `None`. As a result, the test fails when the configured dialect does not reach the formatter."
+  },
+  {
+    "criterion": 9,
+    "text": "`verify_base_tables(connection, \"SELECT a FROM t\", dialect=\"sqlite\")` raises `RlsError` and issues no query on the connection's cursor. `DefaultSystemPromptBuilder(dialect=\"sqlite\")` raises `ValueError`."
+  },
+  {
+    "criterion": 10,
+    "text": "`sqllens init` writes a config whose `database.url` is a `mysql+pymysql://` placeholder URL, and `sqllens validate` exits 0 on that file."
+  },
+  {
+    "criterion": 11,
+    "text": "A config with `database.url = mysql+pymysql://ci@127.0.0.1/ci` and at least one `[[rls]]` rule passes `sqllens validate -c <file>`, run without `--check-db` and with `SQLLENS_LLM__API_KEY` set: - It exits 0. - It opens no network connection. A test confirms this with every socket connect attempt made to fail. - The same config with an invalid `[[rls]]` rule still exits 2."
+  },
+  {
+    "criterion": 12,
+    "text": "For a MySQL URL whose database segment is a non-empty name, `derive_default_name` returns that name unchanged. The test cases include at minimum `Chinook`, `sales.db` and `x.sqlite3`. For a URL with no database segment, or one it cannot parse, it still returns `sqllens`."
+  },
+  {
+    "criterion": 13,
+    "text": "Neither the empty root-level `demo.db` nor `examples/sqlite-demo/` is tracked."
+  },
+  {
+    "criterion": 14,
+    "text": "`examples/mysql-demo/` holds a `sqllens.toml`, a Docker Compose file, a `README.md`, the user-creation init script and `Chinook_MySql.sql`. `.gitattributes` exempts `Chinook_MySql.sql` from line-ending normalization. Both the committed blob (`git cat-file -p HEAD:examples/mysql-demo/Chinook_MySql.sql`) and the checked-out file have SHA-256 `02a1835417c3ea19bff64e1d1f22be738ce51b3f88b0473c24eebff9a3ccde4b` and are 616,450 bytes."
+  },
+  {
+    "criterion": 15,
+    "text": "The compose file runs the `mysql:8.0` image and loads `Chinook_MySql.sql` and the user-creation script on first start. It publishes MySQL to the host only by a port mapping bound to `127.0.0.1`, and it sets no `network_mode: host`."
+  },
+  {
+    "criterion": 16,
+    "text": "With `SQLLENS_LLM__API_KEY` set: 1. Start the demo container with `docker compose` from a fresh checkout and wait until it is ready. 2. Run `sqllens validate --check-db -c examples/mysql-demo/sqllens.toml`. It exits 0. 3. Query the demo database as the demo config's user for the number of albums whose artist is `AC/DC`. It returns 2. The demo config keeps `read_only = true`, and its ChromaDB `persist_dir` lies under `examples/mysql-demo/`. A run that cannot use Docker ends Blocked on this criterion."
+  },
+  {
+    "criterion": 17,
+    "text": "`examples/mysql-demo/README.md` covers: - how to start and stop the container; - the sample questions; - how to change the published host port, with the matching edit to the demo config's URL, for when port 3306 is taken."
+  },
+  {
+    "criterion": 18,
+    "text": "`LICENSES/THIRD-PARTY.txt` has a section for `examples/mysql-demo/Chinook_MySql.sql`. The section names the upstream project, the v1.4.5 release and its URL, and it carries the upstream copyright line and permission notice verbatim."
+  },
+  {
+    "criterion": 19,
+    "text": "The post-publish smoke job in `.github/workflows/release.yml` meets three conditions: - It reads no file under `examples/`. - It validates a config whose `database.url` is a MySQL URL. - It fails when `pymysql` cannot be imported in the smoke venv."
+  },
+  {
+    "criterion": 20,
+    "text": "`git grep -n -i -E 'sqlite|load_extension|pragma_'` over the tracked tree returns hits only in these 6 classes (complete by construction): 1. ChromaDB's `chroma.sqlite3` memory store, or the SQLite behavior of that file or of Python's stdlib `sqlite3` that ChromaDB relies on. 2. Text stating that SQLite is not supported or must not be added, such as the AGENTS.md engine rule. 3. Tests asserting either that a SQLite URL or the `\"sqlite\"` dialect is refused or unsupported, or that `derive_default_name` keeps a `.sqlite`/`.sqlite3` suffix. 4. Every `changelog.d` fragment, the removal PR's own `removed` fragment included. 5. `CHANGELOG.md` and `docs/external/release-notes.md`. 6. Dated historical records: `docs/internal/production-readiness-v0.1.0.md` and the README roadmap's completed Phase 1 line. Outside classes 4 to 6, no hit names a `sqlite-demo` path, `SqliteRunner`, `connect_sqlite`, `sqlite_path_from_url`, `_probe_sqlite` or `_readonly_uri`."
+  },
+  {
+    "criterion": 21,
+    "text": "No README, `docs/external/` or `docs/internal/` page refers to a demo database or example file that the repository does not ship after the change. The Docker-started `examples/mysql-demo` database counts as the shipped demo database. The exceptions are `docs/external/release-notes.md` and the class 6 historical records."
+  },
+  {
+    "criterion": 22,
+    "text": "Each first-run walkthrough lists Docker with Compose and an Anthropic API key as prerequisites. It starts the `examples/mysql-demo` container and points SQL Lens at it through a `mysql+pymysql://` URL. It keeps the Chinook sample questions, and wherever it asks the AC/DC question it states the expected answer, 2 albums. The walkthroughs are, at minimum: - the README quick start; - step 2 of `docs/external/getting-started.md`; - the fast path and the manual install in `docs/external/install-claude-desktop-windows.md`. Where these pages explain connecting to the reader's own database, they say SQL Lens needs a MySQL 8.0+ server. The README quick-start heading, the getting-started introduction and `docs/external/index.md` no longer promise a 60-second or under-a-minute first run. Any first-run duration they state includes pulling the `mysql:8.0` image and loading the demo."
+  },
+  {
+    "criterion": 23,
+    "text": "Database-URL examples show only MySQL URLs (`mysql://` or `mysql+<driver>://`). This holds at minimum in: - the README URL table; - `docs/external/configuration.md`; - `docs/external/getting-started.md`; - the Windows guide's URL table; - the `database_url` description in `mcpb/manifest.json`; - `mcpb/README.md`."
+  },
+  {
+    "criterion": 24,
+    "text": "These describe a system catalog only as a table in `information_schema`, `mysql`, `sys` or `performance_schema`, and none of them describes a catalog name prefix, a catalog table-valued function, or a CTE exclusion with its scope-analysis failure path: - the docstrings of `is_introspection_query` and `is_catalog_table`; - the catalog comment in `src/sqllens/safety/readonly.py`; - the `src/sqllens/safety/whole_row.py` module docstring; - `docs/internal/database-connectors/read-only-safety.md`; - the `refuse_whole_row_selects` row and the schema-introspection note in `docs/external/configuration.md`."
+  },
+  {
+    "criterion": 25,
+    "text": "AGENTS.md meets these conditions: - It describes no SQLite query-engine code, demo or test as still present in the repository. - In its sqlglot rule, the `is_introspection_query` sentence describes no identifier-normalization or scope-analysis failure path. - Its debugging checklist step 1 directs reproduction against MySQL 8.0+ and names `examples/mysql-demo` as a ready local MySQL. - The rules forbidding new SQLite or other-engine support, and the ChromaDB bullet, keep their meaning."
+  },
+  {
+    "criterion": 26,
+    "text": "`src/sqllens/agent/integrations/mysql/sql_runner.py` states in its own text why it uses the shared `effective_row_cap`/`rows_to_capped_df` helper: a per-request profile can narrow the row cap without rebuilding the agent. It no longer points to the SQLite runner for that rationale."
+  },
+  {
+    "criterion": 27,
+    "text": "The removal PR leaves every `changelog.d` fragment on its base byte-for-byte unchanged and adds a `changelog.d/<PR>.removed.md` fragment. That fragment states: - that SQLite query-engine support and the SQLite demo were removed; - that a `sqlite` `database.url` is now refused at config load; - that operators should point `database.url` at a MySQL 8.0+ server with a `mysql://` or `mysql+<driver>://` URL (for example `mysql+pymysql://`); - that pipelines running `sqllens validate` without `--check-db` on a `sqlite:///…` stand-in should use a MySQL URL instead, for example `mysql+pymysql://ci@127.0.0.1/ci`, which needs no running server; - that the demo is now `examples/mysql-demo` and needs Docker; - that `SqliteRunner` is no longer exported; - that earlier entries in the same release describing SQLite as a query engine no longer apply; - that the ChromaDB memory store is unaffected."
+  },
+  {
+    "criterion": 28,
+    "text": "The change leaves these surfaces unchanged, exactly these 4 (complete by construction): - ChromaDB; - its `chroma.sqlite3` store; - `probe_memory` and its writability check on that file; - Python's stdlib `sqlite3` in the Docker runtime image."
+  }
+]

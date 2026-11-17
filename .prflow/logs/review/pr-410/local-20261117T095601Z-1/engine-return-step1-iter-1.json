@@ -1,0 +1,1237 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "verdict": "REJECT",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:code-reviewer",
+   "severity": "Suggestion",
+   "description": "The 'Not covered' paragraph of the whole_row.py module docstring wraps awkwardly after the deletion; text still accurate.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/whole_row.py",
+    "line_range": [
+     44,
+     50
+    ],
+    "kind": "style"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "Suggestion",
+   "description": "No test calls verify_base_tables with dialect='sqlite', and no unknown-dialect row asserts that the cursor issues no query (criterion 9's second half).",
+   "defect_signature": {
+    "file": "tests/unit/test_rls_views.py",
+    "line_range": [
+     312,
+     319
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 8,
+  "by_category": {
+   "data_format_assumption": 8
+  }
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [
+  "VC-122"
+ ],
+ "criterion_exempt": [],
+ "report": "## Verdict: REJECT (one acceptance criterion is not met: two first-run walkthroughs ask the AC/DC question without stating the expected answer)\n\nThis PR is not ready to merge: acceptance criterion twenty-two requires every first-run walkthrough that asks the AC/DC question to state the expected answer of 2 albums, and two walkthroughs do not.\nRule applied: rule 1 — a checklist FAIL at or above the threshold → REJECT\n\n## Code Review Findings\n\n- VC-122: FAIL (critical) — Each first-run walkthrough lists Docker with Compose and an Anthropic API key as prerequisites. It starts the `examples/mysql-demo` container and points SQL Lens at it through a `mysql+pymysql://` URL. It keeps the Chinook sample questions, and wherever it asks the AC/DC question it states the expected answer, 2 albums. The walkthroughs are, at minimum: - the README quick start; - step 2 of `docs/external/getting-started.md`; - the fast path and the manual install in `docs/external/install-claude-desktop-windows.md`. Where these pages explain connecting to the reader's own database, they say SQL Lens needs a MySQL 8.0+ server. The README quick-start heading, the getting-started introduction and `docs/external/index.md` no longer promise a 60-second or under-a-minute first run. Any first-run duration they state includes pulling the `mysql:8.0` image and loading the demo. [README.md] — fix the code, or have the issue author amend this criterion\n\n  <details><summary>Evidence</summary>\n\n  criteria.json is a valid list and carries criterion 22, so it counts. Most of the criterion holds: README.md:20 lists Docker with Compose and an Anthropic API key and says the first run takes a few minutes including the mysql:8.0 pull; README.md:31 uses mysql+pymysql and states 'The answer is 2'; getting-started.md:3,8-9,28-38 and install-claude-desktop-windows.md:11-14,26-31,121-140 cover Docker, the container and the mysql+pymysql URL; 'MySQL 8.0+' appears where own-database connection is explained (README:33, getting-started:96, Windows:12,78); no 60-second promise in the README heading, getting-started intro or index.md. But the criterion requires 'wherever it asks the AC/DC question it states the expected answer, 2 albums'. docs/external/getting-started.md:56 (step 4, the first-run walkthrough) asks 'Using sqllens, how many albums did AC/DC release?' with no expected answer (lines 54-60 never state 2). docs/external/install-claude-desktop-windows.md:70 (Verify the connection, part of the fast path) asks the AC/DC question and likewise gives no answer (lines 69-72). Both are counterexamples to the stated-answer requirement; the matching question in the README does state it, but that does not excuse the others. No sibling criterion excuses this.\n\n  </details>\n\n### 🟡 Suggestion / Minor (3)\n\n<details><summary>3 items</summary>\n\n1. `src/sqllens/safety/whole_row.py` lines 44 to 50: the \"Not covered\" paragraph of the module docstring wraps oddly after the deletion (\"A catalog\" ends one line and \"table that holds credentials\" starts the next). The text is still accurate. (raised by 1/5 agents)\n2. `tests/unit/test_rls_views.py` lines 312 to 319: no test calls `verify_base_tables(..., dialect=\"sqlite\")`, and no unknown-dialect row asserts that the cursor issues no query. Criterion nine asks for both the refusal and no query on the cursor; only the refusal is pinned. (raised by 1/5 agents)\n- VC-66: FAIL (suggestion) — The first question creates ./examples/mysql-demo/chroma/ for ChromaDB memory, matching the demo config's persist_dir resolved relative to the repository root. [examples/mysql-demo/README.md]\n\n  <details><summary>Evidence</summary>\n\n  README.md:42-44 says the first question creates ./examples/mysql-demo/chroma/. sqllens.toml:24 sets persist_dir = \"./examples/mysql-demo/chroma\" (cwd-relative; matches only when run from repo root, as the README commands do). ChromaAgentMemory is lazy: __init__ (agent_memory.py:107-128) does no I/O and PersistentClient is only created in _get_client (:136-152). But the documented command `sqllens serve -c examples/mysql-demo/sqllens.toml` runs run_preflight(cfg) by default (cli.py:241-249) before run(cfg); run_preflight runs probe_memory (preflight.py:245-257), which does persist_dir.mkdir(parents=True, exist_ok=True) (preflight.py:188). So the directory is created at serve startup (and by validate --check-memory), before any question; the first question is not what creates it. Only the Chroma store files inside would be created lazily at first touch. Repo rule AGENTS.md 'Claims must match the code' / 'Boot vs. lazy / first-call' requires behavioral doc claims to match the code; text unchanged in base and head.\n\n  </details>\n\n</details>\n\n### ℹ️ Informational — Deferred (8)\n\n<details><summary>8 items</summary>\n\n- VC-39: INCONCLUSIVE (suggestion) — From sqlglot 30.22 the MySQL tokenizer ends a block comment at the first */ [docs/internal/database-connectors/read-only-safety.md]\n\n  <details><summary>Evidence</summary>\n\n  The claim is the last sentence of docs/internal/database-connectors/read-only-safety.md:54 ('From 30.22 the MySQL tokenizer also ends a block comment at the first */, as MySQL does.'). It is a library claim, but the item has no dependency_sources and the views contain no sqlglot source (Glob for **/sqlglot* in the head view found nothing). The claim cannot be verified from the views alone. Not run: reading sqlglot 30.22's sqlglot/dialects/mysql.py (and tokens.py) block-comment handling, and comparing it with the pre-30.22 release.\n\n  </details>\n\n- VC-41: INCONCLUSIVE (suggestion) — DESCRIBE parses as exp.Command (rejected) under the guard; with PRAGMA dropped the doc still lists every rejected introspection form [docs/internal/database-connectors/read-only-safety.md]\n\n  <details><summary>Evidence</summary>\n\n  Behavior: DESCRIBE is rejected under mysql. assert_select_only (src/sqllens/safety/readonly.py:545-560) raises UnsafeSqlError for any root not in _ALLOWED_ROOT_TYPES (:276-282). But the claim's mechanism is inaccurate: sqlglot (.venv/lib/python3.12/site-packages/sqlglot/parser.py:1203 STATEMENT_PARSERS TokenType.DESCRIBE -> _parse_describe, :3641 returns exp.Describe; mysql.py has no override, only EXPLAIN->DESCRIBE at :106) parses DESCRIBE to exp.Describe, not exp.Command. The doc line docs/internal/database-connectors/read-only-safety.md:61 says DESCRIBE and non-allowlisted SHOW 'parse as exp.Command / non-allowlisted exp.Show roots', which is imprecise for DESCRIBE (outcome, rejection, is right). That line is text the PR changed (base also mentions DESCRIBE at base line 62 with PRAGMA), so it is not a usable requirement source, and no unchanged file requires the claimed Command parse; so neither FAIL nor INVALID can be established. Whether other introspection forms are fully listed was not exhaustively checked; the doc lists DESCRIBE and non-allowlisted SHOW (and CALL at :58).\n\n  </details>\n\n- VC-60: INCONCLUSIVE (suggestion) — During first-start loading the mysql image runs a temporary server with no TCP listener, so the TCP healthcheck as chinook_reader against Chinook.Album only passes after both init scripts finished. [examples/mysql-demo/compose.yaml]\n\n  <details><summary>Evidence</summary>\n\n  examples/mysql-demo/compose.yaml:16-31 matches the claim's text: the healthcheck runs `mysql -h127.0.0.1 -uchinook_reader -pchinook_reader -e 'SELECT 1 FROM Chinook.Album LIMIT 1'`, i.e. over TCP, as the demo user, against Chinook. The claim's truth depends on the mysql:8.0 image's docker-entrypoint.sh starting its temporary server with --skip-networking. No dependency_sources were supplied and a Glob for docker-entrypoint.sh in the head view found none, so I could not read the entrypoint. I did not run the image or inspect it with docker. I recall the upstream entrypoint using --skip-networking, but that is not evidence I read.\n\n  </details>\n\n- VC-76: INCONCLUSIVE (important) — sqlglot exp.Table.db returns the schema qualifier name as a string (empty when unqualified) for MySQL-parsed tables, including quoted identifiers [src/sqllens/safety/readonly.py]\n\n  <details><summary>Evidence</summary>\n\n  The item has no dependency_sources. A Glob for **/sqlglot*/**/expressions* in the head view found nothing, and a Glob for **/sqlglot/expressions.py over / found nothing. I could not read Table.db in the locked sqlglot version. The use site is src/sqllens/safety/readonly.py:273, `(table.db or \"\").lower()`, which tolerates an empty value. Whether Table.db returns a string for quoted MySQL identifiers is unverified.\n\n  </details>\n\n- VC-86: INCONCLUSIVE (suggestion) — Patching socket.socket.connect and connect_ex catches every network connect validate could make (pymysql and any LLM/HTTP client use socket.socket.connect, not create_connection on a subclass bypassing it) [tests/unit/test_cli.py]\n\n  <details><summary>Evidence</summary>\n\n  tests/unit/test_cli.py:143-169 patches socket.socket.connect and connect_ex with a refusing stub (lines 157-158) and asserts no attempts during `validate` without --check-db. The claim depends on how pymysql (connections.py connect()) and stdlib socket.create_connection behave at runtime. The item has no dependency_sources, and no pymysql or stdlib source is in the views, so I could not read them as the rules require. Copies of pymysql exist in other venvs on the host, but those are outside the supplied views and dependency_sources, so I did not use them. The claim is also absolute (every network connect, any LLM/HTTP client). Async or C-level clients may not route through the patched Python-level methods. I did not trace those clients. Missing evidence: pymysql and stdlib socket source via dependency_sources.\n\n  </details>\n\n- VC-114: INCONCLUSIVE (critical) — `examples/mysql-demo/` holds a `sqllens.toml`, a Docker Compose file, a `README.md`, the user-creation init script and `Chinook_MySql.sql`. `.gitattributes` exempts `Chinook_MySql.sql` from line-ending normalization. Both the committed blob (`git cat-file -p HEAD:examples/mysql-demo/Chinook_MySql.sql`) and the checked-out file have SHA-256 `02a1835417c3ea19bff64e1d1f22be738ce51b3f88b0473c24eebff9a3ccde4b` and are 616,450 bytes. [.gitattributes]\n\n  <details><summary>Evidence</summary>\n\n  Verified: head inventory.json lists examples/mysql-demo/{Chinook_MySql.sql (blob, size 616450), README.md, compose.yaml, demo-user.sql, sqllens.toml}; .gitattributes:4 has '* text=auto eol=lf' and :7 'examples/mysql-demo/Chinook_MySql.sql -text', which is a later, more specific line and exempts the file from normalization. Criterion 14 counts (criteria.json has criterion 14 as a {criterion,text} object). Not verified: the SHA-256 02a18354...de4b of the committed blob and the checked-out file. I have no tool to hash the file (no shell; the 616,450-byte file cannot be hashed by reading), and inventory.json lists only the git blob SHA-1 cdbd482f..., not a SHA-256. The command not run is `git cat-file -p HEAD:examples/mysql-demo/Chinook_MySql.sql | sha256sum` plus `sha256sum` on the working file. Size matches 616450.\n\n  </details>\n\n- VC-116: INCONCLUSIVE (critical) — With `SQLLENS_LLM__API_KEY` set: 1. Start the demo container with `docker compose` from a fresh checkout and wait until it is ready. 2. Run `sqllens validate --check-db -c examples/mysql-demo/sqllens.toml`. It exits 0. 3. Query the demo database as the demo config's user for the number of albums whose artist is `AC/DC`. It returns 2. The demo config keeps `read_only = true`, and its ChromaDB `persist_dir` lies under `examples/mysql-demo/`. A run that cannot use Docker ends Blocked on this criterion. [examples/mysql-demo/sqllens.toml:16,24]\n\n  <details><summary>Evidence</summary>\n\n  Static parts verified in examples/mysql-demo/sqllens.toml: read_only = true (line 16), persist_dir = \"./examples/mysql-demo/chroma\" (line 24). Files present: compose.yaml, Chinook_MySql.sql, demo-user.sql, README.md. The runtime steps (docker compose start, `sqllens validate --check-db` exit 0, AC/DC album count = 2) require Docker and an API key; I did not run them. Per the criterion, a run that cannot use Docker ends Blocked. Criteria file not separately relied on.\n\n  </details>\n\n- VC-118: INCONCLUSIVE (critical) — `LICENSES/THIRD-PARTY.txt` has a section for `examples/mysql-demo/Chinook_MySql.sql`. The section names the upstream project, the v1.4.5 release and its URL, and it carries the upstream copyright line and permission notice verbatim. [LICENSES/THIRD-PARTY.txt]\n\n  <details><summary>Evidence</summary>\n\n  Criterion 18 counted from criteria.json (valid list of {criterion,text}). LICENSES/THIRD-PARTY.txt:284-300 has a section for examples/mysql-demo/Chinook_MySql.sql naming The Chinook Database (github.com/lerocha/chinook-database), release v1.4.5 with its release URL, plus a 'Copyright (c) 2008-2024 Luis Rocha' line and an MIT permission notice. The structural parts of the claim hold. 'Verbatim' against upstream LICENSE.md cannot be checked from the views: the repo has no copy of upstream LICENSE.md (Chinook_MySql.sql:8 only links to it), no dependency_sources were supplied, and I did not fetch https://github.com/lerocha/chinook-database/blob/v1.4.5/LICENSE.md. The year range in the copyright line (2008-2024) and the paragraph breaks (the notice paragraph at line 299 is followed directly by the warranty disclaimer at line 300 with no blank line) are unverified. Missing evidence: upstream v1.4.5 LICENSE.md text.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: 71 changed files, 18,349 changed lines; not small, not config-only, test-relevant.\n- Working tree: Phase 0.1 skipped in PR mode.\n- Review prompt extension: content-present. Final-pass (requesting-code-review) extension: content-present.\n- CI evidence: none held for this head; no test suite was run in this review.\n- Normalized (wording-only): 0\n- Re-verification: none.\n- prior-report: none\n- Finding rejected lines not counted (no Finding rejected line) — not printed, exempt.\n- The first verifier wave hit a 20-agent concurrency limit; refused items were dispatched in later rounds, and VC-20 and VC-59 were re-dispatched once (attempt 2). Four replies arrived without a verdict file and were completed by delivery messages.\n- Dirty-tree check: clean.\n- Checklist: 118 passed, 2 failed, 8 inconclusive\n- <details><summary>✅ Passed items (118 of 128)</summary>\n\n  - VC-1: `sqllens init --path <file>` accepts a `--path` option and writes a config whose `url` line starts with `url = \"mysql+pymysql://` at column 0, so the smoke job's grep matches. [.github/workflows/release.yml]\n  - VC-2: `sqllens validate -c` on the init template, without `--check-db`, exits 0 with only SQLLENS_LLM__API_KEY set and opens no network connection. [.github/workflows/release.yml]\n  - VC-3: The published wheel's install of the smoke venv brings pymysql as a dependency, so `import pymysql` succeeds unless the wheel drops it. [.github/workflows/release.yml]\n  - VC-4: `examples/mysql-demo/compose.yaml` exists and `docker compose ... up -d --wait` waits on a healthcheck so the database answers queries when it returns. [README.md]\n  - VC-5: The demo config's URL is `mysql+pymysql://chinook_reader:chinook_reader@127.0.0.1:3306/Chinook` and the init script creates user `chinook_reader` with that password and read access to `Chinook` only. [docs/external/getting-started.md]\n  - VC-6: The README quick start's demo URL matches the demo config's database.url. [README.md]\n  - VC-7: The documented refusal message `unsupported database URL scheme; use a mysql:// or mysql+pymysql:// URL (MySQL 8.0+)` matches the `DatabaseConfig.url` validator's message, which also now refuses sqlite schemes. [changelog.d/410.removed.md]\n  - VC-8: `SqliteRunner` is no longer exported from `sqllens.agent.integrations`. [changelog.d/410.removed.md]\n  - VC-9: `validate` without `--check-db` checks the configuration and its `[[rls]]` rules and opens no connection. [docs/external/configuration.md]\n  - VC-10: A query reading a table in information_schema, mysql, sys or performance_schema, or running a SHOW command, adds no table or text to what the user sees. [docs/external/configuration.md]\n  - VC-11: Whole-row guard allows `*` over a catalog table (the four schemas) and refuses `*` over a row-returning function with no catalog-function exception. [docs/external/configuration.md]\n  - VC-12: `statement_timeout_ms = 0` disables the timeout in the MySQL runner. [docs/external/configuration.md]\n  - VC-13: `--check-db` opens and immediately closes a connection to database.url (MySQL), with no remaining SQLite branch. [docs/external/configuration.md]\n  - VC-14: `examples/mysql-demo/README.md` covers stopping the database, changing the port when 3306 is taken, and more sample questions, as README and getting-started point there. [docs/external/getting-started.md]\n  - VC-15: The demo user can only read the Chinook database. [docs/external/getting-started.md]\n  - VC-16: The AC/DC question returns 2 albums against the vendored Chinook_MySql.sql. [README.md]\n  - VC-17: AGENTS.md states the repository has no other engine's runner, probe, safety entries or demo. [AGENTS.md]\n  - VC-18: AGENTS.md's `is_introspection_query` failure-path sentence matches the code: fails open on parse/tokenize error or empty parse, SHOW detected before parse, other parser exceptions propagate, warning and fallback to no dialect on unresolved dialect. [AGENTS.md]\n  - VC-19: The Windows guide's demo commands rely on examples/mysql-demo shipping compose.yaml, Chinook_MySql.sql and demo-user.sql, and the compose file referencing only those files (no other file such as a separate init dir) so that a folder holding just those three starts the demo [docs/external/install-claude-desktop-windows.md]\n  - VC-20: The demo URL mysql+pymysql://chinook_reader:chinook_reader@127.0.0.1:3306/Chinook matches the user, password, database name (case Chinook) and host port that demo-user.sql, Chinook_MySql.sql and compose.yaml create [docs/external/install-claude-desktop-windows.md]\n  - VC-21: `docker compose up -d --wait` returns only once the demo database answers queries, which requires a healthcheck in compose.yaml that waits until the data load finishes [docs/external/install-claude-desktop-windows.md]\n  - VC-22: The chinook_reader user can only read the Chinook database [docs/external/install-claude-desktop-windows.md]\n  - VC-23: With --db mysql+pymysql://...@127.0.0.1:3306/Chinook and no --name, derive_default_name returns `Chinook` (database segment as written); `sqllens` when there is no segment or the DSN does not parse [docs/external/install-claude-desktop-windows.md]\n  - VC-24: The internal installer doc's derive_default_name description (database segment as written, else sqllens) matches the code [docs/internal/installation/claude-desktop-installer.md]\n  - VC-25: The internal Windows doc's --name default (database segment as written, `Chinook` for the demo URL, or `sqllens` when none) matches derive_default_name [docs/internal/installation/claude-desktop-windows-install.md]\n  - VC-26: The internal Windows fast path and manual steps download the same three demo files and use the same demo URL that the compose/demo-user files support [docs/internal/installation/claude-desktop-windows-install.md]\n  - VC-27: build_sql_runner raises ValueError with message `unsupported database scheme: … (expected mysql)` for a non-mysql scheme, and a scheme starting with mysql (mysqlx included) goes to MySQLRunner [docs/internal/agent/factory.md]\n  - VC-28: Config loading refuses every scheme other than mysql and mysql+<driver>, sqlite included [docs/internal/agent/factory.md]\n  - VC-29: sqlglot_dialect_for_url returns \"mysql\" for mysql schemes and None for any other scheme [docs/internal/agent/factory.md]\n  - VC-30: examples/mysql-demo/sqllens.toml sets the model claude-opus-5-5 (or relies on the default) [docs/internal/agent/factory.md]\n  - VC-31: The vendored Chinook_MySql.sql is exempted from line-ending normalization by a .gitattributes -text rule [docs/internal/architecture/overview.md]\n  - VC-32: LICENSES/THIRD-PARTY.txt holds notices for the vendored agent code and for the Chinook demo script [docs/internal/architecture/overview.md]\n  - VC-33: src/sqllens/agent/integrations/ contains anthropic, chromadb, local and mysql and no sqlite package [docs/internal/architecture/overview.md]\n  - VC-34: _SIDE_EFFECT_FUNCS has one entry, mysql, and for an unknown or None dialect the denylist is the mysql entry plus _ALWAYS_DENIED_FUNCS [docs/internal/database-connectors/read-only-safety.md]\n  - VC-35: Every dialect gets the same denylist [docs/internal/database-connectors/read-only-safety.md]\n  - VC-36: is_catalog_table treats a table as catalog only when its lower-cased schema qualifier is information_schema, mysql, sys or performance_schema; unqualified tables, table-valued functions and prefix-named tables are data [docs/internal/database-connectors/read-only-safety.md]\n  - VC-37: _CATALOGS_BY_DIALECT has one entry, mysql; with None or an unknown dialect the union applies; a dialect name sqlglot does not know is logged at WARNING and parsed as no dialect [docs/internal/database-connectors/read-only-safety.md]\n  - VC-38: is_introspection_query returns False on ParseError/TokenError or None parse (logged at INFO), True for a SHOW-led statement before any parse, and lets any other parser exception propagate [docs/internal/database-connectors/read-only-safety.md]\n  - VC-40: With read_only the MySQL runner executes SET SESSION TRANSACTION READ ONLY, sets MAX_EXECUTION_TIME unless statement_timeout_ms is 0, streams fetchmany(max_rows+1), and passes \"mysql\" to is_read_shaped [docs/internal/database-connectors/read-only-safety.md]\n  - VC-42: Whole-row guard allows t.* only for a catalog table per is_catalog_table (schema in the four MySQL catalogs) [docs/internal/database-connectors/read-only-safety.md]\n  - VC-43: The removed test classes TestSqliteReadOnlyUri / TestReadOnlyUriSpecialChars / TestSqliteConnectorReadOnlyEnforced no longer exist, and the remaining listed test classes do [docs/internal/database-connectors/read-only-safety.md]\n  - VC-44: relations.py has an entry only for mysql; any other dialect refuses a relation-referencing statement before querying, and its fail-closed message is \"could not verify relation types\" while mysql's adds \"or function calls\" [docs/internal/database-connectors/row-level-security.md]\n  - VC-45: The MySQL connector calls verify_base_tables on its execution connection when require_base_tables is true [docs/internal/database-connectors/row-level-security.md]\n  - VC-46: The cleanup-error-handling doc no longer refers to a SQLite runner, matching the removal of src/sqllens/agent/integrations/sqlite [docs/internal/database-connectors/cleanup-error-handling.md]\n  - VC-47: The MySQL runner's run_sql hands connect, the require_base_tables relation check, execute, fetchmany and close to run_blocking_sql, and only the MySQL runner remains. [docs/internal/mcp-server/transport.md]\n  - VC-48: database.statement_timeout_ms = 0 disables the MySQL statement timeout, and MAX_EXECUTION_TIME is applied only to SELECT. [docs/internal/mcp-server/transport.md]\n  - VC-49: The release smoke job runs sqllens --version, sqllens init into a temp dir, checks the url is mysql+pymysql://, runs sqllens validate without --check-db with a placeholder key, runs python -c 'import pymysql', and reads no repository file. [docs/internal/operations/ci-and-distribution.md]\n  - VC-50: The DatabaseConfig.url validator accepts only a scheme equal to mysql or starting with mysql+ (case-insensitive) and refuses sqlite://, mysqlx://, empty and no-:// URLs with the fixed message quoted. [docs/internal/setup/config-loading.md]\n  - VC-51: With read_only = true the MySQL connector sets SET SESSION TRANSACTION READ ONLY as a session backstop. [docs/internal/setup/config-loading.md]\n  - VC-52: DatabaseConfig.dialect strips any +driver suffix, mapping mysql+pymysql://... to mysql. [docs/internal/setup/config-loading.md]\n  - VC-53: probe_database raises PreflightError 'database.url is missing the '://' separator' for no separator and 'unsupported database scheme (expected mysql)' for a scheme not starting with mysql (sqlite included); any mysql-prefixed scheme including mysqlx goes to the MySQL branch. [docs/internal/setup/preflight.md]\n  - VC-54: probe_database runs no query of its own except the rule-set catalog check when [rule_sets] file is set. [docs/internal/setup/preflight.md]\n  - VC-55: The script creates a database named `Chinook`, and the demo config's `database.url` database segment and the user-creation init script's grants name that same database (case-sensitive on Linux MySQL). [examples/mysql-demo/Chinook_MySql.sql:25]\n  - VC-56: The compose file mounts Chinook_MySql.sql and the user-creation script into /docker-entrypoint-initdb.d in an order where the user grants apply to a database that exists (or grant works regardless of order), so both load on first start. [examples/mysql-demo/Chinook_MySql.sql]\n  - VC-57: The script's own header identifies Chinook version 1.4.5 by Luis Rocha, matching the upstream project, release and copyright the LICENSES/THIRD-PARTY.txt section cites. [examples/mysql-demo/Chinook_MySql.sql:3]\n  - VC-58: The data holds exactly 2 Album rows whose ArtistId belongs to the Artist named `AC/DC`, the expected answer the docs and README state. [examples/mysql-demo/Chinook_MySql.sql]\n  - VC-59: The mysql:8.0 image runs scripts under /docker-entrypoint-initdb.d once, in file-name order, only when the data volume is empty, so 01-chinook.sql loads before 02-demo-user.sql. [examples/mysql-demo/compose.yaml]\n  - VC-61: Chinook_MySql.sql creates a database named exactly `Chinook` with table `Album`, matching the GRANT in demo-user.sql, the healthcheck query and the demo config URL path /Chinook. [examples/mysql-demo/demo-user.sql]\n  - VC-62: The demo config's URL host/port/user/password/database (chinook_reader:chinook_reader@127.0.0.1:3306/Chinook) matches the compose port mapping and the user created in demo-user.sql. [examples/mysql-demo/sqllens.toml]\n  - VC-63: The demo user can read the Chinook database and nothing else. [examples/mysql-demo/demo-user.sql]\n  - VC-64: The container publishes MySQL on 127.0.0.1:3306 only, and the demo user can read Chinook and nothing else. [examples/mysql-demo/README.md]\n  - VC-65: `docker compose up -d --wait` returns once the service healthcheck reports healthy, i.e. once the database answers queries. [examples/mysql-demo/README.md]\n  - VC-67: `sqllens validate --check-db -c <file>` and `sqllens serve -c <file>` are valid CLI invocations. [examples/mysql-demo/README.md]\n  - VC-68: The mcpb README and manifest database_url description show only MySQL URLs, consistent with the DatabaseConfig.url validator accepting mysql and mysql+ schemes. [mcpb/manifest.json]\n  - VC-69: With 'sqlite' removed from _ENGINE_NAMES and _CATALOG_EXAMPLES, DefaultSystemPromptBuilder(dialect=\"sqlite\") raises ValueError rather than silently using the neutral prompt. [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-70: No remaining importer of sqllens.agent.integrations.SqliteRunner, sqllens.agent.integrations.sqlite, sqlite_path_from_url or connect_sqlite exists (e.g. preflight.py, tests), so deleting the module breaks no import. [src/sqllens/agent/integrations/__init__.py]\n  - VC-71: UNSUPPORTED_DATABASE_URL_MESSAGE and other config-referencing text no longer say SQLite URLs are still accepted, consistent with the tightened validator. [src/sqllens/config.py]\n  - VC-72: sqlalchemy make_url(...).database returns the raw database segment unchanged (e.g. 'sales.db', 'x.sqlite3', 'Chinook') and None or '' for a URL with no segment such as 'mysql://u:p@h/' [src/sqllens/installers/claude_desktop.py]\n  - VC-73: probe_database raises PreflightError('database', 'unsupported database scheme (expected mysql)') for a sqlite URL, now that the sqlite branch is removed, and no earlier code path in probe_database handles sqlite [src/sqllens/preflight.py]\n  - VC-74: preflight.py no longer uses contextlib or Path after removing _probe_sqlite, or still uses them elsewhere (no unused-import lint failure) [src/sqllens/preflight.py]\n  - VC-75: The preflight module docstring asserts the remaining probes are non-mutating [src/sqllens/preflight.py]\n  - VC-77: sqlglot_dialect_for_url still derives its dialects from _CATALOGS_BY_DIALECT keys and works with the value type changed from tuple to frozenset; returns None for sqlite URL [src/sqllens/safety/readonly.py]\n  - VC-78: No other module (whole_row.py, tools/_format.py, rule_sets, tests) still imports _ALL_CATALOG_NAME_PREFIXES, _cte_reference_ids, or unpacks _catalog_names as a tuple [src/sqllens/safety/readonly.py]\n  - VC-79: is_catalog_table docstring says every other table, unqualified ones included, is data [src/sqllens/safety/readonly.py]\n  - VC-80: Catalog comment says any dialect other than listed keys falls back to the union [src/sqllens/safety/readonly.py]\n  - VC-81: verify_base_tables with dialect='sqlite' raises RlsError without issuing a cursor query after the sqlite branch was removed from _verify_relations [src/sqllens/safety/relations.py]\n  - VC-82: relations.py comment: a kind in neither the view set nor base-table set is refused [src/sqllens/safety/relations.py]\n  - VC-83: safety/__init__.py says the per-runner statement timeout is SET SESSION MAX_EXECUTION_TIME on MySQL, a server-side bound [src/sqllens/safety/__init__.py]\n  - VC-84: safety/__init__.py still counts 'Seven orthogonal protections' and the list still has seven entries after merging the timeout bullet [src/sqllens/safety/__init__.py]\n  - VC-85: limits.py docstring: the MySQL runner calls effective_row_cap per query [src/sqllens/safety/limits.py]\n  - VC-87: Config with only [database] and [auth] mode='none' (no memory dir) loads and validate does not touch the filesystem beyond the tmp path [tests/unit/test_cli.py]\n  - VC-88: run_install raises InstallError for a sqlite db_url and writes nothing into working_dir or the config JSON [tests/unit/test_cli_claude_desktop.py]\n  - VC-89: base_options fixture's working_dir is a path under tmp that does not pre-exist with content, so the emptiness assertion is meaningful [tests/unit/test_cli_claude_desktop.py]\n  - VC-90: claude-desktop install CLI accepts --db, --working-dir and --config-path options [tests/unit/test_cli_claude_desktop.py]\n  - VC-91: build_sql_runner's ValueError message ends with '(expected mysql)' for sqlite and postgresql URLs [tests/unit/test_factory_wiring.py]\n  - VC-92: Removing test_validate_refuses_a_non_mysql_url leaves the rule-set 'need a MySQL database' check (if still in code) covered or dead, and a sqlite URL now fails earlier at config load [tests/unit/test_cli_rule_sets.py]\n  - VC-93: test_factory_wiring docstring: a symbol-led statement is not read-shaped under MySQL (a row count) [tests/unit/test_factory_wiring.py]\n  - VC-94: probe_database refuses sqlite:///:memory:, sqlite:///./demo.db and sqlite+pysqlite:///x.db with PreflightError subsystem 'database', detail exactly 'unsupported database scheme (expected mysql)' and no __cause__ [tests/unit/test_preflight.py]\n  - VC-95: _cfg_unvalidated_url builds a Config that bypasses the DatabaseConfig.url validator so a sqlite URL reaches probe_database [tests/unit/test_preflight.py]\n  - VC-96: sqlglot_dialect_for_url returns None for sqlite:///x.db and 'mysql' for mysql://, mysql+pymysql://, mysql+mysqldb:// and MySQL:// URLs [tests/unit/test_safety.py]\n  - VC-97: readonly.py exposes _SIDE_EFFECT_FUNCS with only a 'mysql' key, _ALWAYS_DENIED_FUNCS, and _denied_funcs(dialect) returning _SIDE_EFFECT_FUNCS['mysql'] | _ALWAYS_DENIED_FUNCS for None, mysql, sqlite and oracle [tests/unit/test_safety.py]\n  - VC-98: _catalog_names(dialect) returns {information_schema, mysql, sys, performance_schema} for None, mysql, sqlite and oracle, and _CATALOGS_BY_DIALECT has only a 'mysql' key [tests/unit/test_safety.py]\n  - VC-99: is_catalog_table(table, dialect=...) returns True for schema-qualified tables in the four MySQL catalog schemas (case-insensitive) and False for unqualified tables, prefix-named tables and table_info('t') [tests/unit/test_safety.py]\n  - VC-100: readonly.py has no module attributes _cte_reference_ids, traverse_scope, normalize_identifiers or _ALL_CATALOG_NAME_PREFIXES, and the test's hasattr checks stand for is_introspection_query/is_catalog_table calling neither traverse_scope nor normalize_identifiers [tests/unit/test_safety.py]\n  - VC-101: A config whose `database.url` scheme is `sqlite` or starts with `sqlite+` fails to load. #382's `DatabaseConfig.url` validator refuses it with its fixed unsupported-scheme message, which does not echo the URL. - `sqllens validate -c <file>` and `sqllens serve -c <file>` on such a config each exit 2. - A non-dry-run `sqllens claude-desktop install --db \"sqlite:///…\"` exits non-zero. It leaves `claude_desktop_config.json` unchanged and leaves no `sqllens.toml` or launcher from the attempt. [src/sqllens/config.py]\n  - VC-102: `build_sql_runner` raises `ValueError` for a `sqlite…://` URL, and `probe_database` raises `PreflightError` with subsystem `database` for one. In each message, the list of expected schemes names only MySQL. [docs/internal/setup/preflight.md]\n  - VC-103: `sqlglot_dialect_for_url` keeps its `-> str | None` signature. It returns `\"mysql\"` for `mysql://`, `mysql+pymysql://` and `mysql+mysqldb://` URLs, and `None` for a `sqlite:///x.db` URL. [src/sqllens/safety/readonly.py:176-197]\n  - VC-104: For every dialect, `_denied_funcs` returns the `mysql` entry's functions plus the always-denied functions, and `_catalog_names` returns `information_schema` plus the `mysql` entry's catalog schemas. Neither holds a SQLite function or name. [src/sqllens/safety/readonly.py]\n  - VC-105: Under dialect `None`, and under a dialect name sqlglot resolves but SQL Lens has no entry for (for example `\"oracle\"`), tests assert these outcomes: - `assert_select_only` still refuses, at minimum, `SELECT SLEEP(1)` and `SELECT load_file('/etc/passwd')` as denied functions. Each refusal is asserted with `pytest.raises(UnsafeSqlError, match=…)` naming the denied function. - `is_introspection_query` still returns `True` for `SELECT * FROM mysql.user` and `SELECT * FROM performance_schema.threads`. [tests/unit/test_safety.py]\n  - VC-106: `is_catalog_table` returns `True` only for a table whose schema qualifier, lower-cased with `str.lower()`, is `information_schema`, `mysql`, `sys` or `performance_schema`. It returns `False` for every other table, under every dialect: an unqualified table-valued function, an unqualified table, and a table whose name merely starts with some prefix. `is_introspection_query` and `is_catalog_table` call neither `traverse_scope` nor `normalize_identifiers`, and `src/sqllens/safety/readonly.py` defines no catalog name prefix and no `_cte_reference_ids`. [src/sqllens/safety/readonly.py]\n  - VC-107: The tests that existed only to check one of the following are deleted, not renamed or re-pointed: - a catalog name prefix; - a catalog-prefixed CTE; - another engine's catalog name being data; - a SQLite catalog or function under the union fallback; - `is_introspection_query`'s scope-analysis failure path. This covers whole tests and parametrized rows. At minimum it covers these, under whatever dialect or name #382 and #381 left them: - `test_scope_failure_excludes_no_cte`; - `test_catalog_prefixed_cte_is_data`; - `test_other_engine_catalogs_are_data`; - `test_no_dialect_counts_pragma_functions`; - the prefix rows of `test_own_engine_catalogs_detected`, `test_no_dialect_counts_every_engine` and `test_unknown_sqlglot_dialect_counts_every_engine` in `tests/unit/test_safety.py`; - the catalog-prefix \"documented limit\" rows (`sqlite_stuff`, and any `pg_` row left) in `test_allowed_dialect_specific_shapes` in `tests/unit/test_safety_whole_row.py`; - `test_other_engine_catalog_name_data_query_shown_and_clears_error` in `tests/unit/test_format.py`. [tests/unit/test_format.py]\n  - VC-108: `test_with_widgets_hides_introspection_result_under_configured_dialect` in `tests/unit/test_query_database.py` runs under a `mysql+pymysql://` URL. Its catalog statement is one only the `mysql` dialect classifies as introspection, for example `# note\\nSHOW TABLES`, which `is_introspection_query` classifies `True` under `\"mysql\"` and `False` under `None`. As a result, the test fails when the configured dialect does not reach the formatter. [tests/unit/test_query_database.py]\n  - VC-109: `verify_base_tables(connection, \"SELECT a FROM t\", dialect=\"sqlite\")` raises `RlsError` and issues no query on the connection's cursor. `DefaultSystemPromptBuilder(dialect=\"sqlite\")` raises `ValueError`. [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-110: `sqllens init` writes a config whose `database.url` is a `mysql+pymysql://` placeholder URL, and `sqllens validate` exits 0 on that file. [src/sqllens/cli.py]\n  - VC-111: A config with `database.url = mysql+pymysql://ci@127.0.0.1/ci` and at least one `[[rls]]` rule passes `sqllens validate -c <file>`, run without `--check-db` and with `SQLLENS_LLM__API_KEY` set: - It exits 0. - It opens no network connection. A test confirms this with every socket connect attempt made to fail. - The same config with an invalid `[[rls]]` rule still exits 2. [src/sqllens/cli.py:252-330]\n  - VC-112: For a MySQL URL whose database segment is a non-empty name, `derive_default_name` returns that name unchanged. The test cases include at minimum `Chinook`, `sales.db` and `x.sqlite3`. For a URL with no database segment, or one it cannot parse, it still returns `sqllens`. [src/sqllens/installers/claude_desktop.py]\n  - VC-113: Neither the empty root-level `demo.db` nor `examples/sqlite-demo/` is tracked. [demo.db]\n  - VC-115: The compose file runs the `mysql:8.0` image and loads `Chinook_MySql.sql` and the user-creation script on first start. It publishes MySQL to the host only by a port mapping bound to `127.0.0.1`, and it sets no `network_mode: host`. [examples/mysql-demo/compose.yaml:5-14]\n  - VC-117: `examples/mysql-demo/README.md` covers: - how to start and stop the container; - the sample questions; - how to change the published host port, with the matching edit to the demo config's URL, for when port 3306 is taken. [examples/mysql-demo/README.md:10-67]\n  - VC-119: The post-publish smoke job in `.github/workflows/release.yml` meets three conditions: - It reads no file under `examples/`. - It validates a config whose `database.url` is a MySQL URL. - It fails when `pymysql` cannot be imported in the smoke venv. [.github/workflows/release.yml]\n  - VC-120: `git grep -n -i -E 'sqlite|load_extension|pragma_'` over the tracked tree returns hits only in these 6 classes (complete by construction): 1. ChromaDB's `chroma.sqlite3` memory store, or the SQLite behavior of that file or of Python's stdlib `sqlite3` that ChromaDB relies on. 2. Text stating that SQLite is not supported or must not be added, such as the AGENTS.md engine rule. 3. Tests asserting either that a SQLite URL or the `\"sqlite\"` dialect is refused or unsupported, or that `derive_default_name` keeps a `.sqlite`/`.sqlite3` suffix. 4. Every `changelog.d` fragment, the removal PR's own `removed` fragment included. 5. `CHANGELOG.md` and `docs/external/release-notes.md`. 6. Dated historical records: `docs/internal/production-readiness-v0.1.0.md` and the README roadmap's completed Phase 1 line. Outside classes 4 to 6, no hit names a `sqlite-demo` path, `SqliteRunner`, `connect_sqlite`, `sqlite_path_from_url`, `_probe_sqlite` or `_readonly_uri`. [docs/internal/database-connectors/read-only-safety.md]\n  - VC-121: No README, `docs/external/` or `docs/internal/` page refers to a demo database or example file that the repository does not ship after the change. The Docker-started `examples/mysql-demo` database counts as the shipped demo database. The exceptions are `docs/external/release-notes.md` and the class 6 historical records. [docs/internal/architecture/overview.md]\n  - VC-123: Database-URL examples show only MySQL URLs (`mysql://` or `mysql+<driver>://`). This holds at minimum in: - the README URL table; - `docs/external/configuration.md`; - `docs/external/getting-started.md`; - the Windows guide's URL table; - the `database_url` description in `mcpb/manifest.json`; - `mcpb/README.md`. [docs/external/configuration.md]\n  - VC-124: These describe a system catalog only as a table in `information_schema`, `mysql`, `sys` or `performance_schema`, and none of them describes a catalog name prefix, a catalog table-valued function, or a CTE exclusion with its scope-analysis failure path: - the docstrings of `is_introspection_query` and `is_catalog_table`; - the catalog comment in `src/sqllens/safety/readonly.py`; - the `src/sqllens/safety/whole_row.py` module docstring; - `docs/internal/database-connectors/read-only-safety.md`; - the `refuse_whole_row_selects` row and the schema-introspection note in `docs/external/configuration.md`. [docs/external/configuration.md]\n  - VC-125: AGENTS.md meets these conditions: - It describes no SQLite query-engine code, demo or test as still present in the repository. - In its sqlglot rule, the `is_introspection_query` sentence describes no identifier-normalization or scope-analysis failure path. - Its debugging checklist step 1 directs reproduction against MySQL 8.0+ and names `examples/mysql-demo` as a ready local MySQL. - The rules forbidding new SQLite or other-engine support, and the ChromaDB bullet, keep their meaning. [AGENTS.md]\n  - VC-126: `src/sqllens/agent/integrations/mysql/sql_runner.py` states in its own text why it uses the shared `effective_row_cap`/`rows_to_capped_df` helper: a per-request profile can narrow the row cap without rebuilding the agent. It no longer points to the SQLite runner for that rationale. [src/sqllens/agent/integrations/mysql/sql_runner.py]\n  - VC-127: The removal PR leaves every `changelog.d` fragment on its base byte-for-byte unchanged and adds a `changelog.d/<PR>.removed.md` fragment. That fragment states: - that SQLite query-engine support and the SQLite demo were removed; - that a `sqlite` `database.url` is now refused at config load; - that operators should point `database.url` at a MySQL 8.0+ server with a `mysql://` or `mysql+<driver>://` URL (for example `mysql+pymysql://`); - that pipelines running `sqllens validate` without `--check-db` on a `sqlite:///…` stand-in should use a MySQL URL instead, for example `mysql+pymysql://ci@127.0.0.1/ci`, which needs no running server; - that the demo is now `examples/mysql-demo` and needs Docker; - that `SqliteRunner` is no longer exported; - that earlier entries in the same release describing SQLite as a query engine no longer apply; - that the ChromaDB memory store is unaffected. [changelog.d/410.removed.md]\n  - VC-128: The change leaves these surfaces unchanged, exactly these 4 (complete by construction): - ChromaDB; - its `chroma.sqlite3` store; - `probe_memory` and its writability check on that file; - Python's stdlib `sqlite3` in the Docker runtime image. [docker/Dockerfile]\n\n  </details>\n- Reviewed against issue #383 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] A config whose `database.url` scheme is `sqlite` or starts with `sqlite+` fails to load. #382's `DatabaseConfig.url` validator refuses it with its fixed unsupported-scheme message, which does not echo the URL. - `sqllens validate -c <file>` and `sqllens serve -c <file>` on such a config each exit 2. - A non-dry-run `sqllens claude-desktop install --db \"sqlite:///…\"` exits non-zero. It leaves `claude_desktop_config.json` unchanged and leaves no `sqllens.toml` or launcher from the attempt.\n- [ ] `build_sql_runner` raises `ValueError` for a `sqlite…://` URL, and `probe_database` raises `PreflightError` with subsystem `database` for one. In each message, the list of expected schemes names only MySQL.\n- [ ] `sqlglot_dialect_for_url` keeps its `-> str | None` signature. It returns `\"mysql\"` for `mysql://`, `mysql+pymysql://` and `mysql+mysqldb://` URLs, and `None` for a `sqlite:///x.db` URL.\n- [ ] For every dialect, `_denied_funcs` returns the `mysql` entry's functions plus the always-denied functions, and `_catalog_names` returns `information_schema` plus the `mysql` entry's catalog schemas. Neither holds a SQLite function or name.\n- [ ] Under dialect `None`, and under a dialect name sqlglot resolves but SQL Lens has no entry for (for example `\"oracle\"`), tests assert these outcomes: - `assert_select_only` still refuses, at minimum, `SELECT SLEEP(1)` and `SELECT load_file('/etc/passwd')` as denied functions. Each refusal is asserted with `pytest.raises(UnsafeSqlError, match=…)` naming the denied function. - `is_introspection_query` still returns `True` for `SELECT * FROM mysql.user` and `SELECT * FROM performance_schema.threads`.\n- [ ] `is_catalog_table` returns `True` only for a table whose schema qualifier, lower-cased with `str.lower()`, is `information_schema`, `mysql`, `sys` or `performance_schema`. It returns `False` for every other table, under every dialect: an unqualified table-valued function, an unqualified table, and a table whose name merely starts with some prefix. `is_introspection_query` and `is_catalog_table` call neither `traverse_scope` nor `normalize_identifiers`, and `src/sqllens/safety/readonly.py` defines no catalog name prefix and no `_cte_reference_ids`.\n- [ ] The tests that existed only to check one of the following are deleted, not renamed or re-pointed: - a catalog name prefix; - a catalog-prefixed CTE; - another engine's catalog name being data; - a SQLite catalog or function under the union fallback; - `is_introspection_query`'s scope-analysis failure path. This covers whole tests and parametrized rows. At minimum it covers these, under whatever dialect or name #382 and #381 left them: - `test_scope_failure_excludes_no_cte`; - `test_catalog_prefixed_cte_is_data`; - `test_other_engine_catalogs_are_data`; - `test_no_dialect_counts_pragma_functions`; - the prefix rows of `test_own_engine_catalogs_detected`, `test_no_dialect_counts_every_engine` and `test_unknown_sqlglot_dialect_counts_every_engine` in `tests/unit/test_safety.py`; - the catalog-prefix \"documented limit\" rows (`sqlite_stuff`, and any `pg_` row left) in `test_allowed_dialect_specific_shapes` in `tests/unit/test_safety_whole_row.py`; - `test_other_engine_catalog_name_data_query_shown_and_clears_error` in `tests/unit/test_format.py`.\n- [ ] `test_with_widgets_hides_introspection_result_under_configured_dialect` in `tests/unit/test_query_database.py` runs under a `mysql+pymysql://` URL. Its catalog statement is one only the `mysql` dialect classifies as introspection, for example `# note\\nSHOW TABLES`, which `is_introspection_query` classifies `True` under `\"mysql\"` and `False` under `None`. As a result, the test fails when the configured dialect does not reach the formatter.\n- [ ] `verify_base_tables(connection, \"SELECT a FROM t\", dialect=\"sqlite\")` raises `RlsError` and issues no query on the connection's cursor. `DefaultSystemPromptBuilder(dialect=\"sqlite\")` raises `ValueError`.\n- [ ] `sqllens init` writes a config whose `database.url` is a `mysql+pymysql://` placeholder URL, and `sqllens validate` exits 0 on that file.\n- [ ] A config with `database.url = mysql+pymysql://ci@127.0.0.1/ci` and at least one `[[rls]]` rule passes `sqllens validate -c <file>`, run without `--check-db` and with `SQLLENS_LLM__API_KEY` set: - It exits 0. - It opens no network connection. A test confirms this with every socket connect attempt made to fail. - The same config with an invalid `[[rls]]` rule still exits 2.\n- [ ] For a MySQL URL whose database segment is a non-empty name, `derive_default_name` returns that name unchanged. The test cases include at minimum `Chinook`, `sales.db` and `x.sqlite3`. For a URL with no database segment, or one it cannot parse, it still returns `sqllens`.\n- [ ] Neither the empty root-level `demo.db` nor `examples/sqlite-demo/` is tracked.\n- [ ] `examples/mysql-demo/` holds a `sqllens.toml`, a Docker Compose file, a `README.md`, the user-creation init script and `Chinook_MySql.sql`. `.gitattributes` exempts `Chinook_MySql.sql` from line-ending normalization. Both the committed blob (`git cat-file -p HEAD:examples/mysql-demo/Chinook_MySql.sql`) and the checked-out file have SHA-256 `02a1835417c3ea19bff64e1d1f22be738ce51b3f88b0473c24eebff9a3ccde4b` and are 616,450 bytes.\n- [ ] The compose file runs the `mysql:8.0` image and loads `Chinook_MySql.sql` and the user-creation script on first start. It publishes MySQL to the host only by a port mapping bound to `127.0.0.1`, and it sets no `network_mode: host`.\n- [ ] With `SQLLENS_LLM__API_KEY` set: 1. Start the demo container with `docker compose` from a fresh checkout and wait until it is ready. 2. Run `sqllens validate --check-db -c examples/mysql-demo/sqllens.toml`. It exits 0. 3. Query the demo database as the demo config's user for the number of albums whose artist is `AC/DC`. It returns 2. The demo config keeps `read_only = true`, and its ChromaDB `persist_dir` lies under `examples/mysql-demo/`. A run that cannot use Docker ends Blocked on this criterion.\n- [ ] `examples/mysql-demo/README.md` covers: - how to start and stop the container; - the sample questions; - how to change the published host port, with the matching edit to the demo config's URL, for when port 3306 is taken.\n- [ ] `LICENSES/THIRD-PARTY.txt` has a section for `examples/mysql-demo/Chinook_MySql.sql`. The section names the upstream project, the v1.4.5 release and its URL, and it carries the upstream copyright line and permission notice verbatim.\n- [ ] The post-publish smoke job in `.github/workflows/release.yml` meets three conditions: - It reads no file under `examples/`. - It validates a config whose `database.url` is a MySQL URL. - It fails when `pymysql` cannot be imported in the smoke venv.\n- [ ] `git grep -n -i -E 'sqlite|load_extension|pragma_'` over the tracked tree returns hits only in these 6 classes (complete by construction): 1. ChromaDB's `chroma.sqlite3` memory store, or the SQLite behavior of that file or of Python's stdlib `sqlite3` that ChromaDB relies on. 2. Text stating that SQLite is not supported or must not be added, such as the AGENTS.md engine rule. 3. Tests asserting either that a SQLite URL or the `\"sqlite\"` dialect is refused or unsupported, or that `derive_default_name` keeps a `.sqlite`/`.sqlite3` suffix. 4. Every `changelog.d` fragment, the removal PR's own `removed` fragment included. 5. `CHANGELOG.md` and `docs/external/release-notes.md`. 6. Dated historical records: `docs/internal/production-readiness-v0.1.0.md` and the README roadmap's completed Phase 1 line. Outside classes 4 to 6, no hit names a `sqlite-demo` path, `SqliteRunner`, `connect_sqlite`, `sqlite_path_from_url`, `_probe_sqlite` or `_readonly_uri`.\n- [ ] No README, `docs/external/` or `docs/internal/` page refers to a demo database or example file that the repository does not ship after the change. The Docker-started `examples/mysql-demo` database counts as the shipped demo database. The exceptions are `docs/external/release-notes.md` and the class 6 historical records.\n- [ ] Each first-run walkthrough lists Docker with Compose and an Anthropic API key as prerequisites. It starts the `examples/mysql-demo` container and points SQL Lens at it through a `mysql+pymysql://` URL. It keeps the Chinook sample questions, and wherever it asks the AC/DC question it states the expected answer, 2 albums. The walkthroughs are, at minimum: - the README quick start; - step 2 of `docs/external/getting-started.md`; - the fast path and the manual install in `docs/external/install-claude-desktop-windows.md`. Where these pages explain connecting to the reader's own database, they say SQL Lens needs a MySQL 8.0+ server. The README quick-start heading, the getting-started introduction and `docs/external/index.md` no longer promise a 60-second or under-a-minute first run. Any first-run duration they state includes pulling the `mysql:8.0` image and loading the demo.\n- [ ] Database-URL examples show only MySQL URLs (`mysql://` or `mysql+<driver>://`). This holds at minimum in: - the README URL table; - `docs/external/configuration.md`; - `docs/external/getting-started.md`; - the Windows guide's URL table; - the `database_url` description in `mcpb/manifest.json`; - `mcpb/README.md`.\n- [ ] These describe a system catalog only as a table in `information_schema`, `mysql`, `sys` or `performance_schema`, and none of them describes a catalog name prefix, a catalog table-valued function, or a CTE exclusion with its scope-analysis failure path: - the docstrings of `is_introspection_query` and `is_catalog_table`; - the catalog comment in `src/sqllens/safety/readonly.py`; - the `src/sqllens/safety/whole_row.py` module docstring; - `docs/internal/database-connectors/read-only-safety.md`; - the `refuse_whole_row_selects` row and the schema-introspection note in `docs/external/configuration.md`.\n- [ ] AGENTS.md meets these conditions: - It describes no SQLite query-engine code, demo or test as still present in the repository. - In its sqlglot rule, the `is_introspection_query` sentence describes no identifier-normalization or scope-analysis failure path. - Its debugging checklist step 1 directs reproduction against MySQL 8.0+ and names `examples/mysql-demo` as a ready local MySQL. - The rules forbidding new SQLite or other-engine support, and the ChromaDB bullet, keep their meaning.\n- [ ] `src/sqllens/agent/integrations/mysql/sql_runner.py` states in its own text why it uses the shared `effective_row_cap`/`rows_to_capped_df` helper: a per-request profile can narrow the row cap without rebuilding the agent. It no longer points to the SQLite runner for that rationale.\n- [ ] The removal PR leaves every `changelog.d` fragment on its base byte-for-byte unchanged and adds a `changelog.d/<PR>.removed.md` fragment. That fragment states: - that SQLite query-engine support and the SQLite demo were removed; - that a `sqlite` `database.url` is now refused at config load; - that operators should point `database.url` at a MySQL 8.0+ server with a `mysql://` or `mysql+<driver>://` URL (for example `mysql+pymysql://`); - that pipelines running `sqllens validate` without `--check-db` on a `sqlite:///…` stand-in should use a MySQL URL instead, for example `mysql+pymysql://ci@127.0.0.1/ci`, which needs no running server; - that the demo is now `examples/mysql-demo` and needs Docker; - that `SqliteRunner` is no longer exported; - that earlier entries in the same release describing SQLite as a query engine no longer apply; - that the ChromaDB memory store is unaffected.\n- [ ] The change leaves these surfaces unchanged, exactly these 4 (complete by construction): - ChromaDB; - its `chroma.sqlite3` store; - `probe_memory` and its writability check on that file; - Python's stdlib `sqlite3` in the Docker runtime image.",
+ "diff_produced_at_head": "22d3078d32609b9a9d12471accbd3427d3651f12",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:release.yml:init-path-mysql-template",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:release.yml:validate-no-connect",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "api_contract:release.yml:pymysql-in-wheel",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:README.md:compose-wait-healthcheck",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "data_format_assumption:getting-started.md:demo-user-url",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "data_format_assumption:README.md:demo-url-match",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:410.removed.md:refusal-message",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:410.removed.md:sqliterunner-export",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "absolute_claim:configuration.md:validate-no-connection",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "absolute_claim:configuration.md:catalog-hidden",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "data_format_assumption:configuration.md:whole-row-catalog",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "dependency_interaction:configuration.md:timeout-zero",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "dependency_interaction:configuration.md:check-db",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "api_contract:getting-started.md:demo-readme-links",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "absolute_claim:getting-started.md:reader-only-chinook",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "data_format_assumption:README.md:acdc-two-albums",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:AGENTS.md:no-other-engine",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:AGENTS.md:introspection-failure-path",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "api_contract:install-claude-desktop-windows.md:demo-download-file-set",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "data_format_assumption:install-claude-desktop-windows.md:demo-url-credentials",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "api_contract:install-claude-desktop-windows.md:compose-wait-ready",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "dependency_interaction:install-claude-desktop-windows.md:reader-read-only-grant",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "dependency_interaction:install-claude-desktop-windows.md:derive-default-name",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "dependency_interaction:claude-desktop-installer.md:derive-default-name",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "dependency_interaction:claude-desktop-windows-install.md:derive-default-name",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "api_contract:claude-desktop-windows-install.md:demo-download-file-set",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "dependency_interaction:factory.md:build-sql-runner-scheme",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "dependency_interaction:factory.md:config-url-validator",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "dependency_interaction:factory.md:dialect-for-url",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-30",
+   "claim_signature": "dependency_interaction:factory.md:demo-config-model",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-31",
+   "claim_signature": "api_contract:overview.md:gitattributes-chinook-text",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "api_contract:overview.md:third-party-chinook",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "dependency_interaction:overview.md:integrations-list",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "dependency_interaction:read-only-safety.md:denylist-union",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "absolute_claim:read-only-safety.md:same-denylist-every-dialect",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "dependency_interaction:read-only-safety.md:catalog-schema-only",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-37",
+   "claim_signature": "dependency_interaction:read-only-safety.md:catalogs-by-dialect",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-38",
+   "claim_signature": "dependency_interaction:read-only-safety.md:introspection-fail-open",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-39",
+   "category": "dependency_interaction",
+   "claim": "From sqlglot 30.22 the MySQL tokenizer ends a block comment at the first */",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "docs/internal/database-connectors/read-only-safety.md",
+   "verify_against": "sqlglot MySQL tokenizer in the installed dependency",
+   "verify_hint": "Check sqlglot/dialects/mysql.py Tokenizer comment handling",
+   "claim_signature": "dependency_interaction:read-only-safety.md:block-comment-end",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-21"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim is the last sentence of docs/internal/database-connectors/read-only-safety.md:54 ('From 30.22 the MySQL tokenizer also ends a block comment at the first */, as MySQL does.'). It is a library claim, but the item has no dependency_sources and the views contain no sqlglot source (Glob for **/sqlglot* in the head view found nothing). The claim cannot be verified from the views alone. Not run: reading sqlglot 30.22's sqlglot/dialects/mysql.py (and tokens.py) block-comment handling, and comparing it with the pre-30.22 release.",
+   "file_checked": "docs/internal/database-connectors/read-only-safety.md:54",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-40",
+   "claim_signature": "dependency_interaction:read-only-safety.md:mysql-runner-session",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-41",
+   "category": "dependency_interaction",
+   "claim": "DESCRIBE parses as exp.Command (rejected) under the guard; with PRAGMA dropped the doc still lists every rejected introspection form",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "docs/internal/database-connectors/read-only-safety.md",
+   "verify_against": "src/sqllens/safety/readonly.py",
+   "verify_hint": "Check assert_select_only root-type check for DESCRIBE under mysql",
+   "claim_signature": "dependency_interaction:read-only-safety.md:describe-rejected",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-23"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Behavior: DESCRIBE is rejected under mysql. assert_select_only (src/sqllens/safety/readonly.py:545-560) raises UnsafeSqlError for any root not in _ALLOWED_ROOT_TYPES (:276-282). But the claim's mechanism is inaccurate: sqlglot (.venv/lib/python3.12/site-packages/sqlglot/parser.py:1203 STATEMENT_PARSERS TokenType.DESCRIBE -> _parse_describe, :3641 returns exp.Describe; mysql.py has no override, only EXPLAIN->DESCRIBE at :106) parses DESCRIBE to exp.Describe, not exp.Command. The doc line docs/internal/database-connectors/read-only-safety.md:61 says DESCRIBE and non-allowlisted SHOW 'parse as exp.Command / non-allowlisted exp.Show roots', which is imprecise for DESCRIBE (outcome, rejection, is right). That line is text the PR changed (base also mentions DESCRIBE at base line 62 with PRAGMA), so it is not a usable requirement source, and no unchanged file requires the claimed Command parse; so neither FAIL nor INVALID can be established. Whether other introspection forms are fully listed was not exhaustively checked; the doc lists DESCRIBE and non-allowlisted SHOW (and CALL at :58).",
+   "file_checked": "src/sqllens/safety/readonly.py:545-560",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-42",
+   "claim_signature": "dependency_interaction:read-only-safety.md:whole-row-catalog",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-43",
+   "claim_signature": "api_contract:read-only-safety.md:test-class-list",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-44",
+   "claim_signature": "dependency_interaction:row-level-security.md:relations-dialect-entries",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-45",
+   "claim_signature": "dependency_interaction:row-level-security.md:mysql-verify-base-tables",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-46",
+   "claim_signature": "api_contract:cleanup-error-handling.md:no-sqlite-runner",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-47",
+   "claim_signature": "dependency_interaction:transport.md:mysql-runner-blocking-offload",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-48",
+   "claim_signature": "dependency_interaction:transport.md:statement-timeout-zero",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-49",
+   "claim_signature": "api_contract:ci-and-distribution.md:smoke-job-steps",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-50",
+   "claim_signature": "api_contract:config-loading.md:url-scheme-validator",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-51",
+   "claim_signature": "dependency_interaction:config-loading.md:mysql-readonly-session",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-52",
+   "claim_signature": "data_format_assumption:config-loading.md:dialect-property",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-53",
+   "claim_signature": "api_contract:preflight.md:probe-scheme-messages",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-54",
+   "claim_signature": "dependency_interaction:preflight.md:probe-no-query",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-55",
+   "claim_signature": "data_format_assumption:Chinook_MySql.sql:database name matches config:25",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-56",
+   "claim_signature": "api_contract:Chinook_MySql.sql:initdb load order",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-57",
+   "claim_signature": "data_format_assumption:Chinook_MySql.sql:upstream version attribution",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-58",
+   "claim_signature": "data_format_assumption:Chinook_MySql.sql:acdc two albums",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-59",
+   "claim_signature": "dependency_interaction:compose.yaml:initdb-script-order",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-60",
+   "category": "dependency_interaction",
+   "claim": "During first-start loading the mysql image runs a temporary server with no TCP listener, so the TCP healthcheck as chinook_reader against Chinook.Album only passes after both init scripts finished.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# Over TCP and against Chinook: during first-start loading the image runs\n      # a temporary server with no TCP listener, so a socket ping would report\n      # healthy before the data and the demo user exist.",
+   "source_file": "examples/mysql-demo/compose.yaml",
+   "verify_against": "mysql:8.0 image docker-entrypoint.sh (temporary server started with --skip-networking)",
+   "verify_hint": "Trace the healthcheck test in compose.yaml against the image entrypoint's temporary server startup",
+   "claim_signature": "dependency_interaction:compose.yaml:healthcheck-tcp-readiness",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch5:VC-2"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "examples/mysql-demo/compose.yaml:16-31 matches the claim's text: the healthcheck runs `mysql -h127.0.0.1 -uchinook_reader -pchinook_reader -e 'SELECT 1 FROM Chinook.Album LIMIT 1'`, i.e. over TCP, as the demo user, against Chinook. The claim's truth depends on the mysql:8.0 image's docker-entrypoint.sh starting its temporary server with --skip-networking. No dependency_sources were supplied and a Glob for docker-entrypoint.sh in the head view found none, so I could not read the entrypoint. I did not run the image or inspect it with docker. I recall the upstream entrypoint using --skip-networking, but that is not evidence I read.",
+   "file_checked": "examples/mysql-demo/compose.yaml:16-31",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-61",
+   "claim_signature": "data_format_assumption:demo-user.sql:chinook-database-name",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-62",
+   "claim_signature": "api_contract:sqllens.toml:demo-url-matches-compose",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-63",
+   "claim_signature": "absolute_claim:demo-user.sql:reads-nothing-else",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-64",
+   "claim_signature": "absolute_claim:README.md:loopback-only-read-only",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-65",
+   "claim_signature": "dependency_interaction:README.md:compose-wait-healthy",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-66",
+   "category": "api_contract",
+   "claim": "The first question creates ./examples/mysql-demo/chroma/ for ChromaDB memory, matching the demo config's persist_dir resolved relative to the repository root.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "examples/mysql-demo/README.md",
+   "verify_against": "examples/mysql-demo/sqllens.toml [memory] persist_dir and ChromaAgentMemory construction",
+   "verify_hint": "Check persist_dir in sqllens.toml and when ChromaAgentMemory in src/sqllens/agent/integrations/chromadb creates the directory (lazy vs boot)",
+   "claim_signature": "api_contract:README.md:chroma-dir-first-question",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch5:VC-8"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "README.md:42-44 says the first question creates ./examples/mysql-demo/chroma/. sqllens.toml:24 sets persist_dir = \"./examples/mysql-demo/chroma\" (cwd-relative; matches only when run from repo root, as the README commands do). ChromaAgentMemory is lazy: __init__ (agent_memory.py:107-128) does no I/O and PersistentClient is only created in _get_client (:136-152). But the documented command `sqllens serve -c examples/mysql-demo/sqllens.toml` runs run_preflight(cfg) by default (cli.py:241-249) before run(cfg); run_preflight runs probe_memory (preflight.py:245-257), which does persist_dir.mkdir(parents=True, exist_ok=True) (preflight.py:188). So the directory is created at serve startup (and by validate --check-memory), before any question; the first question is not what creates it. Only the Chroma store files inside would be created lazily at first touch. Repo rule AGENTS.md 'Claims must match the code' / 'Boot vs. lazy / first-call' requires behavioral doc claims to match the code; text unchanged in base and head.",
+   "file_checked": "examples/mysql-demo/README.md:42-44",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-67",
+   "claim_signature": "dependency_interaction:README.md:cli-flags",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-68",
+   "claim_signature": "api_contract:manifest.json:mysql-url-examples",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-69",
+   "claim_signature": "api_contract:default.py:unknown-dialect-raises",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-70",
+   "claim_signature": "api_contract:__init__.py:no-sqlite-importers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-71",
+   "claim_signature": "api_contract:config.py:unsupported-message-text",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-72",
+   "claim_signature": "dependency_interaction:claude_desktop.py:make-url-database-segment",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-73",
+   "claim_signature": "issue_acceptance:preflight.py:probe-database-sqlite-refused",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-74",
+   "claim_signature": "dependency_interaction:preflight.py:unused-imports",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-75",
+   "claim_signature": "absolute_claim:preflight.py:remaining-probes-non-mutating",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-76",
+   "category": "dependency_interaction",
+   "claim": "sqlglot exp.Table.db returns the schema qualifier name as a string (empty when unqualified) for MySQL-parsed tables, including quoted identifiers",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/safety/readonly.py",
+   "verify_against": "sqlglot expressions.Table.db property in the locked sqlglot version",
+   "verify_hint": "Check Table.db in sqlglot/expressions.py",
+   "claim_signature": "dependency_interaction:readonly.py:table-db-property",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch6:VC-9"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The item has no dependency_sources. A Glob for **/sqlglot*/**/expressions* in the head view found nothing, and a Glob for **/sqlglot/expressions.py over / found nothing. I could not read Table.db in the locked sqlglot version. The use site is src/sqllens/safety/readonly.py:273, `(table.db or \"\").lower()`, which tolerates an empty value. Whether Table.db returns a string for quoted MySQL identifiers is unverified.",
+   "file_checked": "src/sqllens/safety/readonly.py:273",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-77",
+   "claim_signature": "issue_acceptance:readonly.py:dialect-for-url",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-78",
+   "claim_signature": "api_contract:readonly.py:removed-helper-callers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-79",
+   "claim_signature": "absolute_claim:readonly.py:unqualified-is-data",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-80",
+   "claim_signature": "absolute_claim:readonly.py:union-fallback",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-81",
+   "claim_signature": "issue_acceptance:relations.py:sqlite-dialect-refused",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-82",
+   "claim_signature": "absolute_claim:relations.py:unknown-kind-refused",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-83",
+   "claim_signature": "absolute_claim:__init__.py:mysql-statement-timeout",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-84",
+   "claim_signature": "api_contract:__init__.py:protection-count",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-85",
+   "claim_signature": "absolute_claim:limits.py:mysql-calls-per-query",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-86",
+   "category": "test_mock_alignment",
+   "claim": "Patching socket.socket.connect and connect_ex catches every network connect validate could make (pymysql and any LLM/HTTP client use socket.socket.connect, not create_connection on a subclass bypassing it)",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_cli.py",
+   "verify_against": "pymysql connections.Connection.connect and stdlib socket.create_connection",
+   "verify_hint": "Check pymysql/connections.py connect() and socket.create_connection call sock.connect",
+   "criterion": 11,
+   "claim_signature": "test_mock_alignment:test_cli.py:socket-connect-patch",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch6:VC-21"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "tests/unit/test_cli.py:143-169 patches socket.socket.connect and connect_ex with a refusing stub (lines 157-158) and asserts no attempts during `validate` without --check-db. The claim depends on how pymysql (connections.py connect()) and stdlib socket.create_connection behave at runtime. The item has no dependency_sources, and no pymysql or stdlib source is in the views, so I could not read them as the rules require. Copies of pymysql exist in other venvs on the host, but those are outside the supplied views and dependency_sources, so I did not use them. The claim is also absolute (every network connect, any LLM/HTTP client). Async or C-level clients may not route through the patched Python-level methods. I did not trace those clients. Missing evidence: pymysql and stdlib socket source via dependency_sources.",
+   "file_checked": "tests/unit/test_cli.py:143-169",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-87",
+   "claim_signature": "api_contract:test_cli.py:minimal-config-validates",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-88",
+   "claim_signature": "issue_acceptance:test_cli_claude_desktop.py:install-sqlite-refused",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-89",
+   "claim_signature": "test_mock_alignment:test_cli_claude_desktop.py:base-options-workdir",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-90",
+   "claim_signature": "api_contract:test_cli_claude_desktop.py:install-cli-options",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-91",
+   "claim_signature": "issue_acceptance:test_factory_wiring.py:build-sql-runner-message",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-92",
+   "claim_signature": "api_contract:test_cli_rule_sets.py:need-mysql-check",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-93",
+   "claim_signature": "absolute_claim:test_factory_wiring.py:symbol-led-row-count",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-94",
+   "claim_signature": "api_contract:test_preflight.py:non-mysql-scheme-detail",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-95",
+   "claim_signature": "test_mock_alignment:test_preflight.py:unvalidated-url-helper",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-96",
+   "claim_signature": "api_contract:test_safety.py:dialect-for-url",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-97",
+   "claim_signature": "dependency_interaction:test_safety.py:denied-funcs-union",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-98",
+   "claim_signature": "dependency_interaction:test_safety.py:catalog-names-set",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-99",
+   "claim_signature": "api_contract:test_safety.py:is-catalog-table-schema-only",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-100",
+   "claim_signature": "dependency_interaction:test_safety.py:no-scope-analysis",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-101",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-102",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-103",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-104",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-105",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-106",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-107",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-108",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-109",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-110",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-111",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-12",
+   "id": "VC-112",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-13",
+   "id": "VC-113",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "`examples/mysql-demo/` holds a `sqllens.toml`, a Docker Compose file, a `README.md`, the user-creation init script and `Chinook_MySql.sql`. `.gitattributes` exempts `Chinook_MySql.sql` from line-ending normalization. Both the committed blob (`git cat-file -p HEAD:examples/mysql-demo/Chinook_MySql.sql`) and the checked-out file have SHA-256 `02a1835417c3ea19bff64e1d1f22be738ce51b3f88b0473c24eebff9a3ccde4b` and are 616,450 bytes.",
+   "claim_signature": "issue-acceptance-14",
+   "criteria_file": ".prflow/tmp/review/pr-410/local-20261117T095601Z-1/criteria.json",
+   "source_file": ".gitattributes",
+   "verify_hint": "Check the `-text` attribute line overrides `* text=auto eol=lf`",
+   "id": "VC-114",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Verified: head inventory.json lists examples/mysql-demo/{Chinook_MySql.sql (blob, size 616450), README.md, compose.yaml, demo-user.sql, sqllens.toml}; .gitattributes:4 has '* text=auto eol=lf' and :7 'examples/mysql-demo/Chinook_MySql.sql -text', which is a later, more specific line and exempts the file from normalization. Criterion 14 counts (criteria.json has criterion 14 as a {criterion,text} object). Not verified: the SHA-256 02a18354...de4b of the committed blob and the checked-out file. I have no tool to hash the file (no shell; the 616,450-byte file cannot be hashed by reading), and inventory.json lists only the git blob SHA-1 cdbd482f..., not a SHA-256. The command not run is `git cat-file -p HEAD:examples/mysql-demo/Chinook_MySql.sql | sha256sum` plus `sha256sum` on the working file. Size matches 616450.",
+   "file_checked": ".gitattributes:7",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-15",
+   "id": "VC-115",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "With `SQLLENS_LLM__API_KEY` set: 1. Start the demo container with `docker compose` from a fresh checkout and wait until it is ready. 2. Run `sqllens validate --check-db -c examples/mysql-demo/sqllens.toml`. It exits 0. 3. Query the demo database as the demo config's user for the number of albums whose artist is `AC/DC`. It returns 2. The demo config keeps `read_only = true`, and its ChromaDB `persist_dir` lies under `examples/mysql-demo/`. A run that cannot use Docker ends Blocked on this criterion.",
+   "claim_signature": "issue-acceptance-16",
+   "criteria_file": ".prflow/tmp/review/pr-410/local-20261117T095601Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-410/local-20261117T095601Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: With `SQLLENS_LLM__API_KEY` set: 1. Start the demo container with `docker compose` from a fresh checkout and wait until it is ready. 2. Run `sqllens validate --check-db -c examples/mysql-demo/sqllens.toml`. It exits 0. 3. Query the demo database as the demo config's user for the number of albums whose artist is `AC/DC`. It returns 2. The demo config keeps `read_only = true`, and its ChromaDB `persist_dir` lies under `examples/mysql-demo/`. A run that cannot use Docker ends Blocked on this criterion.",
+   "id": "VC-116",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Static parts verified in examples/mysql-demo/sqllens.toml: read_only = true (line 16), persist_dir = \"./examples/mysql-demo/chroma\" (line 24). Files present: compose.yaml, Chinook_MySql.sql, demo-user.sql, README.md. The runtime steps (docker compose start, `sqllens validate --check-db` exit 0, AC/DC album count = 2) require Docker and an API key; I did not run them. Per the criterion, a run that cannot use Docker ends Blocked. Criteria file not separately relied on.",
+   "file_checked": "examples/mysql-demo/sqllens.toml:16,24",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-17",
+   "id": "VC-117",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "`LICENSES/THIRD-PARTY.txt` has a section for `examples/mysql-demo/Chinook_MySql.sql`. The section names the upstream project, the v1.4.5 release and its URL, and it carries the upstream copyright line and permission notice verbatim.",
+   "claim_signature": "issue-acceptance-18",
+   "criteria_file": ".prflow/tmp/review/pr-410/local-20261117T095601Z-1/criteria.json",
+   "source_file": "LICENSES/THIRD-PARTY.txt",
+   "verify_hint": "Compare the added section's copyright line and notice to the upstream LICENSE text (paragraph breaks included)",
+   "id": "VC-118",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Criterion 18 counted from criteria.json (valid list of {criterion,text}). LICENSES/THIRD-PARTY.txt:284-300 has a section for examples/mysql-demo/Chinook_MySql.sql naming The Chinook Database (github.com/lerocha/chinook-database), release v1.4.5 with its release URL, plus a 'Copyright (c) 2008-2024 Luis Rocha' line and an MIT permission notice. The structural parts of the claim hold. 'Verbatim' against upstream LICENSE.md cannot be checked from the views: the repo has no copy of upstream LICENSE.md (Chinook_MySql.sql:8 only links to it), no dependency_sources were supplied, and I did not fetch https://github.com/lerocha/chinook-database/blob/v1.4.5/LICENSE.md. The year range in the copyright line (2008-2024) and the paragraph breaks (the notice paragraph at line 299 is followed directly by the warranty disclaimer at line 300 with no blank line) are unverified. Missing evidence: upstream v1.4.5 LICENSE.md text.",
+   "file_checked": "LICENSES/THIRD-PARTY.txt:284-300",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-19",
+   "id": "VC-119",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-20",
+   "id": "VC-120",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-21",
+   "id": "VC-121",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "Each first-run walkthrough lists Docker with Compose and an Anthropic API key as prerequisites. It starts the `examples/mysql-demo` container and points SQL Lens at it through a `mysql+pymysql://` URL. It keeps the Chinook sample questions, and wherever it asks the AC/DC question it states the expected answer, 2 albums. The walkthroughs are, at minimum: - the README quick start; - step 2 of `docs/external/getting-started.md`; - the fast path and the manual install in `docs/external/install-claude-desktop-windows.md`. Where these pages explain connecting to the reader's own database, they say SQL Lens needs a MySQL 8.0+ server. The README quick-start heading, the getting-started introduction and `docs/external/index.md` no longer promise a 60-second or under-a-minute first run. Any first-run duration they state includes pulling the `mysql:8.0` image and loading the demo.",
+   "claim_signature": "issue-acceptance-22",
+   "criteria_file": ".prflow/tmp/review/pr-410/local-20261117T095601Z-1/criteria.json",
+   "source_file": "README.md",
+   "verify_hint": "Check README quick start and getting-started step 2; also whether getting-started asks the AC/DC question elsewhere without the answer",
+   "id": "VC-122",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "criteria.json is a valid list and carries criterion 22, so it counts. Most of the criterion holds: README.md:20 lists Docker with Compose and an Anthropic API key and says the first run takes a few minutes including the mysql:8.0 pull; README.md:31 uses mysql+pymysql and states 'The answer is 2'; getting-started.md:3,8-9,28-38 and install-claude-desktop-windows.md:11-14,26-31,121-140 cover Docker, the container and the mysql+pymysql URL; 'MySQL 8.0+' appears where own-database connection is explained (README:33, getting-started:96, Windows:12,78); no 60-second promise in the README heading, getting-started intro or index.md. But the criterion requires 'wherever it asks the AC/DC question it states the expected answer, 2 albums'. docs/external/getting-started.md:56 (step 4, the first-run walkthrough) asks 'Using sqllens, how many albums did AC/DC release?' with no expected answer (lines 54-60 never state 2). docs/external/install-claude-desktop-windows.md:70 (Verify the connection, part of the fast path) asks the AC/DC question and likewise gives no answer (lines 69-72). Both are counterexamples to the stated-answer requirement; the matching question in the README does state it, but that does not excuse the others. No sibling criterion excuses this.",
+   "file_checked": "docs/external/getting-started.md:56",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-23",
+   "id": "VC-123",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-24",
+   "id": "VC-124",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-25",
+   "id": "VC-125",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-26",
+   "id": "VC-126",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-27",
+   "id": "VC-127",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-28",
+   "id": "VC-128",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
