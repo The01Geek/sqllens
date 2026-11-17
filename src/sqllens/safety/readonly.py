@@ -19,8 +19,6 @@ import logging
 import sqlglot
 from sqlglot import expressions as exp
 from sqlglot.dialects.mysql import MySQL
-from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
-from sqlglot.optimizer.scope import traverse_scope
 from sqlglot.tokens import TokenType
 
 logger = logging.getLogger("sqllens.safety.readonly")
@@ -189,81 +187,34 @@ def sqlglot_dialect_for_url(url: str) -> str | None:
     return None
 
 
-# Catalog schemas and object-name prefixes that mark a read as schema
-# introspection rather than a data-answering query. Keyed by sqlglot dialect:
-# an engine-specific catalog counts only on its own engine, so a data table
-# that merely starts with another engine's prefix (``sqlite_events`` on MySQL)
-# is not misread as a catalog. ``sqlglot_dialect_for_url`` derives its
+# Catalog schemas that mark a read as schema introspection rather than a
+# data-answering query, keyed by sqlglot dialect. A table is a catalog only
+# through its schema qualifier. ``sqlglot_dialect_for_url`` derives its
 # dialects from these keys; any other dialect falls back to the union.
 _SHARED_CATALOG_SCHEMAS: frozenset[str] = frozenset({"information_schema"})
-# dialect -> (catalog schemas, catalog object-name prefixes)
-_CATALOGS_BY_DIALECT: dict[str, tuple[frozenset[str], tuple[str, ...]]] = {
-    "mysql": (frozenset({"mysql", "sys", "performance_schema"}), ()),
-    "sqlite": (frozenset(), ("sqlite_", "pragma_")),
+_CATALOGS_BY_DIALECT: dict[str, frozenset[str]] = {
+    "mysql": frozenset({"mysql", "sys", "performance_schema"}),
 }
 _ALL_CATALOG_SCHEMAS: frozenset[str] = _SHARED_CATALOG_SCHEMAS.union(
-    *(schemas for schemas, _prefixes in _CATALOGS_BY_DIALECT.values())
-)
-_ALL_CATALOG_NAME_PREFIXES: tuple[str, ...] = tuple(
-    prefix for _schemas, prefixes in _CATALOGS_BY_DIALECT.values() for prefix in prefixes
+    *_CATALOGS_BY_DIALECT.values()
 )
 
 
-def _catalog_names(dialect: str | None) -> tuple[frozenset[str], tuple[str, ...]]:
-    catalogs = _CATALOGS_BY_DIALECT.get(dialect) if dialect is not None else None
-    if catalogs is None:
-        return _ALL_CATALOG_SCHEMAS, _ALL_CATALOG_NAME_PREFIXES
-    schemas, prefixes = catalogs
-    return _SHARED_CATALOG_SCHEMAS | schemas, prefixes
-
-
-def _cte_reference_ids(parsed: exp.Expression, dialect: str | None) -> set[int]:
-    """Return the ids of ``exp.Table`` nodes scope analysis resolves to a CTE.
-
-    Identifiers are normalized in place first, so a CTE reference resolves
-    whatever its letter case where the dialect folds unquoted names. A table
-    is a CTE reference when it has no schema or catalog qualifier and its own
-    name (not its alias) is a CTE visible in its scope, so an aliased or
-    schema-qualified catalog table beside a same-named CTE or derived table
-    still counts. Any exception from normalization or scope analysis
-    excludes nothing.
-    """
-    try:
-        normalize_identifiers(parsed, dialect=dialect)
-        references: set[int] = set()
-        for scope in traverse_scope(parsed):
-            references.update(
-                id(table)
-                for table in scope.tables
-                if not table.args.get("db")
-                and not table.args.get("catalog")
-                and table.name in scope.cte_sources
-            )
-    except Exception as exc:
-        logger.info(
-            "is_introspection_query: identifier normalization or scope analysis "
-            "failed under dialect %r (%s); "
-            "counting every table reference",
-            dialect,
-            type(exc).__name__,
-        )
-        return set()
-    return references
+def _catalog_names(dialect: str | None) -> frozenset[str]:
+    schemas = _CATALOGS_BY_DIALECT.get(dialect) if dialect is not None else None
+    if schemas is None:
+        return _ALL_CATALOG_SCHEMAS
+    return _SHARED_CATALOG_SCHEMAS | schemas
 
 
 def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     """Return True if ``sql`` is a schema-introspection read, not a data query.
 
     Schema introspection = a statement whose ``first_sql_keyword`` under
-    ``dialect`` is ``SHOW``, or a statement that references any catalog table,
-    even alongside data tables. A reference that sqlglot's scope analysis
-    resolves to a CTE is not a catalog table, whatever its name. The catalogs are
-    ``information_schema`` for every dialect, plus the engine's own: the
-    ``mysql``, ``sys`` and ``performance_schema`` schemas for ``mysql``; the
-    ``sqlite_`` and ``pragma_`` name prefixes for ``sqlite``. A name prefix
-    matches, in any casing, a table name or a table-valued function called in
-    ``FROM`` (``pragma_table_info('t')``). With no dialect, or one not listed,
-    every engine's catalogs count; a dialect name sqlglot does not know is
+    ``dialect`` is ``SHOW``, or a statement that references any catalog table
+    (:func:`is_catalog_table`), even alongside data tables. A catalog table is
+    a table in the ``information_schema``, ``mysql``, ``sys`` or
+    ``performance_schema`` schema. A dialect name sqlglot does not know is
     parsed as no dialect.
 
     The MCP formatter (``tools/_format.py``) uses this to withhold a catalog
@@ -276,8 +227,7 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     result is shown; a ``SHOW``-led statement returns ``True`` before any
     parse. Any other exception from
     the parser propagates, so the caller reports an error rather than guessing
-    (``query_database`` returns its sanitized internal error). An exception
-    from identifier normalization or scope analysis excludes no CTE reference.
+    (``query_database`` returns its sanitized internal error).
     """
     if dialect is not None:
         try:
@@ -308,29 +258,19 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
             dialect,
         )
         return False
-    cte_references = _cte_reference_ids(parsed, dialect)
-    for table in parsed.find_all(exp.Table):
-        if id(table) in cte_references:
-            continue
-        if is_catalog_table(table, dialect=dialect):
-            return True
-    return False
+    return any(
+        is_catalog_table(table, dialect=dialect) for table in parsed.find_all(exp.Table)
+    )
 
 
 def is_catalog_table(table: exp.Table, *, dialect: str | None) -> bool:
-    """True if ``table`` names one of ``dialect``'s system catalogs.
+    """True if ``table`` is in a system catalog schema.
 
-    The catalog rule :func:`is_introspection_query` documents: a catalog
-    schema, or a name prefix matched in any casing against the table name or
-    the name of a table-valued function called in ``FROM``. The caller decides
-    whether the reference is a CTE; this looks only at the name.
+    True only when the table's schema qualifier, lower-cased, is
+    ``information_schema``, ``mysql``, ``sys`` or ``performance_schema``;
+    every other table, unqualified ones included, is data.
     """
-    schemas, prefixes = _catalog_names(dialect)
-    if (table.db or "").lower() in schemas:
-        return True
-    source = table.this
-    name = source.name if isinstance(source, exp.Anonymous) else table.name
-    return (name or "").lower().startswith(prefixes)
+    return (table.db or "").lower() in _catalog_names(dialect)
 
 
 _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
@@ -383,12 +323,10 @@ _DML_DDL_TYPES: tuple[type[exp.Expression], ...] = (
 
 # Per-dialect denylist of side-effecting / DoS / RCE functions. A syntactically
 # valid ``SELECT`` that *calls* one of these passes the root-type / DML-DDL
-# walk untouched, so without this the guard is RCE on the default SQLite
-# deployment (``load_extension``) and a write/DoS vector on MySQL.
-# Names are matched case-insensitively against the parsed function node.
-# CWE-89 / CWE-284 / CWE-770 / CWE-94.
+# walk untouched, so without this the guard is a write/DoS/exfiltration vector
+# on MySQL. Names are matched case-insensitively against the parsed function
+# node. CWE-89 / CWE-284 / CWE-770 / CWE-94.
 _SIDE_EFFECT_FUNCS: dict[str, frozenset[str]] = {
-    "sqlite": frozenset({"load_extension"}),
     # ``sys_exec`` / ``sys_eval`` are lib_mysqludf_sys UDFs: where the UDF is
     # installed and the configured DB role has EXECUTE, they are an RCE seam.
     # They parse as exp.Anonymous and need explicit naming to stay refused.
@@ -644,6 +582,6 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
             found = "FOR UPDATE" if sub.args.get("update") else "FOR SHARE / LOCK IN SHARE MODE"
             raise UnsafeSqlError(f"locking reads are not allowed (found {found})")
         # Side-effecting / DoS / RCE function calls. A valid SELECT can still
-        # call e.g. ``load_extension`` (SQLite RCE) or ``load_file`` (MySQL
-        # data exfiltration); the root-type/DML walk above does not see these.
+        # call e.g. ``load_file`` (MySQL data exfiltration); the root-type/DML
+        # walk above does not see these.
         _refuse_denied_function(sub, denied_funcs)

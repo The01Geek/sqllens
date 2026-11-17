@@ -1140,12 +1140,6 @@ async def test_with_widgets_injected_agent_bypasses_singleton(
     [
         (
             "mysql+pymysql://u:p@db.example/shop",
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = DATABASE()",
-            "SELECT id FROM sqlite_widgets",
-        ),
-        (
-            "mysql+pymysql://u:p@db.example/shop",
             "# note\nSHOW TABLES",
             "SELECT id FROM widgets",
         ),
@@ -1161,9 +1155,8 @@ async def test_with_widgets_hides_introspection_result_under_configured_dialect(
 ) -> None:
     """Issue #301: the configured database's sqlglot dialect reaches the
     formatter, so a catalog result is withheld while the data result shows.
-    Each row is classified right only when the dialect arrives: with no
-    dialect, a data query naming another engine's catalog would be hidden
-    too, and a ``#``-led ``SHOW`` would read as a data query and be shown."""
+    The catalog statement is classified right only when the dialect arrives:
+    with no dialect, a ``#``-led ``SHOW`` reads as a data query and is shown."""
     base = build_test_config(persist_dir=tmp_path / "chroma")
     cfg = base.model_copy(
         update={"database": base.database.model_copy(update={"url": url})}

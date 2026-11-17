@@ -21,11 +21,9 @@ from sqllens.agent.core.system_prompt import DefaultSystemPromptBuilder
 from sqllens.agent.integrations import (
     AnthropicLlmService,
     ChromaAgentMemory,
-    SqliteRunner,
 )
 from sqllens.agent.integrations.local import LocalFileSystem
 from sqllens.agent.integrations.mysql import MySQLRunner
-from sqllens.agent.integrations.sqlite.sql_runner import sqlite_path_from_url
 from sqllens.agent.tools import (
     EmitChartTool,
     EmitTextTool,
@@ -274,23 +272,13 @@ def build_sql_runner(
     """Pick the right SQL runner from the database URL prefix.
 
     ``statement_timeout_ms`` and ``max_rows`` are threaded through so the
-    per-engine timeout (MAX_EXECUTION_TIME / progress handler) and
+    MySQL timeout (MAX_EXECUTION_TIME) and
     ``fetchmany(max_rows + 1)`` stream cap run inside the runner.
 
     ``read_only`` is threaded through so the connector enforces read-only at
-    the driver/session layer (SQLite ``mode=ro`` URI, MySQL read-only
-    transaction) — defence-in-depth so a parser-guard miss still cannot mutate.
+    the driver/session layer (a MySQL read-only transaction) — defence-in-depth so a parser-guard miss still cannot mutate.
     """
     scheme = url.split("://", 1)[0].lower()
-    if scheme.startswith("sqlite"):
-        # sqlite:///rel.db is relative to the working directory; sqlite:////abs.db
-        # is absolute. Do not parse here: preflight must resolve the same file.
-        return SqliteRunner(
-            database_path=sqlite_path_from_url(url),
-            statement_timeout_ms=statement_timeout_ms,
-            max_rows=max_rows,
-            read_only=read_only,
-        )
     if scheme.startswith("mysql"):
         parsed = urlparse(url)
         if not parsed.hostname or not parsed.username:
@@ -308,4 +296,4 @@ def build_sql_runner(
             read_only=read_only,
             remove_sql_modes=remove_sql_modes,
         )
-    raise ValueError(f"unsupported database scheme: {scheme!r} (expected sqlite/mysql)")
+    raise ValueError(f"unsupported database scheme: {scheme!r} (expected mysql)")

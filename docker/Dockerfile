@@ -37,8 +37,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SQLLENS_BUILD_TIME=${BUILD_TIME} \
     PATH=/home/sqllens/.local/bin:$PATH
 
-# The MySQL driver (PyMySQL) is pure Python and SQLite is in the stdlib, so
-# no database client library is installed.
+# The MySQL driver (PyMySQL) is pure Python, and ChromaDB's store uses the
+# stdlib sqlite3 module, so no database client library is installed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         tini \

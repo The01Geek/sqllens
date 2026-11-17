@@ -18,16 +18,17 @@ A star is allowed when it cannot return a table's columns:
   star in that list is checked where it stands, so a CTE or derived table
   that itself selects a star from a table is refused at that inner star.
 * Over a ``VALUES`` list: its rows are written out in the query.
-* Over a system catalog (``readonly.is_catalog_table``), for schema lookups,
-  including a catalog function such as SQLite's ``pragma_table_info('t')``.
+* Over a system catalog table (``readonly.is_catalog_table``: a table in the
+  ``information_schema``, ``mysql``, ``sys`` or ``performance_schema``
+  schema), for schema lookups.
 
 Every other star that expands a table or view is refused wherever it
 appears: in the outer projection, a CTE, a derived table, an ``IN`` or scalar
 subquery, or a function argument such as ``f(t.*)``.
 A bare ``*`` is refused when any source it expands is not one of the above.
 A star over a table-valued function, such as ``generate_series(...)`` or
-``UNNEST(...)``, is refused whatever the function returns, directly or through ``LATERAL``: the
-query does not name its columns, and a function can return a table's whole
+``UNNEST(...)``, is refused, directly or through ``LATERAL``: the query
+does not name its columns, and a function can return a table's whole
 rows. So is a star over a parenthesized table or join, such as ``(t) x``:
 sqlglot gives it a scope of its own, as it does a derived table, but its
 columns are the table's. A star over an expression, such as
@@ -42,13 +43,10 @@ refusal: an unquoted ``table`` alias or a ``TABLE(...)`` call is refused too.
 A ``TABLE s.t`` that does not parse is refused as unparseable SQL.
 
 Not covered: a whole row reached without a star, such as a bare ``t`` as a
-composite value, or a function that
-returns rows called outside ``FROM``, and an explicit list of every column.
-A table or function whose name ``is_catalog_table`` takes for a catalog, such
-as a SQLite table named with the ``sqlite_`` prefix, counts as one. A catalog
-table that holds credentials, such as MySQL's ``mysql.user``, is a catalog
-too, so a star over it is allowed;
-database grants, not this guard, keep it out of reach. A statement sqlglot
+composite value, or a function that returns rows called outside ``FROM``,
+and an explicit list of every column. A system catalog table that holds
+credentials, such as MySQL's ``mysql.user``, is allowed like any other
+catalog table; database grants, not this guard, keep it out of reach. A statement sqlglot
 keeps as opaque text (an ``exp.Command``, such as MySQL's
 ``PREPARE s FROM '...'``) has no star node, so a star inside it is not seen;
 the read-only guard refuses such a statement while ``database.read_only`` is

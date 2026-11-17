@@ -9,6 +9,9 @@ The recommended path is the one-command installer in [Fast path: one command](#f
 - **Python 3.11 or newer** on your PATH. Verify in PowerShell with `python --version`. If Python is missing, install it from [python.org](https://www.python.org/downloads/windows/) and select "Add python.exe to PATH" during install.
 - **Claude Desktop**, installed and launched at least once so it creates its configuration file.
 - **An Anthropic API key** from [console.anthropic.com](https://console.anthropic.com/).
+- **Docker Desktop** (it includes Compose), running, for the Chinook MySQL demo database. Verify in PowerShell with `docker compose version`. To connect to your own database instead, SQL Lens needs a MySQL 8.0+ server; skip the demo steps and see [Point at a real database](#point-at-a-real-database).
+
+The demo database is MySQL 8.0 loaded with the Chinook sample music store, started in Docker. Its first start pulls the `mysql:8.0` image and loads the data, which takes a few minutes; later starts take seconds.
 
 ## Fast path: one command
 
@@ -16,11 +19,16 @@ In PowerShell:
 
 ```powershell
 pip install "sqllens[all]"
-mkdir $env:USERPROFILE\sqllens
-curl.exe -L -o $env:USERPROFILE\sqllens\chinook.db https://github.com/The01Geek/sqllens/raw/main/examples/sqlite-demo/chinook.db
+mkdir $env:USERPROFILE\sqllens\mysql-demo
+cd $env:USERPROFILE\sqllens\mysql-demo
+$demo = "https://github.com/The01Geek/sqllens/raw/main/examples/mysql-demo"
+foreach ($f in "compose.yaml", "Chinook_MySql.sql", "demo-user.sql") { curl.exe -L -o $f "$demo/$f" }
+docker compose up -d --wait
 $env:SQLLENS_LLM__API_KEY = "sk-ant-..."
-sqllens claude-desktop install --db "sqlite:///C:/Users/USERNAME/sqllens/chinook.db"
+sqllens claude-desktop install --db "mysql+pymysql://chinook_reader:chinook_reader@127.0.0.1:3306/Chinook" --name chinook
 ```
+
+The `docker compose` command starts the demo database on `127.0.0.1:3306` and returns once it answers queries. The `chinook_reader` user can only read the `Chinook` database; its credentials are for the demo only. If port 3306 is taken, change the host port in `compose.yaml` and in the `--db` URL (see the `README.md` in [`examples/mysql-demo`](https://github.com/The01Geek/sqllens/tree/main/examples/mysql-demo)). To stop the database later, run `docker compose down` in the same folder.
 
 The `sqllens claude-desktop install` command does all of the following in one step:
 
@@ -48,7 +56,7 @@ Reopen Claude Desktop from the Start menu, then jump to [Verify the connection](
 | `--dry-run` | Prints the planned changes (configuration file body, launcher body, JSON diff) without writing anything. |
 | `--db <url>` | The SQLAlchemy connection URL for your database. Required. |
 | `--api-key <key>` | Anthropic API key. Defaults to the `SQLLENS_LLM__API_KEY` environment variable. |
-| `--name <key>` | Name shown in Claude Desktop and used as the `mcpServers` key. Defaults to the SQLite file stem or the database segment of the URL. |
+| `--name <key>` | Name shown in Claude Desktop and used as the `mcpServers` key. Defaults to the database segment of the URL, as written (`Chinook` for the demo URL). |
 | `--model <id>` | Anthropic model identifier. Defaults to `claude-opus-5-5`. |
 | `--working-dir <path>` | Folder where `sqllens.toml` and the launcher are written. Defaults to `%USERPROFILE%\sqllens`. |
 | `--memory-dir <path>` | ChromaDB persistence folder. Defaults to `<working-dir>\chroma`. |
@@ -59,15 +67,13 @@ Reopen Claude Desktop from the Start menu, then jump to [Verify the connection](
 ## Verify the connection
 
 - At the bottom right of the chat input, the MCP indicator should show the server name you configured (for example, `chinook`) with two tools: `query_database` and `list_data_sources`.
-- In a new chat, ask: *"Using sqllens, how many albums did AC/DC release in the chinook database?"*
+- In a new chat, ask: *"Using sqllens, how many albums did AC/DC release in the chinook database?"* The expected answer is 2 albums. Docker Desktop must be running with the demo database started.
 - Approve the tool call when prompted. The first query takes 30 to 60 seconds because ChromaDB downloads roughly 80 MB of embedding model weights into `C:\Users\USERNAME\sqllens\chroma\`. Subsequent queries are fast.
 - After a successful query, a `C:\Users\USERNAME\sqllens\<16-hex-chars>\` directory appears with `query_results_*.csv` files. This is the per-query scratch space. The files are safe to delete periodically.
 
-The expected answer is 2 albums.
-
 ## Point at a real database
 
-Re-run the installer with the new connection URL:
+SQL Lens needs a MySQL 8.0+ server. Re-run the installer with the new connection URL:
 
 ```powershell
 sqllens claude-desktop install --db "mysql+pymysql://user:password@host:3306/dbname" --name analytics
@@ -79,8 +85,7 @@ Keep the default `--read-only` unless you specifically need to allow writes.
 
 | Dialect | URL format |
 |---|---|
-| MySQL 8.0+ | `mysql+pymysql://user:password@host:3306/dbname` |
-| SQLite | `sqlite:///C:/path/to/file.db` (forward slashes) |
+| MySQL 8.0+ | `mysql+pymysql://user:password@host:3306/dbname` (or `mysql://...`) |
 
 ## Troubleshooting
 
@@ -109,15 +114,19 @@ sqllens --version
 
 If `sqllens` is reported as "not recognized" after install, close and reopen PowerShell so the new `Scripts` directory takes effect.
 
-### 2. Prepare a working folder and the demo database
+### 2. Prepare a working folder and start the demo database
+
+With Docker Desktop running:
 
 ```powershell
-mkdir $env:USERPROFILE\sqllens
-cd $env:USERPROFILE\sqllens
-curl.exe -L -o chinook.db https://github.com/The01Geek/sqllens/raw/main/examples/sqlite-demo/chinook.db
+mkdir $env:USERPROFILE\sqllens\mysql-demo
+cd $env:USERPROFILE\sqllens\mysql-demo
+$demo = "https://github.com/The01Geek/sqllens/raw/main/examples/mysql-demo"
+foreach ($f in "compose.yaml", "Chinook_MySql.sql", "demo-user.sql") { curl.exe -L -o $f "$demo/$f" }
+docker compose up -d --wait
 ```
 
-The Chinook SQLite demo is roughly 1 MB and lets you confirm the wiring before pointing at production data.
+The demo database runs MySQL 8.0 on `127.0.0.1:3306` with the Chinook sample data and a read-only demo user, and lets you confirm the wiring before pointing at production data. The first start pulls the `mysql:8.0` image and loads the data, which takes a few minutes.
 
 ### 3. Write the configuration file
 
@@ -126,7 +135,7 @@ PowerShell's `Set-Content -Encoding utf8` and `Out-File -Encoding utf8` both wri
 ```powershell
 $toml = @'
 [database]
-url = "sqlite:///C:/Users/USERNAME/sqllens/chinook.db"
+url = "mysql+pymysql://chinook_reader:chinook_reader@127.0.0.1:3306/Chinook"
 name = "chinook"
 read_only = true
 
@@ -147,7 +156,7 @@ transport = "stdio"
 [System.IO.File]::WriteAllText("$env:USERPROFILE\sqllens\sqllens.toml", $toml)
 ```
 
-The connection URL uses forward slashes even on Windows. Backslashes confuse the URL parser.
+The database name in the URL is case-sensitive: the demo database is `Chinook`.
 
 Optional sanity check for the BOM:
 

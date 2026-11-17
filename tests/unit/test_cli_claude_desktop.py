@@ -176,12 +176,11 @@ class TestDeriveDefaultName:
     @pytest.mark.parametrize(
         "url,expected",
         [
-            ("sqlite:///./chinook.db", "chinook"),
-            ("sqlite:////absolute/path/db.sqlite", "db"),
-            ("sqlite:///./data.sqlite3", "data"),
             ("mysql+pymysql://u:p@h:3306/orders", "orders"),
-            # The file-extension strip does not look at the scheme.
-            ("mysql+pymysql://u:p@h:3306/orders.db", "orders"),
+            ("mysql+pymysql://u:p@127.0.0.1:3306/Chinook", "Chinook"),
+            # A database name keeps a file-like suffix.
+            ("mysql+pymysql://u:p@h:3306/sales.db", "sales.db"),
+            ("mysql://u:p@h/x.sqlite3", "x.sqlite3"),
         ],
     )
     def test_derives_from_dsn(self, url: str, expected: str) -> None:
@@ -189,6 +188,10 @@ class TestDeriveDefaultName:
 
     def test_falls_back_for_unparseable(self) -> None:
         assert derive_default_name("not a url") == "sqllens"
+
+    @pytest.mark.parametrize("url", ["mysql+pymysql://u:p@h:3306", "mysql://u:p@h/"])
+    def test_falls_back_without_a_database_segment(self, url: str) -> None:
+        assert derive_default_name(url) == "sqllens"
 
 
 class TestResolveInvocation:
@@ -692,6 +695,30 @@ class TestRunInstall:
             )
         assert cmd_path.read_text(encoding="utf-8") == original_cmd
 
+    @pytest.mark.parametrize("platform_name", ["linux", "win32"])
+    def test_sqlite_url_is_refused_before_any_artifact_lands(
+        self,
+        base_options: InstallOptions,
+        fake_config_json: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        platform_name: str,
+    ) -> None:
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        before = fake_config_json.read_bytes()
+        options = dataclasses.replace(base_options, db_url="sqlite:///./chinook.db")
+        with pytest.raises(InstallError):
+            run_install(
+                options,
+                dry_run=False,
+                force=False,
+                platform_name=platform_name,
+                which=lambda _: r"C:\Python\Scripts\sqllens.exe",
+                now=_fixed_now,
+            )
+        assert fake_config_json.read_bytes() == before
+        workdir = options.working_dir
+        assert not workdir.exists() or list(workdir.iterdir()) == []
+
     def test_validation_failure_does_not_leak_secret_in_install_error(
         self,
         base_options: InstallOptions,
@@ -977,6 +1004,33 @@ class TestCli:
         assert not (tmp_path / "workdir" / "sqllens.toml").exists()
         # JSON on disk unchanged.
         assert "demo" not in json.loads(cfg.read_text(encoding="utf-8")).get("mcpServers", {})
+
+    @pytest.mark.parametrize("url", ["sqlite:///./chinook.db", "sqlite+pysqlite:///x.db"])
+    def test_sqlite_url_install_aborts_and_leaves_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, url: str
+    ) -> None:
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        monkeypatch.setenv("COLUMNS", "200")
+        cfg = tmp_path / "claude_desktop_config.json"
+        original = json.dumps({"preferences": {"theme": "dark"}})
+        cfg.write_text(original, encoding="utf-8")
+        workdir = tmp_path / "workdir"
+        result = CliRunner().invoke(
+            app,
+            [
+                "claude-desktop",
+                "install",
+                "--db",
+                url,
+                "--working-dir",
+                str(workdir),
+                "--config-path",
+                str(cfg),
+            ],
+        )
+        assert result.exit_code != 0
+        assert cfg.read_text(encoding="utf-8") == original
+        assert not workdir.exists() or list(workdir.iterdir()) == []
 
     def test_missing_config_path_via_cli(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

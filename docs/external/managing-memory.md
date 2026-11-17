@@ -242,5 +242,5 @@ The panel runs entirely through your assistant: it makes no direct network conne
 ## See Also
 
 - **[Configuration reference](configuration.md#section-memory)** for every memory setting.
-- **[Getting started](getting-started.md)** for a first run against the bundled demo database.
+- **[Getting started](getting-started.md)** for a first run against the Chinook MySQL demo database.
 - **[Release notes](release-notes.md)** for what changed in each version.

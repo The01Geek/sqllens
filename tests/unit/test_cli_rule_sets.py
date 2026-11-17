@@ -124,12 +124,6 @@ def test_validate_and_serve_refuse_a_bad_file(tmp_path: Path, mutate, expected: 
     run.assert_not_called()
 
 
-def test_validate_refuses_a_non_mysql_url(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["validate", "-c", str(_write(tmp_path, url="sqlite:///x.db"))])
-    assert result.exit_code == 2
-    assert "need a MySQL database" in _unwrapped(result.stderr)
-
-
 def test_serve_logs_one_warning_per_unconfirmed_set_and_starts(tmp_path: Path, caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="sqllens.rule_sets"):
         with patch("sqllens.server.run") as run:

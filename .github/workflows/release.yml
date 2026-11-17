@@ -113,18 +113,23 @@ jobs:
           done
 
       - name: Exercise the published console script
-        # A placeholder key is required because ``validate`` exits 1 when
-        # llm.api_key is unset (the demo config intentionally omits it) — that
-        # is the "would fail to start" gate, not an import/parse failure. With
-        # no ``--check-llm`` flag, validate makes no network call, so the
-        # placeholder is never used to reach Anthropic; it only satisfies the
-        # api-key-present check so a genuine non-zero exit (broken __init__
-        # import, dropped module, bad config parsing) is what fails the job.
+        # Reads no repository file: the config comes from the published
+        # ``sqllens init`` template (a mysql+pymysql:// placeholder URL), so a
+        # broken template fails here too. ``validate`` without ``--check-db``
+        # opens no database connection, so no server is needed. The placeholder
+        # key only satisfies the api-key-present check; with no ``--check-llm``
+        # nothing reaches Anthropic. The pymysql import fails the job when the
+        # published wheel no longer brings the MySQL driver.
         env:
           SQLLENS_LLM__API_KEY: sk-ant-smoke-test-placeholder
         run: |
+          set -euo pipefail
           /tmp/smoke-venv/bin/sqllens --version
-          /tmp/smoke-venv/bin/sqllens validate -c examples/sqlite-demo/sqllens.toml
+          smoke_dir="$(mktemp -d)"
+          /tmp/smoke-venv/bin/sqllens init --path "${smoke_dir}/sqllens.toml"
+          grep -q '^url = "mysql+pymysql://' "${smoke_dir}/sqllens.toml"
+          /tmp/smoke-venv/bin/sqllens validate -c "${smoke_dir}/sqllens.toml"
+          /tmp/smoke-venv/bin/python -c "import pymysql"
 
   github-release:
     name: Attach artifacts to GitHub release

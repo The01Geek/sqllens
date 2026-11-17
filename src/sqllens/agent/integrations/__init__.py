@@ -1,18 +1,15 @@
 """Concrete implementations of core abstractions.
 
 v1 includes only the integrations actually used by SQL Lens:
-Anthropic LLM, ChromaDB agent memory, and SQL runners for MySQL and
-SQLite.
+Anthropic LLM, ChromaDB agent memory, and a SQL runner for MySQL.
 """
 
 from .anthropic import AnthropicLlmService
 from .chromadb import ChromaAgentMemory
 from .mysql import MySQLRunner
-from .sqlite import SqliteRunner
 
 __all__ = [
     "AnthropicLlmService",
     "ChromaAgentMemory",
     "MySQLRunner",
-    "SqliteRunner",
 ]

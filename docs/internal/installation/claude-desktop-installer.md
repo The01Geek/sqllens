@@ -36,7 +36,7 @@ The installer file is structured as **pure helpers → orchestrator → formatte
 | `InstallResult` | Frozen dataclass — captures every decision plus what actually changed. |
 | `InstallError` | Surfaces installer-level failures to the CLI as exit code 1. |
 | `default_working_dir` / `default_memory_dir` / `default_config_path` | OS-specific path defaults. |
-| `derive_default_name` | Picks a friendly entry name from the DSN (sqlite file stem, otherwise database segment). |
+| `derive_default_name` | Picks a friendly entry name from the DSN: its database segment as written, or `sqllens` when there is none or the DSN does not parse. |
 | `resolve_invocation` | Decides whether to launch via absolute `sqllens` path or `<python> -m sqllens` fallback. |
 | `generate_toml` | Renders the TOML body, with TOML *literal strings* for paths so Windows backslashes aren't interpreted. |
 | `generate_cmd_launcher` | Renders the Windows `.cmd` body. CRLF line endings, cmd.exe-safe quoting. |

@@ -32,12 +32,11 @@ Where things live. The table covers the main top-level directories and files. It
 | `scripts/` | `changelog.py` (release-note tooling) and two HTML preview pages for the result and memory-admin widgets. |
 | `docker/` | `Dockerfile` for the published container image. |
 | `mcpb/` | `build.sh`, `manifest.json`, `launcher.py` and a `README.md` for the per-platform `.mcpb` bundles. |
-| `examples/` | `mcp-clients/` (client configuration snippets for Claude Desktop, Cursor and Windsurf) and `sqlite-demo/` (legacy SQLite demo, due for removal). |
+| `examples/` | `mcp-clients/` (client configuration snippets for Claude Desktop, Cursor and Windsurf) and `mysql-demo/` (Docker Compose MySQL 8.0 Chinook demo database and its config; the vendored `Chinook_MySql.sql` is kept byte-identical by a `.gitattributes` `-text` rule). |
 | `.github/` | Workflows (see [operations/ci-and-distribution.md](../operations/ci-and-distribution.md)), composite actions, workflow helper scripts, the security-audit workflow tests, issue and pull-request templates, and the Dependabot configuration. |
 | `.prflow/` | Configuration and skill extensions for the PRFlow automation. |
-| `LICENSES/` | `THIRD-PARTY.txt`, the license notice for the vendored agent code. |
+| `LICENSES/` | `THIRD-PARTY.txt`, the license notices for the vendored agent code and other vendored files, such as the Chinook demo script. |
 | `AGENTS.md` | Rules for AI coding assistants. `CLAUDE.md` only imports it. |
-| `demo.db` | Legacy SQLite demo database at the repository root. |
 
 Inside `src/sqllens/`:
 
@@ -138,7 +137,7 @@ We aggressively pruned during the lift: ~110 of 283 upstream files kept, framewo
 What was kept:
 - `agent/core/` — `Agent`, `RequestContext`, `ToolRegistry`, `UiComponent`, etc.
 - `agent/capabilities/` — `SqlRunner`, `FileSystem`, `AgentMemory` abstractions.
-- `agent/integrations/` — `anthropic`, `chromadb`, `local`, `sqlite`, `mysql`.
+- `agent/integrations/` — `anthropic`, `chromadb`, `local`, `mysql`.
 - `agent/tools/` — `RunSqlTool`, `EmitChartTool` (the agent-side seam for `query_database`'s chart blocks — first-party, not lifted; see [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py)), `EmitTextTool` (the agent-side seam for deliberate prose blocks in the multi-block response — first-party, see [src/sqllens/agent/tools/emit_text.py](../../../src/sqllens/agent/tools/emit_text.py)), and the three `agent_memory` tools (`SaveQuestionToolArgsTool`, registered only when `cfg.memory.save_queries` is true; `SearchSavedCorrectToolUsesTool`, always registered; and `SaveTextMemoryTool`, registered only when `cfg.memory.save_text_memories` is true).
 - `agent/components/` — Rich-component rendering (we only ever use the markdown conversion).
 
