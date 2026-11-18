@@ -195,7 +195,8 @@ async def import_bundle(
         raise UnknownMemoryGroupsError(unknown)
 
     existing = await run_memory_call(_baseline, store, clear and not dry_run)
-    plan = _plan(bundle, existing)
+    # _plan parses every SQL text with sqlglot; keep it off the event loop.
+    plan = await run_memory_call(_plan, bundle, existing)
     report = ImportReport(updated=plan.updated, skipped_duplicate=plan.skipped_duplicate)
 
     if not dry_run and plan.updates:

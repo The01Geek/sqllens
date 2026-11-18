@@ -43,6 +43,7 @@ from sqllens.memory.schema import (
     SchemaDoc,
     SqlPair,
     SqlPairsBlock,
+    UnknownMemoryGroupsError,
 )
 from sqllens.memory.store import MemoryRecord, MemoryStore
 
@@ -249,6 +250,18 @@ async def add_memories(
     for name, items in (("sql_pairs", sql_pairs), ("schema_docs", schema_docs)):
         if items is not None and len(items) > MAX_BUNDLE_ITEMS:
             raise MemoryInputError(f"{name} exceeds the {MAX_BUNDLE_ITEMS}-item cap")
+    # Refuse unknown groups on every item, an item that fails validation
+    # included, before anything is written.
+    raw_groups = {
+        group
+        for raw in (*(sql_pairs or []), *(schema_docs or []))
+        if isinstance(raw, dict) and isinstance(raw.get("groups"), list)
+        for group in raw["groups"]
+        if isinstance(group, str)
+    }
+    unknown = sorted(raw_groups.difference(known_groups))
+    if unknown:
+        raise UnknownMemoryGroupsError(unknown)
     errors: list[dict[str, Any]] = []
 
     def validation_message(exc: Exception) -> str:

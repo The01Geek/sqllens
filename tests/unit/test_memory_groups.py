@@ -323,7 +323,12 @@ def test_sql_match_rule() -> None:
     )
     assert sql_key("SELECT a FROM t") == sql_key("select a\n  from t")
     assert sql_key("SELECT A FROM T") != sql_key("SELECT a FROM t")
-    for text in ("select 1; select 2", "SELEC garbage ((", "(" * 3000 + "1" + ")" * 3000):
+    for text in (
+        "select 1; select 2",
+        "SELEC garbage ((",
+        "SELECT 'abc",  # tokenizer failure
+        "(" * 3000 + "1" + ")" * 3000,
+    ):
         assert sql_key(text) == ("text", text)
         assert sql_key(f"  {text}\n") == sql_key(text)
     assert sql_key("select 1; select 2") != sql_key("select 1;  select 2")
@@ -389,6 +394,28 @@ def test_golden_file_refuses_items_with_groups() -> None:
     ]}})
     with pytest.raises(BundleFormatError, match=r"pairs\[1\].*tagged one"):
         load_golden(text, "json")
+
+
+@pytest.mark.parametrize("with_pairs", [True, False])
+def test_golden_file_refuses_schema_docs_with_groups(with_pairs: bool) -> None:
+    payload: dict[str, Any] = {"schema_docs": [{"content": "d"}, {"content": "e", "groups": ["a"]}]}
+    if with_pairs:
+        payload["sql_pairs"] = {"pairs": [{"question": "ok", "sql": "SELECT 1"}]}
+    with pytest.raises(BundleFormatError, match=r"schema_docs\[1\]"):
+        load_golden(json.dumps(payload), "json")
+
+
+async def test_add_memories_refuses_unknown_group_on_an_invalid_item(store: MemoryStore) -> None:
+    with pytest.raises(UnknownMemoryGroupsError, match="'bogus'"):
+        await memory_admin.add_memories(
+            store,
+            sql_pairs=[
+                {"question": "valid", "sql": "SELECT 1"},
+                {"question": "", "sql": "SELECT 2", "groups": ["bogus"]},
+            ],
+            known_groups={"finance"},
+        )
+    assert _groups_by_question(store) == []
 
 
 # --- surfaces -----------------------------------------------------------------

@@ -6,8 +6,9 @@
 ``memory.allow_admin_tools`` and ``memory.allow_import`` register eight tools
 that read or delete through the synchronous ChromaDB store. Those calls must run
 on the memory worker thread, one at a time, while the loop keeps serving other
-work; the loop-side work around them (input validation, bundle parsing, the
-per-item dedup check and the final ``json.dumps``) stays on the loop.
+work; the loop-side work around them (input validation, bundle parsing and the
+final ``json.dumps``) stays on the loop, while import duplicate planning runs on
+the worker.
 
 Every test that holds a store call releases it in ``finally``: the memory
 worker is shared by the whole pytest process, so a call left held would stall
@@ -317,10 +318,10 @@ async def test_loop_side_memory_work_stays_on_the_event_loop(
     assert len(threads["dumps"]) == 7
     for key in ("validate", "parse", "dumps"):
         assert all(t is loop_thread for t in threads[key]), key
-    # The per-item dedup check runs on the loop: the added pair's question and
-    # SQL are normalized separately (2) plus the imported schema doc (1). The
-    # store baseline normalizes the stored rows on the worker.
-    assert sum(t is loop_thread for t in threads["dedup"]) == 3
+    # Duplicate planning (which parses SQL with sqlglot) runs on the worker, so
+    # no dedup normalization happens on the loop.
+    assert threads["dedup"]
+    assert not any(t is loop_thread for t in threads["dedup"])
 
 
 def _held_call(started: threading.Event, release: threading.Event, fail: bool) -> str:
