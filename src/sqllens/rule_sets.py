@@ -390,6 +390,15 @@ class RuleSet(_Record):
     scope: NonEmptyStr
     source: Source
     tables: list[TableRule] = Field(min_length=1)
+    # The memory groups requests under this set may read, besides untagged memory.
+    memory_groups: list[NonEmptyStr] | None = Field(default=None, min_length=1)
+
+    @field_validator("memory_groups")
+    @classmethod
+    def _unique_memory_groups(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None:
+            _no_duplicates(value, "memory group")
+        return value
 
     @model_validator(mode="after")
     def _consistent(self) -> RuleSet:
@@ -741,6 +750,20 @@ class LoadedRuleSets:
             if rule_set.name == name:
                 return rule_set
         return None
+
+    def memory_groups_for(self, name: str) -> tuple[str, ...]:
+        """The ``memory_groups`` of rule set ``name``; empty when it lists none or is absent."""
+        rule_set = self.rule_set(name)
+        if rule_set is None or rule_set.memory_groups is None:
+            return ()
+        return tuple(rule_set.memory_groups)
+
+    @property
+    def memory_groups(self) -> frozenset[str]:
+        """Every group some rule set's ``memory_groups`` lists."""
+        return frozenset(
+            group for rule_set in self.file.rule_sets for group in rule_set.memory_groups or ()
+        )
 
     def tables_for(self, name: str) -> dict[str, tuple[str, ...]]:
         """The listed tables of rule set ``name`` and each one's listed ``columns``."""

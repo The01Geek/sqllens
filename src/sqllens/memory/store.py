@@ -34,13 +34,14 @@ import functools
 import json
 import logging
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, ParamSpec, TypeVar
 
 from pydantic import ValidationError
 
+from sqllens._memory_groups import GROUPS_KEY, TAGGED_KEY, group_metadata, record_groups
 from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.core.user.models import User
 from sqllens.agent.integrations.chromadb.agent_memory import ChromaAgentMemory
@@ -116,6 +117,24 @@ async def run_memory_call(func: Callable[P, T], /, *args: P.args, **kwargs: P.kw
         raise
 
 
+class MemoryChangedDuringImportError(RuntimeError):
+    """A record an import was merging into vanished before its groups were written."""
+
+
+@dataclass(frozen=True)
+class DedupEntry:
+    """One stored SQL pair or schema doc as import dedup sees it.
+
+    ``question`` is ``""`` for a schema doc; ``text`` is the SQL or the content.
+    """
+
+    memory_id: str
+    kind: Literal["sql_pair", "schema_doc"]
+    question: str
+    text: str
+    groups: frozenset[str]
+
+
 class MemoryCorruptionError(RuntimeError):
     """Raised when ``iter_all`` cannot reconstruct (almost) any stored row.
 
@@ -161,7 +180,9 @@ class MemoryStore:
         # import surface a non-fatal partial-loss warning.
         self.last_skipped_rows = 0
 
-    async def add_sql_pair(self, question: str, sql: str) -> None:
+    async def add_sql_pair(
+        self, question: str, sql: str, groups: Sequence[str] | None = None
+    ) -> None:
         await self._mem.save_tool_usage(
             question=question,
             tool_name=RUN_SQL_TOOL_NAME,
@@ -169,10 +190,71 @@ class MemoryStore:
             context=self._ctx,
             success=True,
             metadata={"source": _IMPORT_SOURCE},
+            groups=groups,
         )
 
-    async def add_schema_doc(self, content: str) -> None:
-        await self._mem.save_text_memory(content, self._ctx)
+    async def add_schema_doc(self, content: str, groups: Sequence[str] | None = None) -> None:
+        await self._mem.save_text_memory(content, self._ctx, groups=groups)
+
+    def dedup_entries(self) -> list[DedupEntry]:
+        """Every stored SQL pair and schema doc, with its id and groups, for import dedup.
+
+        Covers the rows :meth:`iter_all` turns into bundle items and raises
+        :class:`MemoryCorruptionError` when it does; call it on the memory worker.
+        """
+        self.iter_all()
+        collection = self._mem._get_collection()
+        got = collection.get(include=["metadatas"])
+        entries: list[DedupEntry] = []
+        for record in self._records_from_result(got, include_embeddings=False):
+            metadata = record.metadata
+            groups = frozenset(record_groups(metadata))
+            if metadata.get("is_text_memory"):
+                content = metadata.get("content")
+                if isinstance(content, str) and content.strip():
+                    entries.append(DedupEntry(record.memory_id, "schema_doc", "", content, groups))
+                continue
+            if metadata.get("tool_name") != RUN_SQL_TOOL_NAME:
+                continue
+            try:
+                args = json.loads(metadata.get("args_json", "{}"))
+            except (TypeError, ValueError):
+                continue
+            sql = args.get("sql") if isinstance(args, dict) else None
+            question = metadata.get("question")
+            if isinstance(sql, str) and sql and isinstance(question, str):
+                entries.append(DedupEntry(record.memory_id, "sql_pair", question, sql, groups))
+        return entries
+
+    def set_groups(self, updates: Mapping[str, Sequence[str]]) -> None:
+        """Replace the groups of each record id in ``updates``; call it on the memory worker."""
+        if not updates:
+            return
+        collection = self._mem._get_collection()
+        ids = list(updates)
+        got = collection.get(ids=ids, include=["metadatas"])
+        found_ids = got.get("ids") or []
+        metadatas = got.get("metadatas") or []
+        new_ids: list[str] = []
+        new_metadatas: list[dict[str, Any]] = []
+        for memory_id, metadata in zip(found_ids, metadatas, strict=False):
+            merged = {
+                key: value
+                for key, value in (metadata or {}).items()
+                if key not in (GROUPS_KEY, TAGGED_KEY)
+            }
+            merged.update(group_metadata(updates[memory_id]))
+            new_ids.append(memory_id)
+            new_metadatas.append(merged)
+        missing = set(ids) - set(new_ids)
+        if missing:
+            raise MemoryChangedDuringImportError(
+                f"{len(missing)} memory record(s) disappeared while their groups were updated"
+            )
+        # Chroma merges metadata on update, so a key left out would survive;
+        # every record written here was tagged or becomes tagged, never untagged.
+        with self._mem._collection_state.writing():
+            collection.update(ids=new_ids, metadatas=new_metadatas)
 
     def iter_all(self) -> MemoryBundle:
         """Enumerate the collection into a bundle.
@@ -214,9 +296,10 @@ class MemoryStore:
                 total += 1
                 continue
             total += 1
+            groups = record_groups(metadata) or None
             try:
                 if metadata.get("is_text_memory"):
-                    docs.append(SchemaDoc(content=metadata.get("content", "")))
+                    docs.append(SchemaDoc(content=metadata.get("content", ""), groups=groups))
                     continue
                 if metadata.get("tool_name") != RUN_SQL_TOOL_NAME:
                     continue
@@ -224,7 +307,9 @@ class MemoryStore:
                 sql = args.get("sql")
                 if not sql:
                     continue
-                pairs.append(SqlPair(question=metadata.get("question", ""), sql=sql))
+                pairs.append(
+                    SqlPair(question=metadata.get("question", ""), sql=sql, groups=groups)
+                )
             except (TypeError, ValueError, ValidationError) as exc:
                 # Corrupt/non-conforming stored row — skip rather than abort
                 # the whole enumeration (and the import that seeds off it).

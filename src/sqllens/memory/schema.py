@@ -10,9 +10,16 @@ convenience for SQL pairs only.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    StringConstraints,
+    field_validator,
+)
 
 QUESTION_MAX = 1000
 SQL_MAX = 10000
@@ -52,6 +59,15 @@ def _require_non_blank(value: str, field: str) -> str:
     return value
 
 
+GroupName = Annotated[StrictStr, StringConstraints(min_length=1)]
+
+
+def _distinct_groups(value: list[str] | None) -> list[str] | None:
+    if value is not None and len(set(value)) != len(value):
+        raise ValueError("groups must not repeat a group")
+    return value
+
+
 class SqlPair(BaseModel):
     """A single curated question→SQL training pair."""
 
@@ -59,6 +75,12 @@ class SqlPair(BaseModel):
 
     question: str = Field(max_length=QUESTION_MAX)
     sql: str = Field(max_length=SQL_MAX)
+    groups: list[GroupName] | None = Field(default=None, min_length=1)
+
+    @field_validator("groups")
+    @classmethod
+    def _g(cls, v: list[str] | None) -> list[str] | None:
+        return _distinct_groups(v)
 
     @field_validator("question")
     @classmethod
@@ -87,6 +109,12 @@ class SchemaDoc(BaseModel):
 
     training_type: Literal["schema_docs"] = "schema_docs"
     content: str = Field(max_length=CONTENT_MAX)
+    groups: list[GroupName] | None = Field(default=None, min_length=1)
+
+    @field_validator("groups")
+    @classmethod
+    def _g(cls, v: list[str] | None) -> list[str] | None:
+        return _distinct_groups(v)
 
     @field_validator("content")
     @classmethod
@@ -103,6 +131,18 @@ class MemoryBundle(BaseModel):
     schema_docs: list[SchemaDoc] | None = None
 
 
+class UnknownMemoryGroupsError(ValueError):
+    """An import names groups no loaded rule set's ``memory_groups`` lists."""
+
+    def __init__(self, groups: list[str]) -> None:
+        self.groups = sorted(set(groups))
+        super().__init__(
+            "the bundle names memory group(s) that no rule set's memory_groups lists: "
+            + ", ".join(repr(group) for group in self.groups)
+            + ". Nothing was imported."
+        )
+
+
 class ImportItemError(BaseModel):
     """A single rejected item, surfaced in the report rather than aborting."""
 
@@ -115,6 +155,8 @@ class ImportReport(BaseModel):
     """Outcome of an import run."""
 
     saved: int = 0
+    # Duplicates that changed the groups of a record they matched.
+    updated: int = 0
     skipped_duplicate: int = 0
     errors: list[ImportItemError] = Field(default_factory=list)
 
@@ -124,6 +166,7 @@ class ImportReport(BaseModel):
             "| metric | count |",
             "| --- | --- |",
             f"| saved | {self.saved} |",
+            f"| updated | {self.updated} |",
             f"| skipped (duplicate) | {self.skipped_duplicate} |",
             f"| errors | {len(self.errors)} |",
         ]

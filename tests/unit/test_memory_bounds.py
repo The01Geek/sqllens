@@ -19,7 +19,7 @@ from sqllens.agent.tools.agent_memory import (
     SearchSavedCorrectToolUsesTool,
 )
 from sqllens.memory import admin
-from sqllens.memory.schema import MAX_BUNDLE_ITEMS, MemoryBundle
+from sqllens.memory.schema import MAX_BUNDLE_ITEMS
 from sqllens.memory.store import MemoryStore
 
 from ._agent_stubs import StubAgentMemory
@@ -42,7 +42,7 @@ async def test_oversized_add_rejected_before_validation_or_store_work(kind):
 )
 async def test_exact_add_boundary_preserves_deduplication(kind, item, method):
     store = Mock()
-    store.iter_all.return_value = MemoryBundle()
+    store.dedup_entries.return_value = []
     writer = AsyncMock()
     setattr(store, method, writer)
     result = await admin.add_memories(store, **{kind: [item] * MAX_BUNDLE_ITEMS})
@@ -54,7 +54,7 @@ async def test_exact_add_boundary_preserves_deduplication(kind, item, method):
 
 async def test_mixed_errors_keep_indices_and_counts_without_raw_details():
     store = Mock()
-    store.iter_all.return_value = MemoryBundle()
+    store.dedup_entries.return_value = []
     store.add_sql_pair = AsyncMock(side_effect=[None, RuntimeError("synthetic-private-path")])
     result = await admin.add_memories(
         store,

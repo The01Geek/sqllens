@@ -9,7 +9,7 @@ tree so it is fully linted and SPDX-headed.
 """
 
 from sqllens.memory.exporter import ExportResult, export_bundle
-from sqllens.memory.importer import import_bundle
+from sqllens.memory.importer import configured_groups, import_bundle
 from sqllens.memory.schema import (
     ImportItemError,
     ImportReport,
@@ -17,6 +17,7 @@ from sqllens.memory.schema import (
     SchemaDoc,
     SqlPair,
     SqlPairsBlock,
+    UnknownMemoryGroupsError,
 )
 from sqllens.memory.store import MemoryCorruptionError, MemoryStore
 
@@ -30,6 +31,8 @@ __all__ = [
     "SchemaDoc",
     "SqlPair",
     "SqlPairsBlock",
+    "UnknownMemoryGroupsError",
+    "configured_groups",
     "export_bundle",
     "import_bundle",
 ]

@@ -8,7 +8,7 @@ import json
 import hashlib
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
@@ -41,6 +41,7 @@ from sqllens.agent.capabilities.agent_memory import (
 )
 from sqllens.agent.core.tool import ToolContext
 from sqllens._memory_consistency import collection_state
+from sqllens._memory_groups import and_filters, group_metadata, scope_filter
 
 
 class ChromaAgentMemory(AgentMemory):
@@ -71,6 +72,11 @@ class ChromaAgentMemory(AgentMemory):
                            restarts will retrieve the existing collection without
                            re-downloading the model.
         track_usage: Whether retrieval updates stored hit counters and timestamps.
+        group_scope: Returns the memory groups the current request may read;
+                    searches then return only untagged records and records
+                    sharing one of those groups. ``None`` (the default)
+                    searches every record. Called on the caller's event loop,
+                    before the search moves to the worker thread.
 
     Example:
         >>> from sqllens.agent.integrations.chromadb import ChromaAgentMemory
@@ -111,6 +117,7 @@ class ChromaAgentMemory(AgentMemory):
         embedding_function=None,
         *,
         track_usage: bool = True,
+        group_scope: Optional[Callable[[], Sequence[str]]] = None,
     ):
         if not CHROMADB_AVAILABLE:
             raise ImportError(
@@ -126,6 +133,14 @@ class ChromaAgentMemory(AgentMemory):
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._embedding_function = embedding_function
         self._track_usage = track_usage
+        self._group_scope = group_scope
+
+    def _scope_filter(self) -> Optional[Dict[str, Any]]:
+        # Must run before run_in_executor: the executor does not copy context
+        # variables, so a scope read on the worker thread sees no request.
+        if self._group_scope is None:
+            return None
+        return scope_filter(self._group_scope())
 
     @property
     def _collection_state(self):
@@ -208,8 +223,10 @@ class ChromaAgentMemory(AgentMemory):
         context: ToolContext,
         success: bool = True,
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        groups: Optional[Sequence[str]] = None,
     ) -> None:
-        """Save a tool usage pattern."""
+        """Save a tool usage pattern, tagged with ``groups`` when given."""
 
         def _save():
             collection = self._get_collection()
@@ -226,6 +243,7 @@ class ChromaAgentMemory(AgentMemory):
                 "timestamp": timestamp,
                 "success": success,
                 "metadata_json": json.dumps(metadata or {}),  # Serialize metadata too
+                **group_metadata(groups),
             }
 
             # Use question as document text for embedding
@@ -246,17 +264,16 @@ class ChromaAgentMemory(AgentMemory):
         tool_name_filter: Optional[str] = None,
     ) -> List[ToolMemorySearchResult]:
         """Search for similar tool usage patterns."""
+        group_filter = self._scope_filter()
 
         def _search():
             collection = self._get_collection()
 
-            # Prepare where filter - ChromaDB requires $and for multiple conditions
-            if tool_name_filter:
-                where_filter = {
-                    "$and": [{"success": True}, {"tool_name": tool_name_filter}]
-                }
-            else:
-                where_filter = {"success": True}
+            where_filter = and_filters(
+                {"success": True},
+                {"tool_name": tool_name_filter} if tool_name_filter else None,
+                group_filter,
+            )
 
             results = collection.query(
                 query_texts=[question], n_results=limit, where=where_filter
@@ -404,8 +421,14 @@ class ChromaAgentMemory(AgentMemory):
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _delete)
 
-    async def save_text_memory(self, content: str, context: ToolContext) -> TextMemory:
-        """Save a text memory."""
+    async def save_text_memory(
+        self,
+        content: str,
+        context: ToolContext,
+        *,
+        groups: Optional[Sequence[str]] = None,
+    ) -> TextMemory:
+        """Save a text memory, tagged with ``groups`` when given."""
 
         def _save():
             collection = self._get_collection()
@@ -417,6 +440,7 @@ class ChromaAgentMemory(AgentMemory):
                 "content": content,
                 "timestamp": timestamp,
                 "is_text_memory": True,
+                **group_metadata(groups),
             }
 
             with self._collection_state.writing():
@@ -437,11 +461,12 @@ class ChromaAgentMemory(AgentMemory):
         similarity_threshold: float = 0.7,
     ) -> List[TextMemorySearchResult]:
         """Search for similar text memories."""
+        group_filter = self._scope_filter()
 
         def _search():
             collection = self._get_collection()
 
-            where_filter = {"is_text_memory": True}
+            where_filter = and_filters({"is_text_memory": True}, group_filter)
 
             results = collection.query(
                 query_texts=[query], n_results=limit, where=where_filter

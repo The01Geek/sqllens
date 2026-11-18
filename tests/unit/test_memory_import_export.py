@@ -202,10 +202,10 @@ async def test_schema_doc_per_item_failure_is_isolated(
     """The schema_doc section's failure isolation, not just sql_pair."""
     real_add = store.add_schema_doc
 
-    async def flaky_doc(content: str) -> None:
+    async def flaky_doc(content: str, groups=None) -> None:
         if "fail" in content:
             raise RuntimeError("doc-boom")
-        await real_add(content)
+        await real_add(content, groups=groups)
 
     monkeypatch.setattr(store, "add_schema_doc", flaky_doc)
     bundle = MemoryBundle.model_validate(
@@ -230,11 +230,11 @@ async def test_per_item_save_failure_is_reported_not_fatal(
 
     real_add = store.add_sql_pair
 
-    async def flaky_add(question: str, sql: str) -> None:
+    async def flaky_add(question: str, sql: str, groups=None) -> None:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("boom")
-        await real_add(question, sql)
+        await real_add(question, sql, groups=groups)
 
     monkeypatch.setattr(store, "add_sql_pair", flaky_add)
     report = await import_bundle(store, _BUNDLE)
@@ -250,7 +250,7 @@ async def test_systemic_error_aborts_import_not_per_item(
     """A MemoryError/disk-full is environmental — fail fast, don't flatten it
     into one per-item error per row."""
 
-    async def oom(question: str, sql: str) -> None:
+    async def oom(question: str, sql: str, groups=None) -> None:
         raise MemoryError("out of memory")
 
     monkeypatch.setattr(store, "add_sql_pair", oom)
@@ -259,7 +259,7 @@ async def test_systemic_error_aborts_import_not_per_item(
 
 
 async def test_disk_full_aborts_import(store: MemoryStore, monkeypatch) -> None:
-    async def disk_full(question: str, sql: str) -> None:
+    async def disk_full(question: str, sql: str, groups=None) -> None:
         raise OSError("No space left on device")
 
     monkeypatch.setattr(store, "add_sql_pair", disk_full)

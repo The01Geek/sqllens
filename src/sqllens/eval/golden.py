@@ -40,7 +40,8 @@ def load_golden(text: str, fmt: str) -> list[GoldenCase]:
     silent success" contract.
 
     Raises :class:`sqllens.memory.io.BundleFormatError` on a malformed bundle
-    (size cap, schema violation, etc.) — the parser's existing error path.
+    (size cap, schema violation, etc.) — the parser's existing error path — and
+    on a pair carrying ``groups``.
     """
     from sqllens.memory.io import VALID_FORMATS, parse_csv, parse_json
 
@@ -48,9 +49,18 @@ def load_golden(text: str, fmt: str) -> list[GoldenCase]:
         raise ValueError(
             f"unknown golden-file format {fmt!r}; expected one of {VALID_FORMATS}"
         )
+    from sqllens.memory.io import BundleFormatError
+
     bundle = parse_csv(text, defang=False) if fmt == "csv" else parse_json(text)
     if bundle.sql_pairs is None:
         return []
+    # Every case runs under the one identity given on the command line.
+    for index, pair in enumerate(bundle.sql_pairs.pairs):
+        if pair.groups is not None:
+            raise BundleFormatError(
+                f"sql_pairs.pairs[{index}] (question {pair.question!r}) carries groups; "
+                "golden-file items cannot carry groups"
+            )
     return [
         GoldenCase(question=pair.question, expected_sql=pair.sql)
         for pair in bundle.sql_pairs.pairs

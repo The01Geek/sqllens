@@ -10,6 +10,7 @@ This module is the boundary between the agent framework (``sqllens.agent.core``,
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -36,7 +37,7 @@ from sqllens.agent.tools import (
 )
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
 from sqllens.conversation_store import BoundedConversationStore
-from sqllens.rule_sets import current_rule_set_selection
+from sqllens.rule_sets import LoadedRuleSets, current_rule_set_selection
 from sqllens.safety import (
     ReadOnlyGuardRunner,
     ResultMaskingRunner,
@@ -82,6 +83,18 @@ class _RuleSetUserResolver(UserResolver):
             email=f"{DEFAULT_USER_ID}@local",
             group_memberships=[DEFAULT_USER_GROUP],
         )
+
+
+def _rule_set_memory_scope(rule_sets: LoadedRuleSets) -> Callable[[], tuple[str, ...]]:
+    """The groups the current request's rule set may read; none without a selection."""
+
+    def scope() -> tuple[str, ...]:
+        selection = current_rule_set_selection()
+        if selection is None:
+            return ()
+        return rule_sets.memory_groups_for(selection.name)
+
+    return scope
 
 
 def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
@@ -150,13 +163,14 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     )
     # While a rule-set file is configured the agent writes no memory (no save
     # tools, no retrieval counter or timestamp updates), whatever
-    # memory.save_queries and memory.save_text_memories say: memory is shared
-    # by every rule set.
+    # memory.save_queries and memory.save_text_memories say: a record the agent
+    # saved would carry no group and so reach every rule set.
     allow_memory_writes = allow_memory_writes and rule_sets is None
     memory = ChromaAgentMemory(
         persist_directory=str(cfg.memory.persist_dir),
         collection_name=cfg.memory.collection,
         track_usage=allow_memory_writes,
+        group_scope=None if rule_sets is None else _rule_set_memory_scope(rule_sets),
     )
 
     # Wire the system-prompt context enhancer explicitly so both memory
