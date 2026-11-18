@@ -1,0 +1,837 @@
+{
+  "iter": 1,
+  "loop_role": "fix",
+  "fix_commit_sha": "96d87e57bb2e2edaac4d9c0865c8c3690823caf5",
+  "fix_decisions": [
+    {
+      "finding_id": "F-1",
+      "decision": "applied",
+      "commit": "96d87e57bb2e2edaac4d9c0865c8c3690823caf5",
+      "evidence": "import_bundle now runs _plan through run_memory_call; test_memory_event_loop asserts dedup normalization runs off the loop"
+    },
+    {
+      "finding_id": "VC-4",
+      "decision": "applied",
+      "commit": "96d87e57bb2e2edaac4d9c0865c8c3690823caf5",
+      "evidence": "add_memories checks raw item groups (invalid items included) against known_groups before validation or any write; criterion 'An import ... that names a group no loaded rule set lists leaves the store unchanged': case invalid item with unknown group -> now refused, store unchanged (was: valid items written). New test test_add_memories_refuses_unknown_group_on_an_invalid_item"
+    },
+    {
+      "finding_id": "VC-72",
+      "decision": "applied",
+      "commit": "96d87e57bb2e2edaac4d9c0865c8c3690823caf5",
+      "evidence": "load_golden refuses schema_docs items carrying groups, naming schema_docs[i], before the no-sql_pairs return; criterion 16 case schema_docs item with groups -> now non-zero exit naming item. Tests parametrized with and without sql_pairs"
+    },
+    {
+      "finding_id": "F-2",
+      "decision": "applied",
+      "commit": "96d87e57bb2e2edaac4d9c0865c8c3690823caf5",
+      "evidence": "test_sql_match_rule covers SELECT 'abc (TokenError confirmed on locked sqlglot)"
+    },
+    {
+      "finding_id": "F-5",
+      "decision": "applied",
+      "commit": "96d87e57bb2e2edaac4d9c0865c8c3690823caf5",
+      "evidence": "memory.md and transport.md now name the _plan and set_groups worker calls"
+    },
+    {
+      "finding_id": "F-6",
+      "decision": "applied",
+      "commit": "96d87e57bb2e2edaac4d9c0865c8c3690823caf5",
+      "evidence": "_enforce_item_caps docstring names dedup_entries"
+    }
+  ],
+  "telemetry": "unavailable",
+  "phase3_failed_agents": [],
+  "diff_produced_at_head": "561152f0eb7749f9c96ff42cd4d8734ca08ad528",
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "clean",
+      "reason": null
+    }
+  },
+  "iteration_head": "96d87e57bb2e2edaac4d9c0865c8c3690823caf5",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "agent": "prflow:requesting-code-review",
+      "severity": "important",
+      "file": "src/sqllens/memory/importer.py",
+      "line_range": [
+        198,
+        198
+      ],
+      "kind": "other",
+      "description": "import_bundle runs _plan (sqlglot parse and regenerate of every stored and incoming SQL pair via sql_key) directly on the event loop instead of through run_memory_call, blocking the HTTP server during imports and add_memories; no responsiveness test covers it.",
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-2",
+      "agent": "prflow:requesting-code-review",
+      "severity": "suggestion",
+      "file": "src/sqllens/memory/importer.py",
+      "line_range": [
+        50,
+        66
+      ],
+      "kind": "test_gap",
+      "description": "The TokenError fallback of sql_key has no test (no tokenizer-failing input such as SELECT 'abc).",
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-3",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "file": "src/sqllens/memory/store.py",
+      "line_range": [
+        229,
+        257
+      ],
+      "kind": "type_design",
+      "description": "Public MemoryStore.set_groups accepts an empty sequence; ChromaDB metadata merge would keep the old groups. The grow-only rule lives only in a comment."
+    },
+    {
+      "finding_id": "F-4",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "file": "src/sqllens/memory/store.py",
+      "line_range": [
+        125,
+        136
+      ],
+      "kind": "type_design",
+      "description": "DedupEntry and _NewItem keep kind and payload as separate fields, so mismatched pairs can be built."
+    },
+    {
+      "finding_id": "F-5",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "file": "docs/internal/agent/memory.md",
+      "line_range": [
+        152,
+        152
+      ],
+      "kind": "comment_drift",
+      "description": "memory.md line 152 and transport.md line 121 describe one memory-worker call for the import and omit the new set_groups write path.",
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-6",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "file": "src/sqllens/memory/io.py",
+      "line_range": [
+        81,
+        81
+      ],
+      "kind": "documented_falsehood",
+      "description": "Changed _enforce_item_caps docstring names MemoryStore.iter_all as the import dedup check; the import now reads dedup_entries. Capped at Suggestion by the behavior-inert prose cap.",
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-7",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "file": "tests/unit/test_memory_groups.py",
+      "line_range": null,
+      "kind": "test_gap",
+      "description": "_both_paths only asserts direct hits appear in the tool result, never that out-of-scope questions are absent."
+    },
+    {
+      "finding_id": "F-8",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "file": "src/sqllens/memory/store.py",
+      "line_range": null,
+      "kind": "test_gap",
+      "description": "No test covers set_groups raising MemoryChangedDuringImportError when a record disappears mid-import, on any surface."
+    },
+    {
+      "finding_id": "F-9",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "file": "src/sqllens/memory/exporter.py",
+      "line_range": null,
+      "kind": "test_gap",
+      "description": "No test asserts the CLI prints the CSV dropped-groups Warning:."
+    },
+    {
+      "finding_id": "F-10",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "file": "src/sqllens/_memory_groups.py",
+      "line_range": [
+        42,
+        51
+      ],
+      "kind": "logic_error",
+      "description": "record_groups silently returns [] for a tagged record with malformed memory_groups, while scope_filter treats it as tagged; export then re-import makes it visible to every rule set."
+    },
+    {
+      "finding_id": "F-11",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "file": "src/sqllens/memory/store.py",
+      "line_range": null,
+      "kind": "other",
+      "description": "dedup_entries skips unreadable rows without counting or logging them, so their duplicates are saved again."
+    }
+  ],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "checklist_skipped": null
+  },
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "checklist": [
+    {
+      "id": "VC-1",
+      "claim_signature": "api_contract:413.changed.md:updated-count-surfaces",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-2",
+      "claim_signature": "absolute_claim:managing-memory.md:sql-dedup-match-rule",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-3",
+      "claim_signature": "data_format_assumption:managing-memory.md:question-content-norm",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-4",
+      "claim_signature": "absolute_claim:managing-memory.md:unknown-group-refusal",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "FAIL",
+      "severity": "important"
+    },
+    {
+      "id": "VC-5",
+      "claim_signature": "absolute_claim:managing-memory.md:csv-never-changes-groups",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-6",
+      "claim_signature": "api_contract:managing-memory.md:cli-summary-format",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-7",
+      "claim_signature": "api_contract:managing-memory.md:csv-groups-lossy",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-8",
+      "claim_signature": "api_contract:managing-memory.md:golden-groups-refused",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "important"
+    },
+    {
+      "id": "VC-9",
+      "claim_signature": "api_contract:managing-memory.md:unretrievable-count",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-10",
+      "claim_signature": "absolute_claim:rule-sets.md:filter-inside-search",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-11",
+      "claim_signature": "api_contract:rule-sets.md:verify-memory-parity",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-12",
+      "claim_signature": "data_format_assumption:rule-sets.md:memory-groups-field",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-13",
+      "claim_signature": "api_contract:rule-sets.md:stats-access-rules-groups",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-14",
+      "claim_signature": "dependency_interaction:rule-sets.md:chroma-list-metadata-semantics",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-15",
+      "claim_signature": "dependency_interaction:rule-sets.md:scope-before-executor",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-16",
+      "claim_signature": "api_contract:rule-sets.md:group-scope-wiring",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-17",
+      "claim_signature": "api_contract:memory.md:add-memories-result",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-18",
+      "claim_signature": "data_format_assumption:memory.md:groups-only-tagged",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-19",
+      "claim_signature": "api_contract:memory.md:check-order-set-groups",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-20",
+      "claim_signature": "dependency_interaction:_memory_groups.py:list-metadata-contains",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-21",
+      "claim_signature": "absolute_claim:_memory_groups.py:missing-key-ne-semantics",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-22",
+      "claim_signature": "dependency_interaction:_memory_groups.py:empty-list-or-limits",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-23",
+      "claim_signature": "api_contract:_memory_groups.py:tagged-marker-paired",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-24",
+      "claim_signature": "dependency_interaction:factory.py:memory-groups-for",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-25",
+      "claim_signature": "dependency_interaction:agent_memory.py:scope-read-before-executor",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-26",
+      "claim_signature": "api_contract:access_rules.py:memory-groups-field",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-27",
+      "claim_signature": "api_contract:admin.py:known-groups-wiring",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-28",
+      "claim_signature": "api_contract:admin.py:stats-known-groups-none",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-29",
+      "claim_signature": "api_contract:admin.py:widget-count-keys",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-30",
+      "claim_signature": "data_format_assumption:admin.py:json-export-shape",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-31",
+      "claim_signature": "dependency_interaction:exporter.py:iter-all-groups",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-32",
+      "claim_signature": "dependency_interaction:importer.py:store-dedup-api",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-33",
+      "claim_signature": "absolute_claim:importer.py:catch-all-sqlglot-errors",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-34",
+      "claim_signature": "data_format_assumption:importer.py:dedup-groups-frozenset",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-35",
+      "claim_signature": "api_contract:schema.py:import-report-updated",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-36",
+      "claim_signature": "absolute_claim:tools.md:unknown-group-nothing-written",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-37",
+      "claim_signature": "dependency_interaction:store.py:save-tool-usage-groups",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-38",
+      "claim_signature": "dependency_interaction:store.py:save-text-memory-groups",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-39",
+      "claim_signature": "dependency_interaction:store.py:memory-groups-helpers",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-40",
+      "claim_signature": "dependency_interaction:store.py:update-merges-metadata",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-41",
+      "claim_signature": "absolute_claim:store.py:set-groups-never-untagged",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-42",
+      "claim_signature": "dependency_interaction:store.py:get-ids-alignment",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-43",
+      "claim_signature": "dependency_interaction:store.py:private-collection-helpers",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-44",
+      "claim_signature": "api_contract:store.py:dedup-matches-iter-all",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-45",
+      "claim_signature": "dependency_interaction:server.py:configured-groups-import",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-46",
+      "claim_signature": "api_contract:server.py:add-memories-known-groups",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-47",
+      "claim_signature": "api_contract:server.py:stats-unretrievable-count",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-48",
+      "claim_signature": "api_contract:server.py:duplicate-merge-docstring",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-49",
+      "claim_signature": "api_contract:memory_admin.html:updated-unretrievable-keys",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-50",
+      "claim_signature": "test_mock_alignment:test_memory_bounds.py:dedup-entries-mock",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-51",
+      "claim_signature": "test_mock_alignment:test_memory_import_export.py:groups-keyword",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-52",
+      "claim_signature": "test_mock_alignment:test_memory_tool_responsiveness.py:held-dedup-entries",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-53",
+      "claim_signature": "data_format_assumption:test_access_rules.py:memory-groups-empty-list",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-54",
+      "claim_signature": "data_format_assumption:rule_sets.py:memory-groups-error-message",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-55",
+      "claim_signature": "dependency_interaction:test_memory_groups.py:private-hooks",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-56",
+      "claim_signature": "data_format_assumption:test_memory_groups.py:message-formats",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-1",
+      "id": "VC-57",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-2",
+      "id": "VC-58",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-3",
+      "id": "VC-59",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-4",
+      "id": "VC-60",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-5",
+      "id": "VC-61",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-6",
+      "id": "VC-62",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-7",
+      "id": "VC-63",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-8",
+      "id": "VC-64",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-9",
+      "id": "VC-65",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-10",
+      "id": "VC-66",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-11",
+      "id": "VC-67",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-12",
+      "id": "VC-68",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-13",
+      "id": "VC-69",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-14",
+      "id": "VC-70",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-15",
+      "id": "VC-71",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-16",
+      "id": "VC-72",
+      "reused_from_iter_prev": false,
+      "verdict": "FAIL",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-17",
+      "id": "VC-73",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-18",
+      "id": "VC-74",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-19",
+      "id": "VC-75",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-20",
+      "id": "VC-76",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-21",
+      "id": "VC-77",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "critical"
+    }
+  ],
+  "fix_files": [
+    "docs/internal/agent/memory.md",
+    "docs/internal/mcp-server/transport.md",
+    "src/sqllens/eval/golden.py",
+    "src/sqllens/memory/admin.py",
+    "src/sqllens/memory/importer.py",
+    "src/sqllens/memory/io.py",
+    "tests/unit/test_memory_event_loop.py",
+    "tests/unit/test_memory_groups.py"
+  ],
+  "synthesized": false
+}

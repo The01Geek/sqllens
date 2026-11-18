@@ -1,0 +1,86 @@
+[
+  {
+    "criterion": 1,
+    "text": "A rule-set file whose rule sets carry `memory_groups` loads with `format_version = 1`. A rule-set file with no `memory_groups` anywhere loads as before this change. A `memory_groups` that is empty, holds a duplicate, or holds a non-string is refused at load like any other invalid rule-set field."
+  },
+  {
+    "criterion": 2,
+    "text": "While a rule-set file is configured, a `query_database` request under rule set S gets, from both the `search_saved_correct_tool_uses` tool and the automatic system-prompt memory context, only records that are untagged or share at least one group with S's `memory_groups`. A tagged record whose groups S does not list is never returned to a request under S."
+  },
+  {
+    "criterion": 3,
+    "text": "While a rule-set file is configured, a memory search with an empty group list (the request's rule set lists no `memory_groups`, or no rule-set selection is available to the search) gets only untagged records from both memory paths."
+  },
+  {
+    "criterion": 4,
+    "text": "A memory search under rule set S returns an in-scope record that clears the similarity threshold even when more records than the search's result limit, all outside S's groups, score higher."
+  },
+  {
+    "criterion": 5,
+    "text": "A record stored before the upgrade, while it remains untagged, is retrieved after the upgrade by requests under every rule set, with no re-import or migration step."
+  },
+  {
+    "criterion": 6,
+    "text": "Without a rule-set file, memory retrieval returns tagged and untagged records alike, as before this change."
+  },
+  {
+    "criterion": 7,
+    "text": "`sqllens verify-memory` run with `--rule-set S` retrieves memory exactly as a `query_database` request under S does."
+  },
+  {
+    "criterion": 8,
+    "text": "`sqllens import-memory`, the `import_memory` tool and the `add_memories` tool accept an optional `groups` list (non-empty, distinct strings) on each SQL pair and schema doc. An empty or duplicate-holding `groups` is a validation error."
+  },
+  {
+    "criterion": 9,
+    "text": "An import through any of those three surfaces that names a group no loaded rule set's `memory_groups` lists leaves the store unchanged, with nothing written and, for `sqllens import-memory --clear`, nothing deleted. The CLI exits non-zero and the tools return `isError: true`, and the message names every unknown group. With no rule-set file configured, any import that names a group is refused this way."
+  },
+  {
+    "criterion": 10,
+    "text": "An imported item that duplicates an existing record or an earlier item of the same import creates no second record and sets the groups of every record it matches this way: a tagged item onto a tagged record gives the union of both; a tagged item onto an untagged record gives the item's groups; an untagged item leaves the record's groups as they were. A duplicate that changed the record's groups is counted as updated, and one that changed nothing as a skipped duplicate. The updated count is shown as `updated=<n>` in the `sqllens import-memory` summary line, in the `import_memory` tool's report, and as `updated_count` in the `add_memories` result. A dry run reports the same counts without writing."
+  },
+  {
+    "criterion": 11,
+    "text": "Duplicate detection compares `sql` texts with sqlglot under the MySQL dialect: two texts match when each parses into exactly one statement and both regenerate to the same SQL, with string literals and identifiers keeping their case, so `WHERE region = 'EU'` and `where region = 'eu'` do not match while `SELECT a FROM t` and `select a\\n  from t` do. When sqlglot raises any exception on either `sql` text while parsing or regenerating (`ParseError`, `TokenError` and `RecursionError` included), or the text parses into no statement or more than one, the two match only when their texts are identical after trimming leading and trailing whitespace, so re-importing the same file still saves nothing new. `question` texts match after collapsing whitespace and ignoring case, and `content` texts match as before this change."
+  },
+  {
+    "criterion": 12,
+    "text": "For a store in which no two records duplicate each other under the match rule, exporting it to JSON with `sqllens export-memory` or the `export_memories` tool and importing the result into an empty store recreates every record the export wrote, with the same groups, untagged records staying untagged, when every group the export names is listed in a loaded rule set's `memory_groups`. An export naming a group no rule set lists is refused on import like any other unknown group."
+  },
+  {
+    "criterion": 13,
+    "text": "A CSV export of a store holding at least one tagged record returns `lossy: true` from `export_memories`, and `sqllens export-memory` prints a `Warning:`. Both state how many records' groups were dropped. A CSV import never changes an existing record's groups."
+  },
+  {
+    "criterion": 14,
+    "text": "`list_memories` and `get_memory` return each record's groups. While a rule-set file is configured, `get_memory_stats` returns the count of tagged records none of whose groups appears in any rule set's `memory_groups`; without a rule-set file that count is 0."
+  },
+  {
+    "criterion": 15,
+    "text": "`get_access_rules` returns each rule set's `memory_groups`."
+  },
+  {
+    "criterion": 16,
+    "text": "`sqllens verify-memory` exits non-zero before running any case when its golden file has an item carrying `groups`, and the message names that item."
+  },
+  {
+    "criterion": 17,
+    "text": "The change leaves these unchanged: with a rule-set file configured, the agent has neither `save_question_tool_args` nor `save_text_memory`; and the memory admin tools (`list_memories`, `get_memory`, `export_memories`, `get_memory_stats`, `delete_memory`, `clear_memories`, `add_memories`) and `import_memory` act on every record for any caller, without regard to rule sets."
+  },
+  {
+    "criterion": 18,
+    "text": "`docs/external/rule-sets.md` documents `memory_groups` in the file reference and replaces the \"Memory is shared by every rule set\" limit with the group rule, still stating that the memory admin tools are not limited by rule sets and that SQL Lens trusts `_meta`."
+  },
+  {
+    "criterion": 19,
+    "text": "`docs/external/managing-memory.md` documents the bundle `groups` field, the unknown-group refusal, how duplicates combine groups, and that CSV carries no groups. Its paragraph beginning \"Duplicate entries are skipped automatically\" states the new match rule (SQL compared by sqlglot with literal and identifier case kept, exact text when the SQL does not parse) and that a duplicate which changes a record's groups counts as updated."
+  },
+  {
+    "criterion": 20,
+    "text": "`docs/internal/database-connectors/rule-sets.md` and `docs/internal/agent/memory.md` describe group-filtered retrieval. No doc or code comment states that memory is shared by every rule set as a fact; today that claim appears at least in `docs/external/rule-sets.md` (the \"Nothing is saved to memory\" and \"Memory is shared by every rule set\" bullets), `docs/internal/database-connectors/rule-sets.md` and the rule-set write-gate comment in `src/sqllens/agent/factory.py`."
+  },
+  {
+    "criterion": 21,
+    "text": "The `chromadb` lower bound in `pyproject.toml` admits only releases that support list-valued metadata and the `$contains` filter on it, and that evaluate the metadata filter the retrieval uses the way 1.5.9 does for a record missing the filtered key."
+  }
+]

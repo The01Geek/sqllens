@@ -1,0 +1,949 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "verdict": "REJECT",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:comment-analyzer",
+   "corroborated_by": [
+    "prflow:requesting-code-review"
+   ],
+   "severity": "important",
+   "file": "docs/external/managing-memory.md",
+   "line_range": [
+    176,
+    176
+   ],
+   "kind": "documented_falsehood",
+   "description": "The verify-memory paragraph says only pairs may not carry groups and that the notes block is ignored, but load_golden (src/sqllens/eval/golden.py:64-66) also refuses a golden file whose schema_docs entry carries groups, naming schema_docs[i]. This is a published user doc."
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "file": "src/sqllens/memory/importer.py",
+   "line_range": [
+    137,
+    154
+   ],
+   "kind": "logic_error",
+   "description": "When saving a new item fails, the duplicates already merged into it are still counted as updated or skipped duplicates, though their groups are lost; the failure itself still surfaces as isError."
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "file": "src/sqllens/memory/importer.py",
+   "line_range": null,
+   "kind": "comment_drift",
+   "description": "import_bundle writes set_groups before the save loop; the 'Partial progress so far is intentionally lost' comment does not say the group changes already written stay after a systemic abort."
+  },
+  {
+   "finding_id": "F-4",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "file": "src/sqllens/memory/store.py",
+   "line_range": null,
+   "kind": "comment_drift",
+   "description": "The dedup_entries docstring (and iter_all docstring, docs/internal/agent/memory.md) claims it covers the same rows iter_all turns into bundle items; it keeps a looser set. Capped at Suggestion by the behavior-inert prose cap."
+  },
+  {
+   "finding_id": "F-5",
+   "agent": "prflow:requesting-code-review",
+   "severity": "suggestion",
+   "file": "docs/internal/agent/memory.md",
+   "line_range": [
+    152,
+    152
+   ],
+   "kind": "comment_drift",
+   "description": "The list of synchronous MemoryStore methods omits the new dedup_entries and set_groups. Capped at Suggestion by the behavior-inert prose cap."
+  },
+  {
+   "finding_id": "F-6",
+   "agent": "prflow:requesting-code-review",
+   "severity": "suggestion",
+   "file": "src/sqllens/memory/store.py",
+   "line_range": null,
+   "kind": "race",
+   "description": "set_groups reads metadata then writes the whole dict in a separate call; a hit_count/last_hit_date update made in between (track_usage on, no rule-set file) is overwritten. Only usage counters are lost."
+  },
+  {
+   "finding_id": "F-7",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "file": "src/sqllens/memory/store.py",
+   "line_range": null,
+   "kind": "type_design",
+   "description": "Public MemoryStore.set_groups accepts an empty sequence, which Chroma's metadata merge silently ignores; only a comment enforces that groups only grow."
+  },
+  {
+   "finding_id": "F-8",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "file": "src/sqllens/memory/store.py",
+   "line_range": null,
+   "kind": "type_design",
+   "description": "Only the DedupEntry docstring ties question to kind (it is empty for a schema_doc); no check enforces it."
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [
+  {
+   "agent": "prflow:code-reviewer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 2 (>= 2)"
+  },
+  {
+   "agent": "prflow:pr-test-analyzer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 2 (>= 2)"
+  }
+ ],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [
+  "F-1",
+  "VC-19",
+  "VC-46",
+  "VC-77"
+ ],
+ "criterion_exempt": [],
+ "report": "## Verdict: REJECT (three checklist FAILs at or above the Important threshold, and one Important doc finding)\nThe PR is not ready to merge: the export and import round-trip claims do not hold as written, and the external golden-file doc understates what verify-memory refuses.\nRule applied: rule 1 — a checklist FAIL at or above the threshold → REJECT\n\n## Code Review Findings\n\n### 🔴 Critical\n- VC-77: FAIL (critical) — For a store in which no two records duplicate each other under the match rule, exporting it to JSON with `sqllens export-memory` or the `export_memories` tool and importing the result into an empty store recreates every record the export wrote, with the same groups, untagged records staying untagged, when every group the export names is listed in a loaded rule set's `memory_groups`. An export naming a group no rule set lists is refused on import like any other unknown group. [src/sqllens/memory/io.py:62-96] — fix the code, or have the issue author amend this criterion\n\n  <details><summary>Evidence</summary>\n\n  criteria.json counts (criterion 12 matches this item); graded as limited by the siblings. Core path is correct: store.iter_all/_bundle_from_metadatas (store.py:259-326) emits groups via record_groups (None for untagged); serialize_json/export_memories (io.py:203, admin.py:379-388) keep `groups` (exclude_none keeps untagged without the key); importer.import_bundle (importer.py:175-239) refuses unknown groups before any write (UnknownMemoryGroupsError, importer.py:193-195; known_groups=configured_groups(cfg) in cli.py:491, server.py:585, server.py:821), and _plan dedups by the same pair_key/doc_key match rule, so in an empty store with no matching pairs every item becomes a new record written with its groups (importer.py:206-213) and untagged stays untagged (group_metadata returns {} for none, _memory_groups.py:30-39). Trigger code conditions split: (a) unknown-group refusal -> outside the trigger (claim's trigger requires every group be listed; second sentence of the claim requires this refusal); (b) sqlglot exception / non-single statement in sql_key -> falls back to stripped text; distinct records stay distinct, so outside the trigger's breaking set (no departure); (c) per-item save exception -> report.errors, and the tools/CLI treat errors as failure (fail-closed runtime fault, outside the trigger); (d) parse-boundary caps in memory/io.py:62-96 (10 MiB, 10,000 items per block, depth 64) applied by parse_json on import_memory and the CLI, and the 10,000-item cap in add_memories (admin.py:250-252): a store with no duplicates but more than 10,000 pairs or docs, or a >10 MiB export, is exportable (iter_all/export_bundle have no cap, io.py:81-84) but the import is refused with 'exceeds the 10000-item cap', so it does not recreate every record. This input meets every condition the trigger states, is not a runtime fault, and no sibling criterion names it, so it is a departure under the grading rules (documented pre-existing limit at docs/external/managing-memory.md:97, fails closed with a clear message, not introduced by this PR). Also noted: export_memories' JSON shape ({sql_pairs: [..]}, admin.py:379-388) is the add_memories argument shape, not the import_memory/CLI bundle shape (sql_pairs: {pairs: [..]}, schema.py:130), so import_memory cannot take the tool's output directly; pre-existing.\n\n  </details>\n\n### 🟠 Important / Major\n1. `docs/external/managing-memory.md` line 176 says a golden file may not give any *pair* `groups`, and that \"the free-form notes block, if present, is ignored\". At head, `load_golden` in `src/sqllens/eval/golden.py` (lines 64-66) also refuses a file whose `schema_docs` entry carries `groups`, naming `schema_docs[i]`. A note with `groups` therefore makes verify-memory refuse the whole file. This page is published to users. (raised by 2/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: user-facing doc page; no tool reads it; making it true changes no branch -->\n- VC-19: FAIL (important) — JSON export round-trips losslessly, keeping each entry's groups. [docs/external/managing-memory.md]\n\n  <details><summary>Evidence</summary>\n\n  serialize_json (io.py:203-206) dumps the bundle with model_dump(exclude_none=True), so groups are exported. But import_bundle (importer.py:175-213) runs _plan (114-161), which keys every incoming pair by pair_key = (normalized question, sql_key(sql)) (50-68) and merges any item matching an earlier item of the same import into one record (lines 139-154: no new record, groups unioned). So two stored records that export as distinct entries but share a key, for example 'SELECT 1;' and 'SELECT 1' with the same question, which sqlglot MySQL regeneration makes identical, come back from an import into an empty store as ONE record with merged groups. Record count and per-entry group sets are not preserved, so the round trip is not lossless. Records stored before the sql_key rule can differ under the old rule but match under the new one, so this input is reachable. Separately, a tagged entry whose group no rule set lists makes the import raise UnknownMemoryGroupsError (193-195); docs/external/managing-memory.md:88 discloses that refusal, so it is a caveat, not the main counterexample. The doc claim at line 148, 'complete, lossless backup', is an absolute statement and is wrong for duplicate-under-key records.\n\n  </details>\n\n- VC-46: FAIL (important) — export_memories JSON emits each pair via SqlPair.model_dump(exclude_none=True) (question, sql, groups when set) and each doc without training_type, a shape the import parser accepts back under the bundle models. [src/sqllens/memory/admin.py]\n\n  <details><summary>Evidence</summary>\n\n  admin.py:379-388 emits {\"sql_pairs\": [ {question,sql,groups?}, ...], \"schema_docs\": [ {content,groups?} ]} (SqlPair.model_dump(exclude_none=True); docs exclude training_type). SqlPair (schema.py:71-78) has extra=forbid and only question/sql/groups, so the per-item part of the claim holds. But the claim says this shape is accepted back by the import parser under the bundle models: io.parse_json (io.py:153) does MemoryBundle.model_validate(raw), and MemoryBundle.sql_pairs is SqlPairsBlock | None (schema.py:130), an object with a `pairs` key (schema.py:96-102, extra=forbid). A top-level list for sql_pairs fails validation, so the exported JSON is rejected by parse_json / sqllens import-memory. It is only accepted by add_memories (admin.py:233-304), which takes bare lists and builds the bundle itself; the export docstring (admin.py:335-337) says so explicitly. So the 'bundle models' round-trip part is false. Requirement text (docs/external/managing-memory.md:50) says JSON export 'round-trips without losing anything', which concerns the CLI export; the MCP export shape is a separate format, so impact is limited.\n\n  </details>\n\n### 🟡 Suggestion / Minor (7)\n\n<details><summary>7 items</summary>\n\n1. `src/sqllens/memory/importer.py` lines 137-154 (`_plan`) and 217-231 (save loop): when saving a new item fails, the duplicates already merged into it are still counted as updated or skipped duplicates, though their groups are lost with the item. The failure itself still surfaces as `isError`. (raised by 1/5 agents)\n2. `src/sqllens/memory/importer.py`: `import_bundle` writes `set_groups` for stored records before the save loop runs. The \"Partial progress so far is intentionally lost\" comment does not say that the group changes already written stay after a systemic abort. (raised by 1/5 agents)\n3. `src/sqllens/memory/store.py`: the `dedup_entries` docstring says it \"Covers the rows `iter_all` turns into bundle items\". It actually keeps a looser set, including rows the bundle models reject. The `iter_all` docstring and `docs/internal/agent/memory.md` repeat the same equivalence. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: internal docstring and internal doc; no tool reads them -->\n4. `docs/internal/agent/memory.md` line 152: the list of synchronous `MemoryStore` methods leaves out the new `dedup_entries` and `set_groups`. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: internal doc page, not published -->\n5. `src/sqllens/memory/store.py` `set_groups`: it reads metadata, then writes the whole dict back in a separate call. A `hit_count`/`last_hit_date` update made in between, possible when no rule-set file is configured, is overwritten. Only usage counters are lost. (raised by 1/5 agents)\n6. `src/sqllens/memory/store.py` `set_groups`: an empty groups sequence passes the type, but Chroma's metadata merge silently keeps the old groups. Only the comment enforces that groups only grow. (raised by 1/5 agents)\n7. `src/sqllens/memory/store.py` `DedupEntry`: only the docstring ties `question` to `kind` (it is empty for a `schema_doc`); no check enforces it. (raised by 1/5 agents)\n\n</details>\n\n### ℹ️ Informational — Deferred\n- VC-20: INCONCLUSIVE (important) — scope_filter builds a where clause using {'memory_groups': {'$contains': name}} on a list-valued metadata key and {'memory_tagged': {'$ne': True}}; ChromaDB >=1.5 accepts $contains on list metadata in collection.query where= and evaluates $ne True as matching a record that lacks the key. [src/sqllens/_memory_groups.py]\n\n  <details><summary>Evidence</summary>\n\n  src/sqllens/_memory_groups.py:22,63 builds {'memory_tagged': {'$ne': True}} and {'$or': [untagged, {'memory_groups': {'$contains': name}}...]} as the claim says. The claim depends on installed chromadb behaviour (validate_where and the sqlite metadata segment's $ne on a missing key). The item has no dependency_sources, and chromadb source is not in the head view. Per the rules a library claim without dependency_sources is verified from the views alone, and the views cannot settle it. I did not read chromadb source from outside the supplied directories, so chromadb's validation and evaluation of these filters is unverified.\n\n  </details>\n\n- VC-32: INCONCLUSIVE (important) — chromadb lower bound 1.5 admits only releases supporting list-valued metadata and $contains on it, with missing-key $ne semantics as in 1.5.9. [pyproject.toml]\n\n  <details><summary>Evidence</summary>\n\n  pyproject.toml:35 has \"chromadb>=1.5,<2\" and requirements.txt:31 locks chromadb==1.5.9. Whether 1.5.0-1.5.8 support list-valued metadata, $contains on it, and the same missing-key $ne semantics as 1.5.9 depends on chromadb release history/source. No dependency_sources were supplied and no chromadb source is in the views, so I could not check the earlier 1.5.x releases. Command not run: inspect chromadb 1.5.0 release notes or source, or run the filter tests against 1.5.0.\n\n  </details>\n\n- VC-55: INCONCLUSIVE (suggestion) — collection.get(ids=..., include=['metadatas']) returns ids and metadatas aligned by position, so zipping them pairs each id with its metadata. [src/sqllens/memory/store.py]\n\n  <details><summary>Evidence</summary>\n\n  The claim concerns chromadb Collection.get ordering. The item supplies no dependency_sources, and chromadb is not vendored in the head view. The call site (src/sqllens/memory/store.py:235-240) zips got['ids'] with got['metadatas'] with strict=False, but whether chromadb aligns them by position cannot be settled from the views alone. No sanctioned chromadb source directory was provided, so this was not verified.\n\n  </details>\n\n- VC-86: INCONCLUSIVE (critical) — The `chromadb` lower bound in `pyproject.toml` admits only releases that support list-valued metadata and the `$contains` filter on it, and that evaluate the metadata filter the retrieval uses the way 1.5.9 does for a record missing the filtered key. [pyproject.toml:35]\n\n  <details><summary>Evidence</summary>\n\n  criteria.json is a valid list with criterion 21 matching this item. pyproject.toml:35 (head) has `chromadb>=1.5,<2` (diff: was >=0.5,<2), so the floor is 1.5.0. The retrieval filter (src/sqllens/_memory_groups.py:55-63) uses an $or of an untagged marker and `{memory_groups: {$contains: name}}`. Whether every release from 1.5.0 up to 1.5.8 supports list metadata and $contains and treats a record missing the filtered key the way 1.5.9 does is behaviour of ChromaDB's compiled Rust core, which cannot be settled by reading repo source. No dependency_sources were supplied, so I did not read chromadb release source or changelogs for 1.5.0-1.5.8, and I did not run any version of chromadb against the filter. Missing evidence: chromadb 1.5.0 through 1.5.8 source, or a run of the filter against 1.5.0.\n\n  </details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant (not small_diff, not config_only), 31 changed files; detect_all_audit not set\n- Working tree: skipped (head-override PR mode)\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present; requesting-code-review extension: content-present\n- CI evidence: none held for this head (missing)\n- Normalized (wording-only): 0\n- Re-verification: none\n- prior-report: none\n- Finding rejected lines not counted (no Finding rejected line) is exempt; none held\n- Phase 3 roster: silent-failure-hunter, comment-analyzer, requesting-code-review, type-design-analyzer; code-reviewer and pr-test-analyzer excluded (iterations=first-only, iteration 2)\n- Dirty-tree check: ran clean\n- Phase 2 dispatch: 45 verifier launches were refused at the 20-concurrent-subagent limit and retried in later rounds; every item was verified. VC-63's first reply was malformed, and a delivery request then produced its verdict file.\n- Checklist: 79 passed, 3 failed, 4 inconclusive\n- <details><summary>✅ Passed items (79 of 86)</summary>\n\n  - VC-2: The CLI import-memory runs the unknown-group check before its --clear prompt and before any clear, exiting 1 and naming every unknown group; with no rule-set file every named group is unknown. [docs/internal/agent/memory.md]\n  - VC-3: An import naming an unknown group, including with --clear and when restoring an export, is refused before anything is written or cleared, and the error names each unknown group. [docs/external/managing-memory.md]\n  - VC-4: Questions and notes (content) match after trimming, collapsing internal whitespace and ignoring case; SQL that does not parse as exactly one statement matches only identical text after trimming. [docs/external/managing-memory.md]\n  - VC-5: Re-importing the same file saves nothing the second time. [docs/external/managing-memory.md]\n  - VC-7: A CSV import never changes an existing record's groups because CSV rows are untagged items. [docs/external/managing-memory.md]\n  - VC-8: export_memories in CSV form sets lossy (reported as isError) when tagged pairs' groups are dropped, and the CLI warning states how many records' groups were dropped. [docs/external/managing-memory.md]\n  - VC-9: get_memory_stats reports unretrievable_count as records listing only groups no rule set names, and 0 without a rule-set file (server passes known_groups=None). [docs/internal/agent/memory.md]\n  - VC-13: A golden file whose pair carries groups is refused before any case runs, naming the pair. [docs/external/managing-memory.md]\n  - VC-14: Each list_memories entry and get_memory result includes the record's groups. [docs/external/managing-memory.md]\n  - VC-17: With a rule-set file configured the agent saves no question or note memory, since a saved record would be untagged. [docs/external/rule-sets.md]\n  - VC-18: Stored records' new groups are written in one set_groups call before new records are added, and _plan, set_groups and the clear-plus-baseline read each run through run_memory_call. [docs/internal/agent/memory.md]\n  - VC-21: ChromaDB raises ValueError for an $or with fewer than two branches, so scope_filter returns the untagged clause alone for an empty group list. [src/sqllens/_memory_groups.py]\n  - VC-22: and_filters returns a lone clause unchanged and wraps two or more in $and, so search_similar_usage without tool_name_filter and without group scope still passes {'success': True} as before. [src/sqllens/agent/integrations/chromadb/agent_memory.py]\n  - VC-27: The import-memory CLI computes unknown groups and exits 1 before the --clear confirmation and before opening the store, so a refused import deletes and writes nothing; with no rule-set file configured_groups yields an empty set so any named group is refused. [src/sqllens/cli.py]\n  - VC-28: UnknownMemoryGroupsError(unknown) renders a message naming every unknown group. [src/sqllens/cli.py]\n  - VC-29: load_golden reads pair.groups and doc.groups attributes that default to None on SqlPair and SchemaDoc, and parse_csv never sets groups, so a groups-carrying item is refused with a message naming its index. [src/sqllens/eval/golden.py]\n  - VC-30: A BundleFormatError raised by load_golden for an item carrying groups makes sqllens verify-memory exit non-zero before running any case. [src/sqllens/eval/golden.py]\n  - VC-33: import_bundle runs the dedup read, _plan, and (when groups change) set_groups as separate run_memory_call calls, while per-entry writes run on ChromaAgentMemory's executor and the unknown-group check stays on the loop. [docs/internal/mcp-server/transport.md]\n  - VC-34: list_memories returns each memory's `groups` ([] when untagged) and add_memories refuses an item naming an unknown group with isError and nothing written. [docs/internal/mcp-server/tools.md]\n  - VC-36: export_memories CSV sets lossy=True when any pair is tagged (groups dropped), and get_memory_stats unretrievable_count is 0 without a rule-set file. [docs/internal/mcp-server/tools.md]\n  - VC-41: With a rule-set file configured, build_agent still registers no memory save tools and builds ChromaAgentMemory with track_usage=False. [src/sqllens/agent/factory.py]\n  - VC-42: configured_groups returns cfg.rule_sets.loaded.memory_groups, or an empty frozenset when no rule-set file is loaded, so any group is refused without a rule-set file. [src/sqllens/memory/importer.py]\n  - VC-45: get_memory_stats counts unretrievable records only when known_groups is not None; callers pass None without a rule-set file and the loaded rule sets' groups otherwise. [src/sqllens/memory/admin.py]\n  - VC-47: export_memories CSV sets lossy true and appends the groups-dropped warning, which states the number of tagged SQL pairs; tagged schema docs are not counted in that number. [src/sqllens/memory/exporter.py]\n  - VC-48: Every record set_groups writes was tagged or becomes tagged, never untagged. [src/sqllens/memory/store.py]\n  - VC-50: SqlPair and SchemaDoc groups accept only a non-empty list of distinct non-empty strict strings, or None. [src/sqllens/memory/schema.py]\n  - VC-51: add_memories' raw pre-check only inspects string entries of list-valued groups; non-list or non-string groups fall through to model validation errors rather than the unknown-group refusal. [src/sqllens/memory/admin.py]\n  - VC-52: set_groups raises MemoryChangedDuringImportError when a record vanished, and import surfaces turn it into isError / non-zero exit rather than an unguarded crash. [src/sqllens/memory/store.py]\n  - VC-56: sqllens.memory exports UnknownMemoryGroupsError and configured_groups; configured_groups(cfg) returns the set of groups listed by loaded rule sets, and a value import_bundle treats as 'no group known' when no rule-set file is configured. [src/sqllens/server.py:550]\n  - VC-57: In the add_memories tool, UnknownMemoryGroupsError reaches its own except clause (it is not a subclass of MemoryInputError, which is caught first) and becomes an isError RuntimeError naming the unknown groups. [src/sqllens/server.py:823]\n  - VC-58: import_bundle raises UnknownMemoryGroupsError before any write or clear, so the import_memory tool's refusal leaves the store unchanged and str(exc) names every unknown group. [src/sqllens/server.py:584]\n  - VC-59: memory_admin.get_memory_stats accepts a known_groups keyword (None or a frozenset) and returns unretrievable_count = number of tagged records none of whose groups is in known_groups, and 0 when known_groups is None. [src/sqllens/server.py:901]\n  - VC-60: The get_memory_stats docstring says unretrievable_count counts records whose groups no rule set's memory_groups lists and is 0 without a rule-set file. [src/sqllens/server.py:898]\n  - VC-61: The export_memories docstring says JSON carries each record's groups, CSV carries none, and lossy is true when groups are dropped. [src/sqllens/server.py:854]\n  - VC-62: The import_memory and add_memories docstrings say a duplicate creates no record and adds its groups to the records it matches. [src/sqllens/server.py:572]\n  - VC-63: Mocked store.dedup_entries.return_value = [] matches the real MemoryStore.dedup_entries return type (an iterable/list of entries), and add_memories calls dedup_entries (not iter_all) on the store. [tests/unit/test_memory_bounds.py:237]\n  - VC-64: import_memory's store read goes through MemoryStore.dedup_entries on the memory worker, so holding dedup_entries holds a memory worker call. [tests/integration/test_memory_tool_responsiveness.py:182]\n  - VC-65: The test docstring says import duplicate planning runs on the worker and no dedup normalization happens on the loop. [tests/unit/test_memory_event_loop.py:259]\n  - VC-66: A rule-set file whose rule sets carry `memory_groups` loads with `format_version = 1`. A rule-set file with no `memory_groups` anywhere loads as before this change. A `memory_groups` that is empty, holds a duplicate, or holds a non-string is refused at load like any other invalid rule-set field. [src/sqllens/rule_sets.py]\n  - VC-67: While a rule-set file is configured, a `query_database` request under rule set S gets, from both the `search_saved_correct_tool_uses` tool and the automatic system-prompt memory context, only records that are untagged or share at least one group with S's `memory_groups`. A tagged record whose groups S does not list is never returned to a request under S. [src/sqllens/_memory_groups.py:54-63]\n  - VC-68: While a rule-set file is configured, a memory search with an empty group list (the request's rule set lists no `memory_groups`, or no rule-set selection is available to the search) gets only untagged records from both memory paths. [src/sqllens/_memory_groups.py:54-63]\n  - VC-69: A memory search under rule set S returns an in-scope record that clears the similarity threshold even when more records than the search's result limit, all outside S's groups, score higher. [src/sqllens/agent/integrations/chromadb/agent_memory.py:264-303]\n  - VC-70: A record stored before the upgrade, while it remains untagged, is retrieved after the upgrade by requests under every rule set, with no re-import or migration step. [src/sqllens/_memory_groups.py:22-63]\n  - VC-71: Without a rule-set file, memory retrieval returns tagged and untagged records alike, as before this change. [src/sqllens/agent/integrations/chromadb/agent_memory.py:138-143]\n  - VC-72: `sqllens verify-memory` run with `--rule-set S` retrieves memory exactly as a `query_database` request under S does. [src/sqllens/eval/runner.py:179-301]\n  - VC-73: `sqllens import-memory`, the `import_memory` tool and the `add_memories` tool accept an optional `groups` list (non-empty, distinct strings) on each SQL pair and schema doc. An empty or duplicate-holding `groups` is a validation error. [src/sqllens/memory/schema.py:62-83,112-117]\n  - VC-74: An import through any of those three surfaces that names a group no loaded rule set's `memory_groups` lists leaves the store unchanged, with nothing written and, for `sqllens import-memory --clear`, nothing deleted. The CLI exits non-zero and the tools return `isError: true`, and the message names every unknown group. With no rule-set file configured, any import that names a group is refused this way. [src/sqllens/memory/importer.py]\n  - VC-75: An imported item that duplicates an existing record or an earlier item of the same import creates no second record and sets the groups of every record it matches this way: a tagged item onto a tagged record gives the union of both; a tagged item onto an untagged record gives the item's groups; an untagged item leaves the record's groups as they were. A duplicate that changed the record's groups is counted as updated, and one that changed nothing as a skipped duplicate. The updated count is shown as `updated=<n>` in the `sqllens import-memory` summary line, in the `import_memory` tool's report, and as `updated_count` in the `add_memories` result. A dry run reports the same counts without writing. [src/sqllens/memory/importer.py]\n  - VC-76: Duplicate detection compares `sql` texts with sqlglot under the MySQL dialect: two texts match when each parses into exactly one statement and both regenerate to the same SQL, with string literals and identifiers keeping their case, so `WHERE region = 'EU'` and `where region = 'eu'` do not match while `SELECT a FROM t` and `select a\\n from t` do. When sqlglot raises any exception on either `sql` text while parsing or regenerating (`ParseError`, `TokenError` and `RecursionError` included), or the text parses into no statement or more than one, the two match only when their texts are identical after trimming leading and trailing whitespace, so re-importing the same file still saves nothing new. `question` texts match after collapsing whitespace and ignoring case, and `content` texts match as before this change. [src/sqllens/memory/importer.py]\n  - VC-78: A CSV export of a store holding at least one tagged record returns `lossy: true` from `export_memories`, and `sqllens export-memory` prints a `Warning:`. Both state how many records' groups were dropped. A CSV import never changes an existing record's groups. [src/sqllens/memory/exporter.py:32-43]\n  - VC-79: `list_memories` and `get_memory` return each record's groups. While a rule-set file is configured, `get_memory_stats` returns the count of tagged records none of whose groups appears in any rule set's `memory_groups`; without a rule-set file that count is 0. [src/sqllens/memory/admin.py]\n  - VC-80: `get_access_rules` returns each rule set's `memory_groups`. [src/sqllens/access_rules.py]\n  - VC-81: `sqllens verify-memory` exits non-zero before running any case when its golden file has an item carrying `groups`, and the message names that item. [src/sqllens/eval/golden.py:54-67]\n  - VC-82: The change leaves these unchanged: with a rule-set file configured, the agent has neither `save_question_tool_args` nor `save_text_memory`; and the memory admin tools (`list_memories`, `get_memory`, `export_memories`, `get_memory_stats`, `delete_memory`, `clear_memories`, `add_memories`) and `import_memory` act on every record for any caller, without regard to rule sets. [src/sqllens/agent/factory.py:168]\n  - VC-83: `docs/external/rule-sets.md` documents `memory_groups` in the file reference and replaces the \"Memory is shared by every rule set\" limit with the group rule, still stating that the memory admin tools are not limited by rule sets and that SQL Lens trusts `_meta`. [docs/external/rule-sets.md]\n  - VC-84: `docs/external/managing-memory.md` documents the bundle `groups` field, the unknown-group refusal, how duplicates combine groups, and that CSV carries no groups. Its paragraph beginning \"Duplicate entries are skipped automatically\" states the new match rule (SQL compared by sqlglot with literal and identifier case kept, exact text when the SQL does not parse) and that a duplicate which changes a record's groups counts as updated. [docs/external/managing-memory.md]\n  - VC-85: `docs/internal/database-connectors/rule-sets.md` and `docs/internal/agent/memory.md` describe group-filtered retrieval. No doc or code comment states that memory is shared by every rule set as a fact; today that claim appears at least in `docs/external/rule-sets.md` (the \"Nothing is saved to memory\" and \"Memory is shared by every rule set\" bullets), `docs/internal/database-connectors/rule-sets.md` and the rule-set write-gate comment in `src/sqllens/agent/factory.py`. [docs/internal/agent/memory.md]\n  - VC-1: The changelog says the import_memory tool reports an `updated` row and add_memories returns `updated_count`, and that SQL Lens now requires chromadb 1.5 or later. [changelog.d/413.changed.md]\n  - VC-6: CLI summary line has the form `saved=N updated=N skipped_duplicate=N errors=N` and a dry run reports the same counts without writing. [docs/external/managing-memory.md]\n  - VC-10: The group filter runs inside the memory search so out-of-scope records never take up the result limit; a set with no memory_groups reads untagged only. [docs/external/rule-sets.md]\n  - VC-11: verify-memory under --rule-set S reads exactly what a query_database request under S reads. [docs/external/rule-sets.md]\n  - VC-12: memory_groups in a rule set is optional, at least one entry, each non-empty, no duplicates. [docs/external/rule-sets.md]\n  - VC-15: _scope_filter calls group_scope() on the caller's event loop before run_in_executor because the executor thread does not see the context var. [docs/internal/database-connectors/rule-sets.md]\n  - VC-16: build_agent passes group_scope=_rule_set_memory_scope(rule_sets) returning memory_groups_for(selection.name), or () when no selection is published. [docs/internal/database-connectors/rule-sets.md]\n  - VC-23: Every write path that sets memory_groups metadata also sets memory_tagged=True (including MemoryStore.set_groups, add_sql_pair, add_schema_doc), so tagged records are not visible to every rule set [src/sqllens/_memory_groups.py]\n  - VC-24: LoadedRuleSets exposes memory_groups_for(name) returning a tuple of strings and a memory_groups frozenset attribute; current_rule_set_selection() returns an object with .name or None [src/sqllens/agent/factory.py]\n  - VC-25: The group scope is read on the event loop before run_in_executor because the executor does not copy context variables [src/sqllens/agent/integrations/chromadb/agent_memory.py]\n  - VC-26: access_rules._rule_set returns memory_groups from RuleSet.memory_groups, an attribute that exists on RuleSet and may be None [src/sqllens/access_rules.py]\n  - VC-31: MemoryStore.iter_all populates SqlPair.groups from stored metadata, so csv_groups_dropped_warning counts tagged pairs and serialize_json writes groups [src/sqllens/memory/exporter.py]\n  - VC-35: The import_memory tool report renders updated via ImportReport markdown and the CLI summary shows updated=<n> [src/sqllens/memory/schema.py]\n  - VC-37: ChromaAgentMemory.save_tool_usage accepts a `groups` keyword (Sequence[str] | None) and stores it as group metadata; None leaves the record untagged. [src/sqllens/memory/store.py]\n  - VC-38: ChromaAgentMemory.save_text_memory accepts `groups` as a keyword after (content, context). [src/sqllens/memory/store.py]\n  - VC-39: sqllens._memory_groups exports GROUPS_KEY, TAGGED_KEY, group_metadata and record_groups; record_groups(metadata) returns the record's groups (empty for an untagged or legacy record without the keys), and group_metadata(groups) returns metadata setting both GROUPS_KEY and TAGGED_KEY. [src/sqllens/memory/store.py]\n  - VC-40: set_groups relies on Chroma's collection.update merging metadata, so writing group_metadata for every updated record overwrites both group keys; with an empty groups value, a stale key would survive. [src/sqllens/memory/store.py]\n  - VC-43: ChromaAgentMemory exposes `_collection_state.writing()` as a context manager and `_get_collection()`; MemoryStore exposes `_records_from_result(got, include_embeddings=False)` yielding records with `.metadata` and `.memory_id`. [src/sqllens/memory/store.py]\n  - VC-44: dedup_entries covers the rows iter_all turns into bundle items and raises MemoryCorruptionError when iter_all would. [src/sqllens/memory/store.py]\n  - VC-49: The widget reads `updated_count` from add_memories/import results and `unretrievable_count` from get_memory_stats. [src/sqllens/ui/memory_admin.html]\n  - VC-53: Access-rules listing returns `memory_groups` per rule set, as [] when the set lists none. [tests/unit/test_access_rules.py]\n  - VC-54: Invalid memory_groups (empty, duplicate, non-string, empty string) raise RuleSetFileError whose message contains 'memory_groups'. [src/sqllens/rule_sets.py]\n\n  </details>\n- Reviewed against issue #412 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] A rule-set file whose rule sets carry `memory_groups` loads with `format_version = 1`. A rule-set file with no `memory_groups` anywhere loads as before this change. A `memory_groups` that is empty, holds a duplicate, or holds a non-string is refused at load like any other invalid rule-set field.\n- [ ] While a rule-set file is configured, a `query_database` request under rule set S gets, from both the `search_saved_correct_tool_uses` tool and the automatic system-prompt memory context, only records that are untagged or share at least one group with S's `memory_groups`. A tagged record whose groups S does not list is never returned to a request under S.\n- [ ] While a rule-set file is configured, a memory search with an empty group list (the request's rule set lists no `memory_groups`, or no rule-set selection is available to the search) gets only untagged records from both memory paths.\n- [ ] A memory search under rule set S returns an in-scope record that clears the similarity threshold even when more records than the search's result limit, all outside S's groups, score higher.\n- [ ] A record stored before the upgrade, while it remains untagged, is retrieved after the upgrade by requests under every rule set, with no re-import or migration step.\n- [ ] Without a rule-set file, memory retrieval returns tagged and untagged records alike, as before this change.\n- [ ] `sqllens verify-memory` run with `--rule-set S` retrieves memory exactly as a `query_database` request under S does.\n- [ ] `sqllens import-memory`, the `import_memory` tool and the `add_memories` tool accept an optional `groups` list (non-empty, distinct strings) on each SQL pair and schema doc. An empty or duplicate-holding `groups` is a validation error.\n- [ ] An import through any of those three surfaces that names a group no loaded rule set's `memory_groups` lists leaves the store unchanged, with nothing written and, for `sqllens import-memory --clear`, nothing deleted. The CLI exits non-zero and the tools return `isError: true`, and the message names every unknown group. With no rule-set file configured, any import that names a group is refused this way.\n- [ ] An imported item that duplicates an existing record or an earlier item of the same import creates no second record and sets the groups of every record it matches this way: a tagged item onto a tagged record gives the union of both; a tagged item onto an untagged record gives the item's groups; an untagged item leaves the record's groups as they were. A duplicate that changed the record's groups is counted as updated, and one that changed nothing as a skipped duplicate. The updated count is shown as `updated=<n>` in the `sqllens import-memory` summary line, in the `import_memory` tool's report, and as `updated_count` in the `add_memories` result. A dry run reports the same counts without writing.\n- [ ] Duplicate detection compares `sql` texts with sqlglot under the MySQL dialect: two texts match when each parses into exactly one statement and both regenerate to the same SQL, with string literals and identifiers keeping their case, so `WHERE region = 'EU'` and `where region = 'eu'` do not match while `SELECT a FROM t` and `select a\\n  from t` do. When sqlglot raises any exception on either `sql` text while parsing or regenerating (`ParseError`, `TokenError` and `RecursionError` included), or the text parses into no statement or more than one, the two match only when their texts are identical after trimming leading and trailing whitespace, so re-importing the same file still saves nothing new. `question` texts match after collapsing whitespace and ignoring case, and `content` texts match as before this change.\n- [ ] For a store in which no two records duplicate each other under the match rule, exporting it to JSON with `sqllens export-memory` or the `export_memories` tool and importing the result into an empty store recreates every record the export wrote, with the same groups, untagged records staying untagged, when every group the export names is listed in a loaded rule set's `memory_groups`. An export naming a group no rule set lists is refused on import like any other unknown group.\n- [ ] A CSV export of a store holding at least one tagged record returns `lossy: true` from `export_memories`, and `sqllens export-memory` prints a `Warning:`. Both state how many records' groups were dropped. A CSV import never changes an existing record's groups.\n- [ ] `list_memories` and `get_memory` return each record's groups. While a rule-set file is configured, `get_memory_stats` returns the count of tagged records none of whose groups appears in any rule set's `memory_groups`; without a rule-set file that count is 0.\n- [ ] `get_access_rules` returns each rule set's `memory_groups`.\n- [ ] `sqllens verify-memory` exits non-zero before running any case when its golden file has an item carrying `groups`, and the message names that item.\n- [ ] The change leaves these unchanged: with a rule-set file configured, the agent has neither `save_question_tool_args` nor `save_text_memory`; and the memory admin tools (`list_memories`, `get_memory`, `export_memories`, `get_memory_stats`, `delete_memory`, `clear_memories`, `add_memories`) and `import_memory` act on every record for any caller, without regard to rule sets.\n- [ ] `docs/external/rule-sets.md` documents `memory_groups` in the file reference and replaces the \"Memory is shared by every rule set\" limit with the group rule, still stating that the memory admin tools are not limited by rule sets and that SQL Lens trusts `_meta`.\n- [ ] `docs/external/managing-memory.md` documents the bundle `groups` field, the unknown-group refusal, how duplicates combine groups, and that CSV carries no groups. Its paragraph beginning \"Duplicate entries are skipped automatically\" states the new match rule (SQL compared by sqlglot with literal and identifier case kept, exact text when the SQL does not parse) and that a duplicate which changes a record's groups counts as updated.\n- [ ] `docs/internal/database-connectors/rule-sets.md` and `docs/internal/agent/memory.md` describe group-filtered retrieval. No doc or code comment states that memory is shared by every rule set as a fact; today that claim appears at least in `docs/external/rule-sets.md` (the \"Nothing is saved to memory\" and \"Memory is shared by every rule set\" bullets), `docs/internal/database-connectors/rule-sets.md` and the rule-set write-gate comment in `src/sqllens/agent/factory.py`.\n- [ ] The `chromadb` lower bound in `pyproject.toml` admits only releases that support list-valued metadata and the `$contains` filter on it, and that evaluate the metadata filter the retrieval uses the way 1.5.9 does for a record missing the filtered key.",
+ "diff_produced_at_head": "96d87e57bb2e2edaac4d9c0865c8c3690823caf5",
+ "checklist": [
+  {
+   "id": "VC-2",
+   "claim_signature": "api_contract:memory.md:unknown-group-before-clear",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "absolute_claim:managing-memory.md:unknown-group-refusal",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "data_format_assumption:managing-memory.md:dedup-match-rule",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "absolute_claim:managing-memory.md:reimport-saves-nothing",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:managing-memory.md:csv-untagged",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:managing-memory.md:csv-groups-lossy",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "api_contract:memory.md:unretrievable-count",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "api_contract:managing-memory.md:golden-groups-refused",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "api_contract:managing-memory.md:list-get-groups",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:rule-sets.md:no-save-under-rule-sets",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:memory.md:import-call-sequence",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "category": "absolute_claim",
+   "claim": "JSON export round-trips losslessly, keeping each entry's groups.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "Use `--format json` (the default) for a complete, lossless backup; it keeps each entry's groups.",
+   "source_file": "docs/external/managing-memory.md",
+   "verify_against": "serialize_json in src/sqllens/memory/io.py and import_bundle in importer.py",
+   "verify_hint": "Trace exporting two stored records that duplicate each other under the new sql_key rule, or a tagged record whose group no rule set lists, then importing into an empty store",
+   "claim_signature": "absolute_claim:managing-memory.md:json-lossless",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-12"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "serialize_json (io.py:203-206) dumps the bundle with model_dump(exclude_none=True), so groups are exported. But import_bundle (importer.py:175-213) runs _plan (114-161), which keys every incoming pair by pair_key = (normalized question, sql_key(sql)) (50-68) and merges any item matching an earlier item of the same import into one record (lines 139-154: no new record, groups unioned). So two stored records that export as distinct entries but share a key, for example 'SELECT 1;' and 'SELECT 1' with the same question, which sqlglot MySQL regeneration makes identical, come back from an import into an empty store as ONE record with merged groups. Record count and per-entry group sets are not preserved, so the round trip is not lossless. Records stored before the sql_key rule can differ under the old rule but match under the new one, so this input is reachable. Separately, a tagged entry whose group no rule set lists makes the import raise UnknownMemoryGroupsError (193-195); docs/external/managing-memory.md:88 discloses that refusal, so it is a caveat, not the main counterexample. The doc claim at line 148, 'complete, lossless backup', is an absolute statement and is wrong for duplicate-under-key records.",
+   "file_checked": "src/sqllens/memory/importer.py:114-161",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-20",
+   "category": "dependency_interaction",
+   "claim": "scope_filter builds a where clause using {'memory_groups': {'$contains': name}} on a list-valued metadata key and {'memory_tagged': {'$ne': True}}; ChromaDB >=1.5 accepts $contains on list metadata in collection.query where= and evaluates $ne True as matching a record that lacks the key.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/_memory_groups.py",
+   "verify_against": "installed chromadb package where-filter validation and metadata segment evaluation",
+   "verify_hint": "Check chromadb's validate_where (api/types.py) for $contains on metadata keys and the sqlite metadata segment's $ne handling for missing keys",
+   "claim_signature": "dependency_interaction:_memory_groups.py:contains-list-filter",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-1"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "src/sqllens/_memory_groups.py:22,63 builds {'memory_tagged': {'$ne': True}} and {'$or': [untagged, {'memory_groups': {'$contains': name}}...]} as the claim says. The claim depends on installed chromadb behaviour (validate_where and the sqlite metadata segment's $ne on a missing key). The item has no dependency_sources, and chromadb source is not in the head view. Per the rules a library claim without dependency_sources is verified from the views alone, and the views cannot settle it. I did not read chromadb source from outside the supplied directories, so chromadb's validation and evaluation of these filters is unverified.",
+   "file_checked": "src/sqllens/_memory_groups.py:22,63",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "absolute_claim:_memory_groups.py:single-branch-or",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "data_format_assumption:agent_memory.py:and-filters-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "api_contract:cli.py:unknown-groups-before-clear",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "api_contract:cli.py:unknown-groups-message",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "data_format_assumption:golden.py:groups-attribute",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-30",
+   "claim_signature": "api_contract:golden.py:verify-memory-exit",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-32",
+   "category": "api_contract",
+   "claim": "chromadb lower bound 1.5 admits only releases supporting list-valued metadata and $contains on it, with missing-key $ne semantics as in 1.5.9.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "pyproject.toml",
+   "verify_against": "requirements.txt lock and chromadb release notes in the installed package",
+   "verify_hint": "Check the chromadb specifier in pyproject.toml and the locked version in requirements.txt",
+   "criterion": 21,
+   "claim_signature": "api_contract:pyproject.toml:chromadb-lower-bound",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-8"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "pyproject.toml:35 has \"chromadb>=1.5,<2\" and requirements.txt:31 locks chromadb==1.5.9. Whether 1.5.0-1.5.8 support list-valued metadata, $contains on it, and the same missing-key $ne semantics as 1.5.9 depends on chromadb release history/source. No dependency_sources were supplied and no chromadb source is in the views, so I could not check the earlier 1.5.x releases. Command not run: inspect chromadb 1.5.0 release notes or source, or run the filter tests against 1.5.0.",
+   "file_checked": "pyproject.toml:35",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "api_contract:transport.md:import-memory-calls",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "api_contract:tools.md:list-memories-groups",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "api_contract:tools.md:csv-lossy-groups",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-41",
+   "claim_signature": "api_contract:factory.py:no-save-tools-with-rule-sets",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-42",
+   "claim_signature": "api_contract:importer.py:configured-groups-source",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-45",
+   "claim_signature": "api_contract:admin.py:unretrievable-known-groups",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-46",
+   "category": "data_format_assumption",
+   "claim": "export_memories JSON emits each pair via SqlPair.model_dump(exclude_none=True) (question, sql, groups when set) and each doc without training_type, a shape the import parser accepts back under the bundle models.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/memory/admin.py",
+   "verify_against": "SqlPair/SchemaDoc in src/sqllens/memory/schema.py (extra fields policy) and the JSON parser in src/sqllens/memory/io.py",
+   "verify_hint": "Check SqlPair model_config (extra=forbid?) and whether SqlPair has any field besides question/sql/groups that model_dump would emit; check io.py parse of a top-level {sql_pairs: [...]} list vs the {pairs: [...]} SqlPairsBlock shape",
+   "claim_signature": "data_format_assumption:admin.py:json-export-shape",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-6"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "admin.py:379-388 emits {\"sql_pairs\": [ {question,sql,groups?}, ...], \"schema_docs\": [ {content,groups?} ]} (SqlPair.model_dump(exclude_none=True); docs exclude training_type). SqlPair (schema.py:71-78) has extra=forbid and only question/sql/groups, so the per-item part of the claim holds. But the claim says this shape is accepted back by the import parser under the bundle models: io.parse_json (io.py:153) does MemoryBundle.model_validate(raw), and MemoryBundle.sql_pairs is SqlPairsBlock | None (schema.py:130), an object with a `pairs` key (schema.py:96-102, extra=forbid). A top-level list for sql_pairs fails validation, so the exported JSON is rejected by parse_json / sqllens import-memory. It is only accepted by add_memories (admin.py:233-304), which takes bare lists and builds the bundle itself; the export docstring (admin.py:335-337) says so explicitly. So the 'bundle models' round-trip part is false. Requirement text (docs/external/managing-memory.md:50) says JSON export 'round-trips without losing anything', which concerns the CLI export; the MCP export shape is a separate format, so impact is limited.",
+   "file_checked": "src/sqllens/memory/admin.py:379-388",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-47",
+   "claim_signature": "api_contract:exporter.py:csv-groups-count",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-48",
+   "claim_signature": "absolute_claim:store.py:set-groups-never-untagged",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-50",
+   "claim_signature": "data_format_assumption:schema.py:groups-field-validation",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-51",
+   "claim_signature": "data_format_assumption:admin.py:raw-groups-precheck",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-52",
+   "claim_signature": "api_contract:store.py:changed-during-import-surfaced",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-55",
+   "category": "dependency_interaction",
+   "claim": "collection.get(ids=..., include=['metadatas']) returns ids and metadatas aligned by position, so zipping them pairs each id with its metadata.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/memory/store.py",
+   "verify_against": "chromadb Collection.get in the installed chromadb package",
+   "verify_hint": "Check chromadb Collection.get GetResult ids/metadatas ordering",
+   "claim_signature": "dependency_interaction:store.py:get-ids-metadatas-aligned",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-12"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim concerns chromadb Collection.get ordering. The item supplies no dependency_sources, and chromadb is not vendored in the head view. The call site (src/sqllens/memory/store.py:235-240) zips got['ids'] with got['metadatas'] with strict=False, but whether chromadb aligns them by position cannot be settled from the views alone. No sanctioned chromadb source directory was provided, so this was not verified.",
+   "file_checked": "src/sqllens/memory/store.py:235-240",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-56",
+   "claim_signature": "dependency_interaction:server.py:configured-groups-export",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-57",
+   "claim_signature": "api_contract:server.py:add-unknown-groups-except-order:823",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-58",
+   "claim_signature": "api_contract:server.py:import-refusal-before-write:584",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-59",
+   "claim_signature": "dependency_interaction:server.py:stats-known-groups:901",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-60",
+   "claim_signature": "api_contract:server.py:unretrievable-doc:898",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-61",
+   "claim_signature": "api_contract:server.py:export-groups-doc:854",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-62",
+   "claim_signature": "api_contract:server.py:duplicate-adds-groups-doc:572",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-63",
+   "claim_signature": "test_mock_alignment:test_memory_bounds.py:dedup-entries-mock:237",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-64",
+   "claim_signature": "test_mock_alignment:test_memory_tool_responsiveness.py:held-dedup-entries",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-65",
+   "claim_signature": "absolute_claim:test_memory_event_loop.py:planning-on-worker",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-66",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-67",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-68",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-69",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-70",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-71",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-72",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-73",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-74",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-75",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-76",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "For a store in which no two records duplicate each other under the match rule, exporting it to JSON with `sqllens export-memory` or the `export_memories` tool and importing the result into an empty store recreates every record the export wrote, with the same groups, untagged records staying untagged, when every group the export names is listed in a loaded rule set's `memory_groups`. An export naming a group no rule set lists is refused on import like any other unknown group.",
+   "claim_signature": "issue-acceptance-12",
+   "criteria_file": ".prflow/tmp/review/pr-413/local-20261118T164001Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-413/local-20261118T164001Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: For a store in which no two records duplicate each other under the match rule, exporting it to JSON with `sqllens export-memory` or the `export_memories` tool and importing the result into an empty store recreates every record the export wrote, with the same groups, untagged records staying untagged, when every group the export names is listed in a loaded rule set's `memory_groups`. An export naming a group no rule set lists is refused on import like any other unknown group.",
+   "id": "VC-77",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "criteria.json counts (criterion 12 matches this item); graded as limited by the siblings. Core path is correct: store.iter_all/_bundle_from_metadatas (store.py:259-326) emits groups via record_groups (None for untagged); serialize_json/export_memories (io.py:203, admin.py:379-388) keep `groups` (exclude_none keeps untagged without the key); importer.import_bundle (importer.py:175-239) refuses unknown groups before any write (UnknownMemoryGroupsError, importer.py:193-195; known_groups=configured_groups(cfg) in cli.py:491, server.py:585, server.py:821), and _plan dedups by the same pair_key/doc_key match rule, so in an empty store with no matching pairs every item becomes a new record written with its groups (importer.py:206-213) and untagged stays untagged (group_metadata returns {} for none, _memory_groups.py:30-39). Trigger code conditions split: (a) unknown-group refusal -> outside the trigger (claim's trigger requires every group be listed; second sentence of the claim requires this refusal); (b) sqlglot exception / non-single statement in sql_key -> falls back to stripped text; distinct records stay distinct, so outside the trigger's breaking set (no departure); (c) per-item save exception -> report.errors, and the tools/CLI treat errors as failure (fail-closed runtime fault, outside the trigger); (d) parse-boundary caps in memory/io.py:62-96 (10 MiB, 10,000 items per block, depth 64) applied by parse_json on import_memory and the CLI, and the 10,000-item cap in add_memories (admin.py:250-252): a store with no duplicates but more than 10,000 pairs or docs, or a >10 MiB export, is exportable (iter_all/export_bundle have no cap, io.py:81-84) but the import is refused with 'exceeds the 10000-item cap', so it does not recreate every record. This input meets every condition the trigger states, is not a runtime fault, and no sibling criterion names it, so it is a departure under the grading rules (documented pre-existing limit at docs/external/managing-memory.md:97, fails closed with a clear message, not introduced by this PR). Also noted: export_memories' JSON shape ({sql_pairs: [..]}, admin.py:379-388) is the add_memories argument shape, not the import_memory/CLI bundle shape (sql_pairs: {pairs: [..]}, schema.py:130), so import_memory cannot take the tool's output directly; pre-existing.",
+   "file_checked": "src/sqllens/memory/io.py:62-96",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-13",
+   "id": "VC-78",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-14",
+   "id": "VC-79",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-15",
+   "id": "VC-80",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-16",
+   "id": "VC-81",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-17",
+   "id": "VC-82",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-18",
+   "id": "VC-83",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-19",
+   "id": "VC-84",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-20",
+   "id": "VC-85",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "The `chromadb` lower bound in `pyproject.toml` admits only releases that support list-valued metadata and the `$contains` filter on it, and that evaluate the metadata filter the retrieval uses the way 1.5.9 does for a record missing the filtered key.",
+   "claim_signature": "issue-acceptance-21",
+   "criteria_file": ".prflow/tmp/review/pr-413/local-20261118T164001Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-413/local-20261118T164001Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The `chromadb` lower bound in `pyproject.toml` admits only releases that support list-valued metadata and the `$contains` filter on it, and that evaluate the metadata filter the retrieval uses the way 1.5.9 does for a record missing the filtered key.",
+   "id": "VC-86",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "criteria.json is a valid list with criterion 21 matching this item. pyproject.toml:35 (head) has `chromadb>=1.5,<2` (diff: was >=0.5,<2), so the floor is 1.5.0. The retrieval filter (src/sqllens/_memory_groups.py:55-63) uses an $or of an untagged marker and `{memory_groups: {$contains: name}}`. Whether every release from 1.5.0 up to 1.5.8 supports list metadata and $contains and treats a record missing the filtered key the way 1.5.9 does is behaviour of ChromaDB's compiled Rust core, which cannot be settled by reading repo source. No dependency_sources were supplied, so I did not read chromadb release source or changelogs for 1.5.0-1.5.8, and I did not run any version of chromadb against the filter. Missing evidence: chromadb 1.5.0 through 1.5.8 source, or a run of the filter against 1.5.0.",
+   "file_checked": "pyproject.toml:35",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "id": "VC-1",
+   "claim_signature": "api_contract:413.changed.md:updated-count-surfaces",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:managing-memory.md:cli-summary-format",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "absolute_claim:rule-sets.md:filter-inside-search",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "api_contract:rule-sets.md:verify-memory-parity",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "data_format_assumption:rule-sets.md:memory-groups-field",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "dependency_interaction:rule-sets.md:scope-before-executor",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:rule-sets.md:group-scope-wiring",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "api_contract:_memory_groups.py:tagged-marker-paired",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "dependency_interaction:factory.py:memory-groups-for",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "dependency_interaction:agent_memory.py:scope-read-before-executor",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "api_contract:access_rules.py:memory-groups-field",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-31",
+   "claim_signature": "dependency_interaction:exporter.py:iter-all-groups",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "api_contract:schema.py:import-report-updated",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-37",
+   "claim_signature": "dependency_interaction:store.py:save-tool-usage-groups",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-38",
+   "claim_signature": "dependency_interaction:store.py:save-text-memory-groups",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-39",
+   "claim_signature": "dependency_interaction:store.py:memory-groups-helpers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-40",
+   "claim_signature": "dependency_interaction:store.py:update-merges-metadata",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-43",
+   "claim_signature": "dependency_interaction:store.py:private-collection-helpers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-44",
+   "claim_signature": "api_contract:store.py:dedup-matches-iter-all",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-49",
+   "claim_signature": "api_contract:memory_admin.html:updated-unretrievable-keys",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-53",
+   "claim_signature": "data_format_assumption:test_access_rules.py:memory-groups-empty-list",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-54",
+   "claim_signature": "data_format_assumption:rule_sets.py:memory-groups-error-message",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  }
+ ]
+}
