@@ -98,10 +98,19 @@ The mapping keeps MySQL from converting one side of a comparison: a string colum
 `build_agent` (`src/sqllens/agent/factory.py`):
 
 - Uses `_RuleSetUserResolver`, which gives each rule set, account ID and user ID its own user id (from `RuleSetSelection.user_key`), so conversations do not cross identities.
-- Behaves as `allow_memory_writes=False`: registers neither memory save tool, whatever `memory.save_queries` and `memory.save_text_memories` say, and builds `ChromaAgentMemory(track_usage=False)`, because memory is shared by every rule set.
+- Behaves as `allow_memory_writes=False`: registers neither memory save tool, whatever `memory.save_queries` and `memory.save_text_memories` say, and builds `ChromaAgentMemory(track_usage=False)`, because a record the agent saved would carry no group and so reach every rule set.
+- Builds `ChromaAgentMemory` with `group_scope=_rule_set_memory_scope(rule_sets)`, which returns `LoadedRuleSets.memory_groups_for(selection.name)` for the published `RuleSetSelection`, or `()` when none is published. See [Memory groups](#memory-groups).
 - Removes `HIGH_NOT_PRECEDENCE` and `NO_BACKSLASH_ESCAPES` from each query connection's session `sql_mode` (`RULE_SET_REMOVED_SQL_MODES`, applied by the MySQL runner's `remove_sql_modes`); a failure to read or set the mode fails the query.
 - Passes `rule_sets=True` to `DefaultSystemPromptBuilder`, which adds a rule to correct and rerun a query refused with `Refused by the rule set:`, and, when a dialect resolves, a rule to qualify every column with its table name or alias. It also replaces the schema-lookup sentence: the model may look up tables, columns and keys only with a `SELECT` against `INFORMATION_SCHEMA.TABLES`, `COLUMNS` or `KEY_COLUMN_USAGE`, and no `SHOW` statement, `DESCRIBE` or other catalog lookup is permitted. A caller-supplied `base_prompt` is returned as given, so none of these changes reaches it.
 - Wraps `RuleSetGuardRunner` outside the RLS guard and inside the whole-row guard, then `RefusalRedactingRunner` outside every guard and inside result masking. Call order: **ResultMaskingRunner → RefusalRedactingRunner → WholeRowSelectGuardRunner → RuleSetGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**, each optional guard present only when its own setting enables it.
+
+## Memory groups
+
+`RuleSet.memory_groups` (optional, `min_length=1`, distinct non-empty strings, checked by `_no_duplicates`) names the groups requests under the set may read. A file without the field loads unchanged. `LoadedRuleSets.memory_groups_for(name)` returns a set's groups (`()` when it lists none) and `LoadedRuleSets.memory_groups` the union over every set; `access_rules._rule_set` lists each set's `memory_groups`.
+
+Retrieval is filtered in the ChromaDB query, not after it, so out-of-scope records never use up `n_results`. `ChromaAgentMemory._scope_filter` calls `group_scope()` at the top of `search_similar_usage` and `search_text_memories`, on the caller's event loop, and `$and`s `_memory_groups.scope_filter(groups)` with the existing conditions. It must run before `run_in_executor`, which does not copy context variables: on the worker thread `current_rule_set_selection()` is `None`. One seam covers the `search_saved_correct_tool_uses` tool, `DefaultLlmContextEnhancer`, and the `sqllens verify-memory` agent, which `build_agent` builds the same way.
+
+Storage and filter (`src/sqllens/_memory_groups.py`): a tagged record carries `memory_groups` (a sorted list) and `memory_tagged = True`; an untagged record carries neither, because ChromaDB 1.5.9 refuses an empty list. The filter is `{"memory_tagged": {"$ne": True}}` alone for an empty group list (a one-branch `$or` raises `ValueError`, which the enhancer would swallow) and otherwise `$or` of that and one `{"memory_groups": {"$contains": g}}` per group. The marker exists because a record missing a key matches `$ne`/`$nin`/`$not_contains` and `$in`/`$eq` do not look inside lists, so every writer that sets the list sets the marker. `chromadb>=1.5` is the first release line that stores list metadata; 1.4.1 and earlier refuse it.
 
 ## The SQL guard
 

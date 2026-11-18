@@ -48,7 +48,7 @@ A note reaches the assistant only on a turn whose message the automatic backgrou
 Import and export use a portable bundle file in one of two formats:
 
 - **JSON** (recommended): carries both question-and-answer pairs and free-form notes, and round-trips without losing anything. Use this for a full backup or to move memory between machines.
-- **CSV**: a simple two-column spreadsheet with a `question,sql` header. CSV carries question-and-answer pairs only; free-form notes are not included in a CSV export.
+- **CSV**: a simple two-column spreadsheet with a `question,sql` header. CSV carries question-and-answer pairs only; free-form notes and [memory groups](#memory-groups) are not included in a CSV export.
 
 A JSON bundle looks like this:
 
@@ -69,6 +69,25 @@ A JSON bundle looks like this:
 ```
 
 Both top-level blocks are optional. Each question may be up to 1,000 characters, each SQL statement up to 10,000 characters, and each note up to 50,000 characters. Blank values are rejected.
+
+### Memory groups
+
+When you use [per-role rule sets](rule-sets.md#memory-groups), any question-and-answer pair or note may carry a `groups` field: a list of one or more different, non-empty group names. Only requests under a rule set whose `memory_groups` lists one of those names can read the entry. An entry without `groups` is untagged and can be read under every rule set.
+
+```json
+{
+  "sql_pairs": {
+    "pairs": [
+      { "question": "Total revenue by region", "sql": "SELECT region, SUM(total) FROM orders GROUP BY region",
+        "groups": ["finance-core"] }
+    ]
+  }
+}
+```
+
+Every group a bundle names must be listed in some rule set's `memory_groups`. If any is not, or if no rule-set file is configured, the whole import is refused before anything is written or cleared, even with `--clear`, and the error names each unknown group. This applies to `sqllens import-memory` (which exits with a non-zero status), the import tool and the add tool (which report an error), and to restoring an earlier export.
+
+CSV carries no groups. Rows imported from CSV are untagged, so they never change an existing entry's groups.
 
 ### Bundle size limits
 
@@ -104,15 +123,17 @@ sqllens import-memory PATH [--format json|csv] [--clear] [--dry-run] [--batch-si
 | `--batch-size N` | How many entries to write before yielding. The default of `100` is fine for most files; lower it only for very large imports on constrained machines. |
 | `-c CONFIG` | Path to `sqllens.toml`. Falls back to the environment or `./sqllens.toml`. |
 
-Duplicate entries are skipped automatically. An entry counts as a duplicate when an identical one is already stored or appears earlier in the same file, comparing after trimming whitespace and ignoring letter case. Re-importing the same file is therefore safe and saves nothing the second time.
+Duplicate entries are skipped automatically. An entry counts as a duplicate when a matching one is already stored or appears earlier in the same file. Questions and notes match after trimming whitespace and ignoring letter case. SQL is compared by parsing it as MySQL: two statements match when they are the same once reformatted, so differences in spacing and keyword case do not matter, but string values and table and column names keep their case (`WHERE region = 'EU'` does not match `where region = 'eu'`). SQL that does not parse as exactly one statement matches only identical text, ignoring leading and trailing whitespace. Re-importing the same file is therefore safe and saves nothing the second time.
+
+A duplicate is not saved again, but its `groups` are added to every entry it matches: a tagged duplicate of an untagged entry gives that entry its groups, and a tagged duplicate of a tagged entry gives it both lists combined. An untagged duplicate changes nothing. A duplicate that changed an entry's groups counts as updated; one that changed nothing counts as a skipped duplicate.
 
 When the command finishes it prints a summary, for example:
 
 ```
-saved=42 skipped_duplicate=3 errors=0
+saved=42 updated=1 skipped_duplicate=3 errors=0
 ```
 
-A dry run prefixes the summary with `(dry-run)`. If any individual entry could not be saved, the command lists each failure and exits with a non-zero status so it is easy to catch in automation.
+A dry run prefixes the summary with `(dry-run)` and reports the same counts without writing anything. If any individual entry could not be saved, the command lists each failure and exits with a non-zero status so it is easy to catch in automation.
 
 **Warning:** `--clear` permanently deletes the current memory before loading the new file. If the import then fails partway through, the collection may be left empty or partial. Take an export first if the existing memory is valuable.
 
@@ -124,9 +145,9 @@ Write the configured store to a file:
 sqllens export-memory PATH [--format json|csv] [-c CONFIG]
 ```
 
-Use `--format json` (the default) for a complete, lossless backup. Use `--format csv` only when you want a simple `question,sql` spreadsheet and do not need the free-form notes.
+Use `--format json` (the default) for a complete, lossless backup; it keeps each entry's groups. Use `--format csv` only when you want a simple `question,sql` spreadsheet and do not need the free-form notes or the groups.
 
-`export-memory` prints a yellow `Warning:` line (and still writes the file) when the export is not a complete picture: the store is empty, some stored rows could not be represented, or `--format csv` dropped schema docs. CSV formula-prefix additions also produce a nonfatal warning because the exported text changed; use JSON to preserve exact values. If the store looks corrupt or was written by an incompatible version, `export-memory` refuses to write a misleading "successful" backup and exits non-zero with no file written — investigate before relying on a backup or running `--clear`.
+`export-memory` prints a yellow `Warning:` line (and still writes the file) when the export is not a complete picture: the store is empty, some stored rows could not be represented, or `--format csv` dropped schema docs or the groups of some entries (the warning gives how many). CSV formula-prefix additions also produce a nonfatal warning because the exported text changed; use JSON to preserve exact values. If the store looks corrupt or was written by an incompatible version, `export-memory` refuses to write a misleading "successful" backup and exits non-zero with no file written — investigate before relying on a backup or running `--clear`.
 
 ## Verifying Memory After an Import
 
@@ -152,7 +173,7 @@ sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
 
 With a rule-set file configured, every case runs under the rule set, account and user these three options give, and the command checks that identity and the file's tables and columns before the first case. See [Verifying Memory Under a Rule Set](rule-sets.md#verifying-memory-under-a-rule-set). Without a rule-set file, giving any of the three options is an error.
 
-A golden file is structurally a memory bundle's question-and-answer block — the same 10 MiB, 10,000-item and JSON nesting limits apply, and the same blank-value and length rules are enforced. CSV golden values are preserved exactly; unlike memory import/export, verification does not add spreadsheet formula-protection prefixes. The free-form notes block, if present, is ignored: only question-and-answer pairs are reference cases.
+A golden file may not give any pair `groups`, because every case runs under the one identity given on the command line; such a file is refused, naming the pair, before any case runs. A golden file is structurally a memory bundle's question-and-answer block — the same 10 MiB, 10,000-item and JSON nesting limits apply, and the same blank-value and length rules are enforced. CSV golden values are preserved exactly; unlike memory import/export, verification does not add spreadsheet formula-protection prefixes. The free-form notes block, if present, is ignored: only question-and-answer pairs are reference cases.
 
 A typical workflow is to import an updated bundle, then immediately verify it:
 
@@ -206,13 +227,13 @@ For deeper curation than a one-shot import, SQL Lens can expose a set of memory-
 
 The seven tools are:
 
-- **List memories**: returns the saved entries, newest first, with a total count. You can filter to question-and-answer pairs or free-form notes, and limit how many are returned.
-- **Get memory**: returns a single entry by its identifier.
+- **List memories**: returns the saved entries, newest first, with a total count. Each entry shows its groups. You can filter to question-and-answer pairs or free-form notes, and limit how many are returned.
+- **Get memory**: returns a single entry by its identifier, with its groups.
 - **Delete memory**: removes a single entry by its identifier.
 - **Clear memories**: removes all entries, or only one kind, and reports how many were deleted.
-- **Add memories**: bulk-adds curated question-and-answer pairs and free-form notes, skipping duplicates automatically. If any entry fails, the tool reports an error to the assistant rather than a success, and lists which entries failed.
-- **Export memories**: returns the saved memory as a JSON or CSV blob. The JSON form can be fed straight back into the add tool. If the export would leave anything out, for example free-form notes in a CSV export, the tool reports it as an error so a partial backup is never mistaken for a complete one. CSV formula-prefix additions produce a nonfatal warning; they do not set the dropped-record `lossy` flag.
-- **Memory statistics**: returns counts of each kind of entry, how often saved patterns were reused in the last 30 days, and the most-reused patterns.
+- **Add memories**: bulk-adds curated question-and-answer pairs and free-form notes, which may carry `groups`, merging duplicates as an import does and reporting how many entries it updated. If any entry fails, the tool reports an error to the assistant rather than a success, and lists which entries failed.
+- **Export memories**: returns the saved memory as a JSON or CSV blob. The JSON form can be fed straight back into the add tool. The JSON form keeps each entry's groups. If the export would leave anything out, for example free-form notes or groups in a CSV export, the tool reports it as an error so a partial backup is never mistaken for a complete one. CSV formula-prefix additions produce a nonfatal warning; they do not set the dropped-record `lossy` flag.
+- **Memory statistics**: returns counts of each kind of entry, how often saved patterns were reused in the last 30 days, and the most-reused patterns. With a rule-set file configured, it also counts entries whose groups no rule set lists, which no request can read.
 
 Each entry has a stable identifier you can pass to the get and delete tools. SQL Lens connects to a single database per instance, so although the tools accept a data-source identifier for compatibility, the value does not change which database is used.
 

@@ -63,6 +63,7 @@ What each part means:
 - `[[rule_sets]] scope`: A short description of what the role may see. It is for the people reading the file.
 - `[rule_sets.source]`: Where the rule set came from. `confirmed_against_production` (`true` or `false`) is required; `true` records that you checked the set against your production permissions, and a set left at `false` loads but is refused (see below). `role_id`, `role_name`, `role_copy`, `permission_list_version`, `global_switches`, `permission_fingerprint`, `application_commit` and `generated_on` are optional. When you set `role_id`, it must equal the set's `name`. `query_database` never sends any of this to the model; the `get_access_rules` administration tool returns it (see [Section: `[access_rules]`](configuration.md#section-access_rules)).
 - `[[rule_sets.tables]]`: One block per table the role may read, with `columns` listing every column it may read. `predicate_columns` names columns that only row rules read; the assistant cannot read them, and they may not also appear in `columns`. An optional `row_rule` limits which rows of the table the role sees (see [Row rules](#row-rules)).
+- `[[rule_sets]] memory_groups` (optional): The memory groups whose memory requests under this set may read, for example `memory_groups = ["finance-core"]`. See [Memory groups](#memory-groups).
 
 Every key is checked, and an unknown key makes the file fail to load. When a value is wrong, the error names the exact place in the file.
 
@@ -88,6 +89,7 @@ Two value rules recur below:
 | `[[rule_sets]]` | `scope` | string | Required, not empty. |
 | `[[rule_sets]]` | `source` | table | Required. |
 | `[[rule_sets]]` | `tables` | array of tables | Required. At least one; each table `name` must be unique within the set. |
+| `[[rule_sets]]` | `memory_groups` | array of strings | Optional. At least one, each not empty, no duplicates. |
 | `[rule_sets.source]` | `confirmed_against_production` | Boolean | Required. A set is used only when this is `true`. |
 | `[rule_sets.source]` | `role_id` | ID | Optional. When set, must equal the set's `name`. |
 | `[rule_sets.source]` | `role_name`, `role_copy` | string | Optional, not empty. |
@@ -227,10 +229,26 @@ The messages name only what class of problem occurred. They never name a table, 
 
 - **Answers are limited to the selected set.** SQL Lens rewrites every query so it can read only the tables and columns the selected set lists, and of a table with a row rule only the rows the rule makes visible to the request's user. A query that reaches for an unlisted table is refused before it runs; one that reads an unlisted column fails in MySQL as an unknown column (see below).
 - **Queries over a table with a row rule can be slower.** MySQL builds that table's visible rows in full before applying the query's own conditions, so no expression in the query ever runs on a hidden row. On a very large table this work can reach the statement timeout.
-- **Nothing is saved to memory.** The assistant saves no questions and no notes while a rule-set file is configured, whatever your `[memory]` settings say, because memory is shared by every rule set. Loading memory with `sqllens import-memory`, and the memory administration tools, are not affected.
+- **Nothing is saved to memory.** The assistant saves no questions and no notes while a rule-set file is configured, whatever your `[memory]` settings say, because a record it saved would carry no memory group and so reach every rule set. Loading memory with `sqllens import-memory`, and the memory administration tools, are not affected.
+- **Memory is limited to the selected set's groups.** Each request reads only untagged memory and memory tagged with one of its set's `memory_groups`. See [Memory groups](#memory-groups).
 - **A conversation belongs to one identity.** When a follow-up question carries a conversation identifier, the rule set, account and user must be the same ones that started the conversation. A follow-up under a different identity is refused.
 - **`sqllens verify-memory` runs under one rule set, account and user.** You name them on the command line, and every golden case faces that identity's tables, columns and rows. See [Verifying Memory Under a Rule Set](#verifying-memory-under-a-rule-set).
 - **Unconfirmed sets warn at startup.** `sqllens validate` prints a `Warning:` line for each set whose `confirmed_against_production` is not `true`, and `sqllens serve` logs the same warning, so where it appears depends on how you have the server's logging set up. Requests selecting such a set are refused.
+
+## Memory Groups
+
+A memory group is a name you choose, such as `finance-core`. Each memory record you load either lists one or more groups (a tagged record) or lists none (an untagged record). You give a record its groups with the `groups` field of a memory bundle; see [Managing memory](managing-memory.md#memory-groups).
+
+While a rule-set file is configured, a request reads, both through the assistant's memory search and through the memory added to its instructions, only:
+
+- untagged records, and
+- records that list at least one of the `memory_groups` of the rule set the request runs under.
+
+A set with no `memory_groups` reads untagged records only. The filter runs inside the memory search, so records outside a request's groups never take up the search's result limit. A record stored before groups existed is untagged and stays visible to every set, with no migration. Without a rule-set file, every request reads every record, tagged or not.
+
+`sqllens verify-memory` under `--rule-set S` reads exactly what a `query_database` request under `S` reads.
+
+Every group a memory import names must be listed in some rule set's `memory_groups`; an import naming any other group is refused and changes nothing. The `get_memory_stats` administration tool reports, as `unretrievable_count`, how many records list only groups that no rule set names; no request can read those records. The `get_access_rules` tool lists each set's `memory_groups`.
 
 ## Verifying Memory Under a Rule Set
 
@@ -316,7 +334,7 @@ Each `sqllens verify-memory` case writes the same `rule-set audit:` line at info
 
 Rule sets limit which tables and columns a query can read and, through row rules, which rows. They do not separate everything else, so plan around these limits:
 
-- **Memory is shared by every rule set.** Nothing is saved to memory while rule sets are on, but memory you load yourself (with `sqllens import-memory` or the memory administration tools) is searched for every request. Table and column names, SQL literal values, notes and chart data in curated memory can reach any role. Load only what every role may see.
+- **Untagged memory reaches every role.** A memory record with no groups is read by requests under every rule set. Table and column names, SQL literal values, notes and chart data in untagged memory can reach any role, so tag with a group whatever only some roles may see (see [Memory groups](#memory-groups)).
 - **The administration tools act for every rule set.** The memory and profile administration tools and the `get_access_rules` tool are not limited by rule sets. Register them only where end users' assistants cannot call them.
 - **`show_details` shows the model's SQL.** When a profile turns `show_details` on, the SQL in the answer is the SQL the model wrote, before the guard's rewrite, not the SQL MySQL ran. The answer labels it as such: it appears under `**Query as written:**`, its first line is this note line,
 
