@@ -47,7 +47,7 @@ A note reaches the assistant only on a turn whose message the automatic backgrou
 
 Import and export use a portable bundle file in one of two formats:
 
-- **JSON** (recommended): carries both question-and-answer pairs and free-form notes, and round-trips without losing anything. Use this for a full backup or to move memory between machines.
+- **JSON** (recommended): carries both question-and-answer pairs and free-form notes, with their groups. Use this for a full backup or to move memory between machines.
 - **CSV**: a simple two-column spreadsheet with a `question,sql` header. CSV carries question-and-answer pairs only; free-form notes and [memory groups](#memory-groups) are not included in a CSV export.
 
 A JSON bundle looks like this:
@@ -145,7 +145,7 @@ Write the configured store to a file:
 sqllens export-memory PATH [--format json|csv] [-c CONFIG]
 ```
 
-Use `--format json` (the default) for a complete, lossless backup; it keeps each entry's groups. Use `--format csv` only when you want a simple `question,sql` spreadsheet and do not need the free-form notes or the groups.
+Use `--format json` (the default) for a full backup; it keeps each entry's groups. Entries that count as duplicates of each other (see the duplicate rule above) come back from an import as one entry carrying all their groups. Use `--format csv` only when you want a simple `question,sql` spreadsheet and do not need the free-form notes or the groups.
 
 `export-memory` prints a yellow `Warning:` line (and still writes the file) when the export is not a complete picture: the store is empty, some stored rows could not be represented, or `--format csv` dropped schema docs or the groups of some entries (the warning gives how many). CSV formula-prefix additions also produce a nonfatal warning because the exported text changed; use JSON to preserve exact values. If the store looks corrupt or was written by an incompatible version, `export-memory` refuses to write a misleading "successful" backup and exits non-zero with no file written — investigate before relying on a backup or running `--clear`.
 
@@ -173,7 +173,7 @@ sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
 
 With a rule-set file configured, every case runs under the rule set, account and user these three options give, and the command checks that identity and the file's tables and columns before the first case. See [Verifying Memory Under a Rule Set](rule-sets.md#verifying-memory-under-a-rule-set). Without a rule-set file, giving any of the three options is an error.
 
-A golden file may not give any pair `groups`, because every case runs under the one identity given on the command line; such a file is refused, naming the pair, before any case runs. A golden file is structurally a memory bundle's question-and-answer block — the same 10 MiB, 10,000-item and JSON nesting limits apply, and the same blank-value and length rules are enforced. CSV golden values are preserved exactly; unlike memory import/export, verification does not add spreadsheet formula-protection prefixes. The free-form notes block, if present, is ignored: only question-and-answer pairs are reference cases.
+A golden file may not give any item `groups`, a pair or a note, because every case runs under the one identity given on the command line; such a file is refused, naming the item, before any case runs. A golden file is structurally a memory bundle's question-and-answer block — the same 10 MiB, 10,000-item and JSON nesting limits apply, and the same blank-value and length rules are enforced. CSV golden values are preserved exactly; unlike memory import/export, verification does not add spreadsheet formula-protection prefixes. The free-form notes block, if present, is ignored: only question-and-answer pairs are reference cases.
 
 A typical workflow is to import an updated bundle, then immediately verify it:
 
