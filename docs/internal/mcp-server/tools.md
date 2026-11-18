@@ -495,7 +495,7 @@ Every tool is registered with `@_tool(structured_output=False)` (the error-wrapp
 
 | Tool | Args | Success shape | Notes |
 |---|---|---|---|
-| `list_memories` | `data_source_id`, `memory_type?`, `limit=1000` (0–1000), `include_embedding_preview=False` | `{"memories": [...], "total": N}` | Newest first. Each memory carries its `groups` (`[]` when untagged). `total` counts all rows matching `memory_type`, including when `limit=0`. Preview adds an 8-float `embedding_preview` + `embedding_dim`. |
+| `list_memories` | `data_source_id`, `memory_type?`, `limit=1000` (0–1000), `include_embedding_preview=False` | `{"memories": [...], "total": N}` | Newest first. Each memory carries its `groups` (`[]` when untagged; `null` when the record is marked tagged but its group list is unreadable, which no rule set can retrieve). `total` counts all rows matching `memory_type`, including when `limit=0`. Preview adds an 8-float `embedding_preview` + `embedding_dim`. |
 | `get_memory` | `data_source_id`, `memory_id` | the memory's JSON object (with **full** `embedding`) | `MemoryNotFoundError` → `isError` `{"error": "memory not found", "memory_id"}`. |
 | `delete_memory` | `data_source_id`, `memory_id` | `{"deleted": true}` | **Write-guarded.** Absent id → `isError` `{"deleted": false, ...}`. |
 | `clear_memories` | `data_source_id`, `memory_type?` | `{"deleted_count": N}` | **Write-guarded.** Omit `memory_type` to wipe all (by every reported id, so corrupt rows go too). |

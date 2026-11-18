@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Any, Literal, ParamSpec, TypeVar
 
 from pydantic import ValidationError
 
-from sqllens._memory_groups import GROUPS_KEY, TAGGED_KEY, group_metadata, record_groups
+from sqllens._memory_groups import is_tagged, record_groups, with_added_groups
 from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.core.user.models import User
 from sqllens.agent.integrations.chromadb.agent_memory import ChromaAgentMemory
@@ -209,6 +209,8 @@ class MemoryStore:
         for record in self._records_from_result(got, include_embeddings=False):
             metadata = record.metadata
             groups = frozenset(record_groups(metadata))
+            if not groups and is_tagged(metadata):
+                continue  # unrepresentable, as _bundle_from_metadatas counts it
             if metadata.get("is_text_memory"):
                 content = metadata.get("content")
                 if isinstance(content, str) and content.strip():
@@ -226,35 +228,30 @@ class MemoryStore:
                 entries.append(DedupEntry(record.memory_id, "sql_pair", question, sql, groups))
         return entries
 
-    def set_groups(self, updates: Mapping[str, Sequence[str]]) -> None:
-        """Replace the groups of each record id in ``updates``; call it on the memory worker."""
-        if not updates:
+    def add_groups(self, additions: Mapping[str, Sequence[str]]) -> None:
+        """Add groups to each record id in ``additions``; call it on the memory worker.
+
+        Merges with the groups stored when it runs, not with an earlier read, so
+        an import that changed the same record in between keeps its groups.
+        """
+        if not additions:
             return
         collection = self._mem._get_collection()
-        ids = list(updates)
+        ids = list(additions)
         got = collection.get(ids=ids, include=["metadatas"])
         found_ids = got.get("ids") or []
         metadatas = got.get("metadatas") or []
-        new_ids: list[str] = []
-        new_metadatas: list[dict[str, Any]] = []
-        for memory_id, metadata in zip(found_ids, metadatas, strict=False):
-            merged = {
-                key: value
-                for key, value in (metadata or {}).items()
-                if key not in (GROUPS_KEY, TAGGED_KEY)
-            }
-            merged.update(group_metadata(updates[memory_id]))
-            new_ids.append(memory_id)
-            new_metadatas.append(merged)
-        missing = set(ids) - set(new_ids)
+        missing = set(ids) - set(found_ids)
         if missing:
             raise MemoryChangedDuringImportError(
                 f"{len(missing)} memory record(s) disappeared while their groups were updated"
             )
-        # Chroma merges metadata on update, so a key left out would survive;
-        # every record written here was tagged or becomes tagged, never untagged.
+        new_metadatas = [
+            with_added_groups(metadata or {}, additions[memory_id])
+            for memory_id, metadata in zip(found_ids, metadatas, strict=False)
+        ]
         with self._mem._collection_state.writing():
-            collection.update(ids=new_ids, metadatas=new_metadatas)
+            collection.update(ids=list(found_ids), metadatas=new_metadatas)
 
     def iter_all(self) -> MemoryBundle:
         """Enumerate the collection into a bundle.
@@ -300,6 +297,12 @@ class MemoryStore:
                 continue
             total += 1
             groups = record_groups(metadata) or None
+            if groups is None and is_tagged(metadata):
+                # Exporting it untagged would make a restore readable by every
+                # rule set; skip it so the export reports the loss instead.
+                skipped += 1
+                logger.debug("skipping a memory row marked tagged with no readable groups")
+                continue
             try:
                 if metadata.get("is_text_memory"):
                     docs.append(SchemaDoc(content=metadata.get("content", ""), groups=groups))

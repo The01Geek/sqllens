@@ -10,16 +10,16 @@ convenience for SQL pairs only.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    StrictStr,
-    StringConstraints,
     field_validator,
 )
+
+from sqllens._memory_groups import GroupName
 
 QUESTION_MAX = 1000
 SQL_MAX = 10000
@@ -59,7 +59,6 @@ def _require_non_blank(value: str, field: str) -> str:
     return value
 
 
-GroupName = Annotated[StrictStr, StringConstraints(min_length=1)]
 
 
 def _distinct_groups(value: list[str] | None) -> list[str] | None:

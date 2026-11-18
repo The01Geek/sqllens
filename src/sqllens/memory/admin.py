@@ -32,7 +32,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from sqllens._errors import validation_error_lines
-from sqllens._memory_groups import record_groups
+from sqllens._memory_groups import is_tagged, record_groups
 from sqllens.memory.exporter import csv_groups_dropped_warning
 from sqllens.memory.importer import import_bundle
 from sqllens.memory.io import serialize_csv
@@ -89,7 +89,8 @@ def _record_to_wire(
         "memory_id": record.memory_id,
         "memory_type": memory_type,
         "timestamp": metadata.get("timestamp"),
-        "groups": record_groups(metadata),
+        # None, not [], so a corrupt tagged record is not shown as untagged.
+        "groups": record_groups(metadata) or (None if is_tagged(metadata) else []),
     }
 
     if memory_type == "text":
@@ -410,7 +411,7 @@ def get_memory_stats(
     if known_groups is not None:
         for record in records:
             groups = record_groups(record.metadata)
-            if groups and not any(group in known_groups for group in groups):
+            if is_tagged(record.metadata) and not any(group in known_groups for group in groups):
                 unretrievable_count += 1
     # last_hit_date is stored as a naive-local datetime.now().isoformat() (see
     # ChromaAgentMemory.search_similar_usage), so the cutoff must use the same

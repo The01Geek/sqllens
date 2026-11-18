@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import sqlglot
+from sqlglot.errors import ParseError, TokenError
 
 from sqllens.memory.schema import (
     ImportItemError,
@@ -59,8 +60,12 @@ def sql_key(sql: str) -> tuple[str, str]:
         statements = [s for s in sqlglot.parse(sql, read="mysql") if s is not None]
         if len(statements) == 1:
             return ("parsed", statements[0].sql(dialect="mysql"))
-    except Exception:  # RecursionError and parser errors alike
+    except (ParseError, TokenError, RecursionError):
         logger.debug("SQL did not parse for duplicate matching; comparing text", exc_info=True)
+    except Exception:
+        # Not a parse failure: likely a sqlglot regression, which silently
+        # degrades dedup to exact text, so keep it visible to operators.
+        logger.warning("sqlglot failed unexpectedly; comparing SQL as text", exc_info=True)
     return ("text", sql.strip())
 
 
@@ -205,7 +210,7 @@ async def import_bundle(
     report = ImportReport(updated=plan.updated, skipped_duplicate=plan.skipped_duplicate)
 
     if not dry_run and plan.updates:
-        await run_memory_call(store.set_groups, plan.updates)
+        await run_memory_call(store.add_groups, plan.updates)
 
     pending = 0
     for new in plan.new_items:

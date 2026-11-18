@@ -535,3 +535,74 @@ def test_cli_import_refuses_unknown_groups_and_prints_updated(tmp_path, monkeypa
 def test_schema_models_accept_groups() -> None:
     assert SqlPair(question="q", sql="s", groups=["a"]).groups == ["a"]
     assert SchemaDoc(content="c").groups is None
+
+
+# --- review round 1 fixes ------------------------------------------------------
+
+
+def _stored(store: MemoryStore) -> list[dict[str, Any]]:
+    return store._mem._get_collection().get(include=["metadatas"])["metadatas"]
+
+
+async def test_add_groups_merges_with_groups_stored_at_write_time(store: MemoryStore) -> None:
+    """An import that planned from an older read must not drop another import's groups."""
+    await store.add_sql_pair("q", "SELECT 1", groups=["a"])
+    record_id = store.dedup_entries()[0].memory_id
+    # Two imports planned against the same baseline (groups ["a"]), written in turn.
+    store.add_groups({record_id: ["a", "b"]})
+    store.add_groups({record_id: ["a", "c"]})
+    assert _groups_by_question(store) == [("q", ["a", "b", "c"])]
+
+
+def test_add_groups_refuses_a_vanished_record(store: MemoryStore) -> None:
+    from sqllens.memory.store import MemoryChangedDuringImportError
+
+    with pytest.raises(MemoryChangedDuringImportError, match="1 memory record"):
+        store.add_groups({"no-such-id": ["a"]})
+
+
+async def test_tagged_record_with_unreadable_groups_is_not_treated_as_untagged(
+    tmp_path, monkeypatch
+) -> None:
+    patch_fake_embeddings(monkeypatch)
+    cfg = _server_cfg(tmp_path, _grouped_document())
+    store = MemoryStore(cfg)
+    await store.add_sql_pair("fine", "SELECT 1")
+    store._mem._get_collection().upsert(
+        ids=["corrupt"],
+        documents=["corrupt"],
+        metadatas=[{"question": "corrupt", "tool_name": "run_sql",
+                    "args_json": json.dumps({"sql": "SELECT 2"}), "timestamp": "t",
+                    "success": True, "metadata_json": "{}", "memory_tagged": True}],
+    )
+    result = export_bundle(store, "json")
+    assert "corrupt" not in result.text
+    assert any("unrepresentable" in w for w in result.warnings)
+    assert all(entry.memory_id != "corrupt" for entry in store.dedup_entries())
+    mcp = build_server(cfg)
+    listed = _parse(await _fn(mcp, "list_memories")(data_source_id=_DSID))["memories"]
+    assert {m["question"]: m["groups"] for m in listed} == {"fine": [], "corrupt": None}
+    stats = _parse(await _fn(mcp, "get_memory_stats")(data_source_id=_DSID))
+    assert stats["unretrievable_count"] == 1
+
+
+async def test_add_memories_reports_updated_count(tmp_path, monkeypatch) -> None:
+    patch_fake_embeddings(monkeypatch)
+    mcp = build_server(_server_cfg(tmp_path, _grouped_document()))
+    await _fn(mcp, "add_memories")(data_source_id=_DSID, schema_docs=[{"content": "d"}])
+    again = _parse(await _fn(mcp, "add_memories")(
+        data_source_id=_DSID, schema_docs=[{"content": "d", "groups": ["finance"]}]
+    ))
+    assert (again["saved_count"], again["updated_count"], again["duplicate_count"]) == (0, 1, 0)
+
+
+def test_sql_key_warns_on_an_unexpected_sqlglot_failure(monkeypatch, caplog) -> None:
+    import sqlglot
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise AttributeError("ast shape changed")
+
+    monkeypatch.setattr(sqlglot, "parse", broken)
+    with caplog.at_level("WARNING", logger="sqllens.memory"):
+        assert sql_key(" SELECT 1 ") == ("text", "SELECT 1")
+    assert "sqlglot failed unexpectedly" in caplog.text

@@ -46,6 +46,7 @@ from pydantic import (
 )
 from sqlglot import expressions as exp
 
+from sqllens._memory_groups import GroupName
 from sqllens.config import RESERVED_METADATA_KEYS
 
 logger = logging.getLogger("sqllens.rule_sets")
@@ -391,7 +392,7 @@ class RuleSet(_Record):
     source: Source
     tables: list[TableRule] = Field(min_length=1)
     # The memory groups requests under this set may read, besides untagged memory.
-    memory_groups: list[NonEmptyStr] | None = Field(default=None, min_length=1)
+    memory_groups: list[GroupName] | None = Field(default=None, min_length=1)
 
     @field_validator("memory_groups")
     @classmethod
