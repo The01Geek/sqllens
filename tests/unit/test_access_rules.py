@@ -160,6 +160,7 @@ async def test_flat_rls_rules_typed_and_unhashed(tmp_path: Path) -> None:
 async def test_rule_set_file_listing(tmp_path: Path) -> None:
     document = _all_kinds_document()
     document["rule_sets"].append(example_document()["rule_sets"][1])
+    document["rule_sets"][0]["memory_groups"] = ["finance-core", "ops"]
     path = write_rule_set_file(tmp_path, document)
     listing = await _listing(_config(tmp_path, rule_file=path))
     f = listing["rule_set_file"]
@@ -172,6 +173,8 @@ async def test_rule_set_file_listing(tmp_path: Path) -> None:
     assert (confirmed["name"], draft["name"]) == ("2", "3")
     assert confirmed["refused_unconfirmed"] is False
     assert draft["refused_unconfirmed"] is True
+    assert confirmed["memory_groups"] == ["finance-core", "ops"]
+    assert draft["memory_groups"] == []
     assert draft["source"] == {"confirmed_against_production": {"type": "bool", "text": "false"}}
     assert confirmed["source"] == {
         "confirmed_against_production": {"type": "bool", "text": "true"},
