@@ -78,7 +78,7 @@ def _enforce_item_caps(bundle: MemoryBundle) -> None:
     Per-block backstop against a small-on-the-wire bundle that nonetheless
     has more items than the import path is willing to hold under
     ``import_lock``. Not a model-level ``Field`` constraint because
-    ``MemoryStore.iter_all`` (the dedup baseline + export source) constructs
+    ``MemoryStore.iter_all`` (the export source and import dedup check) constructs
     the same models from a live store that may legitimately exceed the cap,
     and a Pydantic ``ValidationError`` would escape ``export_bundle`` /
     ``import_bundle`` as an unstructured crash on healthy data.

@@ -357,10 +357,10 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
                 f"CSV carries SQL pairs only — {len(docs)} schema doc(s) are NOT "
                 "in this export. Use format='json' for a lossless backup."
             )
-        tagged = sum(1 for p in pairs if p.groups)
-        if tagged:
+        dropped = csv_groups_dropped_warning(bundle, "format='json'")
+        if dropped:
             lossy = True
-            warnings.append(csv_groups_dropped_warning(tagged, "format='json'"))
+            warnings.append(dropped)
         data = serialize_csv(bundle, warnings=warnings)
     else:
         data = json.dumps(

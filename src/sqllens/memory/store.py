@@ -202,9 +202,9 @@ class MemoryStore:
         Covers the rows :meth:`iter_all` turns into bundle items and raises
         :class:`MemoryCorruptionError` when it does; call it on the memory worker.
         """
-        self.iter_all()
         collection = self._mem._get_collection()
         got = collection.get(include=["metadatas"])
+        self._bundle_from_metadatas(got.get("metadatas") or [])
         entries: list[DedupEntry] = []
         for record in self._records_from_result(got, include_embeddings=False):
             metadata = record.metadata
@@ -266,9 +266,9 @@ class MemoryStore:
 
         A single corrupt or non-conforming row (unparseable ``args_json``, or a
         value the bundle models reject — e.g. a live-agent memory longer than
-        the import limits) is skipped, not fatal: ``iter_all`` is also the
-        dedup baseline for ``import_bundle``, so one bad row must not abort
-        every export and import.
+        the import limits) is skipped, not fatal: ``dedup_entries``, the
+        ``import_bundle`` baseline, runs the same reconstruction, so one bad
+        row must not abort every export and import.
 
         Wholesale failure is *not* tolerated: if the collection has a
         meaningful number of rows and (almost) none reconstruct, that is
@@ -283,7 +283,10 @@ class MemoryStore:
         collection = self._mem._get_collection()
         # Skip embedding vectors/documents (largest per-row payload, unused here).
         metadatas = collection.get(include=["metadatas"]).get("metadatas") or []
+        return self._bundle_from_metadatas(metadatas)
 
+    def _bundle_from_metadatas(self, metadatas: list[Any]) -> MemoryBundle:
+        """:meth:`iter_all`'s reconstruction of rows already read from the collection."""
         pairs: list[SqlPair] = []
         docs: list[SchemaDoc] = []
         skipped = 0

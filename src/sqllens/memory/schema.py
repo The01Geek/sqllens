@@ -32,8 +32,8 @@ CONTENT_MAX = 50000
 # inside the held ``import_lock``). The two caps below — both enforced in
 # ``memory.io`` at the parse boundary, *not* as model-level ``Field``
 # constraints — reject such payloads on the way in while leaving in-process
-# constructors (notably ``MemoryStore.iter_all``, which is the dedup baseline
-# for ``import_bundle`` and the source for ``export_bundle``) unrestricted.
+# constructors (notably ``MemoryStore.iter_all``, the source for ``export_bundle``,
+# and ``MemoryStore.dedup_entries``, the ``import_bundle`` baseline) unrestricted.
 # Enforcing as a ``Field`` constraint would propagate the cap to every
 # construction, breaking export and import-baseline reads on a healthy store
 # that legitimately holds more than ``MAX_BUNDLE_ITEMS`` rows.
