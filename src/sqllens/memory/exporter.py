@@ -30,11 +30,13 @@ class ExportResult:
 
 
 def csv_groups_dropped_warning(bundle: MemoryBundle, json_option: str) -> str | None:
-    """The warning for a CSV export of ``bundle``, which drops every pair's groups.
+    """The warning for a CSV export of ``bundle``, which drops every record's groups.
 
-    ``None`` when no SQL pair is tagged, so nothing is lost.
+    Counts tagged SQL pairs and tagged schema docs (CSV drops the docs whole).
+    ``None`` when no record is tagged.
     """
-    count = sum(1 for p in bundle.sql_pairs.pairs if p.groups) if bundle.sql_pairs else 0
+    pairs = bundle.sql_pairs.pairs if bundle.sql_pairs else []
+    count = sum(1 for item in (*pairs, *(bundle.schema_docs or [])) if item.groups)
     if not count:
         return None
     return (

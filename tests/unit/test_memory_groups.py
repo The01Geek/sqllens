@@ -376,15 +376,16 @@ async def test_csv_export_of_tagged_store_is_lossy_and_csv_import_keeps_groups(
 ) -> None:
     await store.add_sql_pair("q1", "SELECT 1", groups=["a"])
     await store.add_sql_pair("q2", "SELECT 2")
+    await store.add_schema_doc("tagged doc", groups=["a"])
     result = memory_admin.export_memories(store, "csv")
     assert result["lossy"] is True
-    assert any("groups of 1 record(s)" in w for w in result["warnings"])
-    assert any("groups of 1 record(s)" in w for w in export_bundle(store, "csv").warnings)
+    assert any("groups of 2 record(s)" in w for w in result["warnings"])
+    assert any("groups of 2 record(s)" in w for w in export_bundle(store, "csv").warnings)
     from sqllens.memory.io import parse_csv
 
     report = await import_bundle(store, parse_csv(result["data"]), known_groups={"a"})
     assert (report.saved, report.updated, report.skipped_duplicate) == (0, 0, 2)
-    assert _groups_by_question(store) == [("q1", ["a"]), ("q2", [])]
+    assert _groups_by_question(store) == [("q1", ["a"]), ("q2", []), ("tagged doc", ["a"])]
 
 
 def test_golden_file_refuses_items_with_groups() -> None:

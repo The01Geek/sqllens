@@ -228,7 +228,7 @@ Before the baseline read (so before any clear), `import_bundle` raises `UnknownM
 
 While a rule-set file is configured, both retrieval paths return only untagged records and records sharing a group with the request's rule set; see [Memory groups](../database-connectors/rule-sets.md#memory-groups) for the filter, its storage keys, and why it is read before the search moves to the executor. Without a rule-set file `group_scope` is `None` and no group filter applies.
 
-`clear=True` wipes the collection before importing. `dry_run=True` validates and reports but writes nothing **and skips the clear** (so a dry-run's dedup baseline is the still-populated store). `batch_size` bounds how many writes are issued before `await asyncio.sleep(0)` yields, keeping large imports cooperative. A per-item write failure is recorded in `ImportReport.errors` and does not abort the rest of the batch.
+`clear=True` wipes the collection before importing. `dry_run=True` validates and reports but writes nothing **and skips the clear**; with `clear=True` it plans against an empty baseline without reading the store, so it reports the counts a real `--clear` import would. `batch_size` bounds how many writes are issued before `await asyncio.sleep(0)` yields, keeping large imports cooperative. A per-item write failure is recorded in `ImportReport.errors` and does not abort the rest of the batch.
 
 ### CLI commands
 

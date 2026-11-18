@@ -116,9 +116,10 @@ async def test_dry_run_with_clear_preserves_store(store: MemoryStore) -> None:
     await import_bundle(store, _BUNDLE)
     before = export_bundle(store, "json").text
     report = await import_bundle(store, _BUNDLE, dry_run=True, clear=True)
-    # clear is skipped on a dry-run, so existing memory is still the baseline
-    assert report.saved == 0
-    assert report.skipped_duplicate == 3
+    # clear is skipped on a dry-run, but the counts are those a real --clear
+    # import would report: every item is new against the emptied store.
+    assert report.saved == 3
+    assert report.skipped_duplicate == 0
     assert export_bundle(store, "json").text == before
 
 
