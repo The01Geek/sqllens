@@ -470,6 +470,7 @@ async def test_tools_refuse_unknown_groups_and_report_updates(tmp_path, monkeypa
         {"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1", "groups": ["finance"]}]}}
     ))
     assert "| updated | 1 |" in second
+    assert "saved=0 updated=1 skipped_duplicate=0 errors=0" in second
     added = _parse(await _fn(mcp, "add_memories")(
         data_source_id=_DSID, schema_docs=[{"content": "d", "groups": ["finance"]}]
     ))

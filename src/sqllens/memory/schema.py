@@ -163,6 +163,9 @@ class ImportReport(BaseModel):
     def to_markdown(self) -> str:
         """Render as a compact Markdown summary (used by the MCP tool)."""
         lines = [
+            f"saved={self.saved} updated={self.updated} "
+            f"skipped_duplicate={self.skipped_duplicate} errors={len(self.errors)}",
+            "",
             "| metric | count |",
             "| --- | --- |",
             f"| saved | {self.saved} |",
