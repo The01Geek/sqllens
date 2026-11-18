@@ -116,9 +116,10 @@ async def test_dry_run_with_clear_preserves_store(store: MemoryStore) -> None:
     await import_bundle(store, _BUNDLE)
     before = export_bundle(store, "json").text
     report = await import_bundle(store, _BUNDLE, dry_run=True, clear=True)
-    # clear is skipped on a dry-run, so existing memory is still the baseline
-    assert report.saved == 0
-    assert report.skipped_duplicate == 3
+    # clear is skipped on a dry-run, but the counts are those a real --clear
+    # import would report: every item is new against the emptied store.
+    assert report.saved == 3
+    assert report.skipped_duplicate == 0
     assert export_bundle(store, "json").text == before
 
 
@@ -202,10 +203,10 @@ async def test_schema_doc_per_item_failure_is_isolated(
     """The schema_doc section's failure isolation, not just sql_pair."""
     real_add = store.add_schema_doc
 
-    async def flaky_doc(content: str) -> None:
+    async def flaky_doc(content: str, groups=None) -> None:
         if "fail" in content:
             raise RuntimeError("doc-boom")
-        await real_add(content)
+        await real_add(content, groups=groups)
 
     monkeypatch.setattr(store, "add_schema_doc", flaky_doc)
     bundle = MemoryBundle.model_validate(
@@ -230,11 +231,11 @@ async def test_per_item_save_failure_is_reported_not_fatal(
 
     real_add = store.add_sql_pair
 
-    async def flaky_add(question: str, sql: str) -> None:
+    async def flaky_add(question: str, sql: str, groups=None) -> None:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("boom")
-        await real_add(question, sql)
+        await real_add(question, sql, groups=groups)
 
     monkeypatch.setattr(store, "add_sql_pair", flaky_add)
     report = await import_bundle(store, _BUNDLE)
@@ -250,7 +251,7 @@ async def test_systemic_error_aborts_import_not_per_item(
     """A MemoryError/disk-full is environmental — fail fast, don't flatten it
     into one per-item error per row."""
 
-    async def oom(question: str, sql: str) -> None:
+    async def oom(question: str, sql: str, groups=None) -> None:
         raise MemoryError("out of memory")
 
     monkeypatch.setattr(store, "add_sql_pair", oom)
@@ -259,7 +260,7 @@ async def test_systemic_error_aborts_import_not_per_item(
 
 
 async def test_disk_full_aborts_import(store: MemoryStore, monkeypatch) -> None:
-    async def disk_full(question: str, sql: str) -> None:
+    async def disk_full(question: str, sql: str, groups=None) -> None:
         raise OSError("No space left on device")
 
     monkeypatch.setattr(store, "add_sql_pair", disk_full)

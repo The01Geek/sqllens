@@ -34,13 +34,14 @@ import functools
 import json
 import logging
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, ParamSpec, TypeVar
 
 from pydantic import ValidationError
 
+from sqllens._memory_groups import is_tagged, record_groups, with_added_groups
 from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.core.user.models import User
 from sqllens.agent.integrations.chromadb.agent_memory import ChromaAgentMemory
@@ -116,6 +117,24 @@ async def run_memory_call(func: Callable[P, T], /, *args: P.args, **kwargs: P.kw
         raise
 
 
+class MemoryChangedDuringImportError(RuntimeError):
+    """A record an import was merging into vanished before its groups were written."""
+
+
+@dataclass(frozen=True)
+class DedupEntry:
+    """One stored SQL pair or schema doc as import dedup sees it.
+
+    ``question`` is ``""`` for a schema doc; ``text`` is the SQL or the content.
+    """
+
+    memory_id: str
+    kind: Literal["sql_pair", "schema_doc"]
+    question: str
+    text: str
+    groups: frozenset[str]
+
+
 class MemoryCorruptionError(RuntimeError):
     """Raised when ``iter_all`` cannot reconstruct (almost) any stored row.
 
@@ -161,7 +180,9 @@ class MemoryStore:
         # import surface a non-fatal partial-loss warning.
         self.last_skipped_rows = 0
 
-    async def add_sql_pair(self, question: str, sql: str) -> None:
+    async def add_sql_pair(
+        self, question: str, sql: str, groups: Sequence[str] | None = None
+    ) -> None:
         await self._mem.save_tool_usage(
             question=question,
             tool_name=RUN_SQL_TOOL_NAME,
@@ -169,10 +190,68 @@ class MemoryStore:
             context=self._ctx,
             success=True,
             metadata={"source": _IMPORT_SOURCE},
+            groups=groups,
         )
 
-    async def add_schema_doc(self, content: str) -> None:
-        await self._mem.save_text_memory(content, self._ctx)
+    async def add_schema_doc(self, content: str, groups: Sequence[str] | None = None) -> None:
+        await self._mem.save_text_memory(content, self._ctx, groups=groups)
+
+    def dedup_entries(self) -> list[DedupEntry]:
+        """Every stored SQL pair and schema doc, with its id and groups, for import dedup.
+
+        Covers the rows :meth:`iter_all` turns into bundle items and raises
+        :class:`MemoryCorruptionError` when it does; call it on the memory worker.
+        """
+        collection = self._mem._get_collection()
+        got = collection.get(include=["metadatas"])
+        self._bundle_from_metadatas(got.get("metadatas") or [])
+        entries: list[DedupEntry] = []
+        for record in self._records_from_result(got, include_embeddings=False):
+            metadata = record.metadata
+            groups = frozenset(record_groups(metadata))
+            if not groups and is_tagged(metadata):
+                continue  # unrepresentable, as _bundle_from_metadatas counts it
+            if metadata.get("is_text_memory"):
+                content = metadata.get("content")
+                if isinstance(content, str) and content.strip():
+                    entries.append(DedupEntry(record.memory_id, "schema_doc", "", content, groups))
+                continue
+            if metadata.get("tool_name") != RUN_SQL_TOOL_NAME:
+                continue
+            try:
+                args = json.loads(metadata.get("args_json", "{}"))
+            except (TypeError, ValueError):
+                continue
+            sql = args.get("sql") if isinstance(args, dict) else None
+            question = metadata.get("question")
+            if isinstance(sql, str) and sql and isinstance(question, str):
+                entries.append(DedupEntry(record.memory_id, "sql_pair", question, sql, groups))
+        return entries
+
+    def add_groups(self, additions: Mapping[str, Sequence[str]]) -> None:
+        """Add groups to each record id in ``additions``; call it on the memory worker.
+
+        Merges with the groups stored when it runs, not with an earlier read, so
+        an import that changed the same record in between keeps its groups.
+        """
+        if not additions:
+            return
+        collection = self._mem._get_collection()
+        ids = list(additions)
+        got = collection.get(ids=ids, include=["metadatas"])
+        found_ids = got.get("ids") or []
+        metadatas = got.get("metadatas") or []
+        missing = set(ids) - set(found_ids)
+        if missing:
+            raise MemoryChangedDuringImportError(
+                f"{len(missing)} memory record(s) disappeared while their groups were updated"
+            )
+        new_metadatas = [
+            with_added_groups(metadata or {}, additions[memory_id])
+            for memory_id, metadata in zip(found_ids, metadatas, strict=False)
+        ]
+        with self._mem._collection_state.writing():
+            collection.update(ids=list(found_ids), metadatas=new_metadatas)
 
     def iter_all(self) -> MemoryBundle:
         """Enumerate the collection into a bundle.
@@ -184,9 +263,9 @@ class MemoryStore:
 
         A single corrupt or non-conforming row (unparseable ``args_json``, or a
         value the bundle models reject — e.g. a live-agent memory longer than
-        the import limits) is skipped, not fatal: ``iter_all`` is also the
-        dedup baseline for ``import_bundle``, so one bad row must not abort
-        every export and import.
+        the import limits) is skipped, not fatal: ``dedup_entries``, the
+        ``import_bundle`` baseline, runs the same reconstruction, so one bad
+        row must not abort every export and import.
 
         Wholesale failure is *not* tolerated: if the collection has a
         meaningful number of rows and (almost) none reconstruct, that is
@@ -201,7 +280,10 @@ class MemoryStore:
         collection = self._mem._get_collection()
         # Skip embedding vectors/documents (largest per-row payload, unused here).
         metadatas = collection.get(include=["metadatas"]).get("metadatas") or []
+        return self._bundle_from_metadatas(metadatas)
 
+    def _bundle_from_metadatas(self, metadatas: list[Any]) -> MemoryBundle:
+        """:meth:`iter_all`'s reconstruction of rows already read from the collection."""
         pairs: list[SqlPair] = []
         docs: list[SchemaDoc] = []
         skipped = 0
@@ -214,9 +296,16 @@ class MemoryStore:
                 total += 1
                 continue
             total += 1
+            groups = record_groups(metadata) or None
+            if groups is None and is_tagged(metadata):
+                # Exporting it untagged would make a restore readable by every
+                # rule set; skip it so the export reports the loss instead.
+                skipped += 1
+                logger.debug("skipping a memory row marked tagged with no readable groups")
+                continue
             try:
                 if metadata.get("is_text_memory"):
-                    docs.append(SchemaDoc(content=metadata.get("content", "")))
+                    docs.append(SchemaDoc(content=metadata.get("content", ""), groups=groups))
                     continue
                 if metadata.get("tool_name") != RUN_SQL_TOOL_NAME:
                     continue
@@ -224,7 +313,9 @@ class MemoryStore:
                 sql = args.get("sql")
                 if not sql:
                     continue
-                pairs.append(SqlPair(question=metadata.get("question", ""), sql=sql))
+                pairs.append(
+                    SqlPair(question=metadata.get("question", ""), sql=sql, groups=groups)
+                )
             except (TypeError, ValueError, ValidationError) as exc:
                 # Corrupt/non-conforming stored row — skip rather than abort
                 # the whole enumeration (and the import that seeds off it).

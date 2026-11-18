@@ -547,7 +547,13 @@ def build_server(cfg: Config) -> MCPServer:
     # Opt-in, default OFF: a client that can write memory can poison future
     # SQL generation. Only registered when an operator sets allow_import.
     if cfg.memory.allow_import:
-        from sqllens.memory import MemoryCorruptionError, MemoryStore, import_bundle
+        from sqllens.memory import (
+            MemoryCorruptionError,
+            MemoryStore,
+            UnknownMemoryGroupsError,
+            configured_groups,
+            import_bundle,
+        )
         from sqllens.memory.io import BundleFormatError, parse_json
 
         store = MemoryStore(cfg)
@@ -561,9 +567,12 @@ def build_server(cfg: Config) -> MCPServer:
         async def import_memory(bundle_json: str) -> str:
             """Bulk-load a curated memory bundle (JSON) into the store.
 
-            The bundle has optional ``sql_pairs`` and ``schema_docs`` blocks.
-            Exact-match duplicates (already stored or repeated in the bundle)
-            are skipped. Returns a Markdown summary of saved / skipped / errors.
+            The bundle has optional ``sql_pairs`` and ``schema_docs`` blocks; any
+            item may carry ``groups``, each of which a rule set's
+            ``memory_groups`` must list. A duplicate (already stored or repeated
+            in the bundle) creates no record and adds its groups to the records
+            it matches. Returns a Markdown summary of saved / updated / skipped /
+            errors.
             """
             _require_write_auth("memory")
             try:
@@ -572,7 +581,11 @@ def build_server(cfg: Config) -> MCPServer:
                 raise RuntimeError(f"Invalid memory bundle: {exc}") from exc
             try:
                 async with import_lock:
-                    report = await import_bundle(store, bundle)
+                    report = await import_bundle(
+                        store, bundle, known_groups=configured_groups(cfg)
+                    )
+            except UnknownMemoryGroupsError as exc:
+                raise RuntimeError(f"Memory import refused: {exc}") from exc
             except MemoryCorruptionError as exc:
                 # The dedup baseline could not be reconstructed — importing
                 # would re-save duplicates. Distinct, actionable signal; not
@@ -623,7 +636,12 @@ def build_server(cfg: Config) -> MCPServer:
     # subset (delete/clear/add) additionally refuses to run on an unauthenticated
     # endpoint unless auth.insecure acknowledges a closed network.
     if cfg.memory.allow_admin_tools:
-        from sqllens.memory import MemoryCorruptionError, MemoryStore
+        from sqllens.memory import (
+            MemoryCorruptionError,
+            MemoryStore,
+            UnknownMemoryGroupsError,
+            configured_groups,
+        )
         from sqllens.memory import admin as memory_admin
         from sqllens.memory.admin import MemoryNotFoundError
         from sqllens.memory.store import run_memory_call
@@ -781,25 +799,31 @@ def build_server(cfg: Config) -> MCPServer:
             """Bulk-add curated SQL pairs and schema docs, with server-side dedup.
 
             ``sql_pairs`` items are ``{"question", "sql"}``; ``schema_docs`` items
-            are ``{"content"}``. Each block accepts up to 10,000 items.
-            Exact ``(question, sql)`` / ``content`` matches
-            (already stored or repeated in the batch) are skipped. Write-guarded:
+            are ``{"content"}``; either may add ``"groups"``, each of which a rule
+            set's ``memory_groups`` must list. Each block accepts up to 10,000
+            items. A duplicate (already stored or repeated in the batch) creates no
+            record and adds its groups to the records it matches. Write-guarded:
             refuses on an unauthenticated endpoint unless auth.insecure is set.
 
-            Returns ``{"saved_count", "duplicate_count", "skipped_count",
-            "errors": [{"index", "question", "error"}]}``. Per the partial-failure
-            contract, any per-item error makes this an ``isError`` result (the
-            structured body is still returned so the caller sees which rows
-            failed).
+            Returns ``{"saved_count", "updated_count", "duplicate_count",
+            "skipped_count", "errors": [{"index", "question", "error"}]}``. Per the
+            partial-failure contract, any per-item error makes this an ``isError``
+            result (the structured body is still returned so the caller sees which
+            rows failed).
             """
             _memory_write_auth()
             try:
                 async with admin_write_lock:
                     result = await memory_admin.add_memories(
-                        admin_store, sql_pairs=sql_pairs, schema_docs=schema_docs
+                        admin_store,
+                        sql_pairs=sql_pairs,
+                        schema_docs=schema_docs,
+                        known_groups=configured_groups(cfg),
                     )
             except memory_admin.MemoryInputError as exc:
                 raise RuntimeError(str(exc)) from None
+            except UnknownMemoryGroupsError as exc:
+                raise RuntimeError(f"Memory add refused: {exc}") from None
             except Exception:
                 logger.exception("add_memories tool failed")
                 raise RuntimeError(
@@ -827,8 +851,10 @@ def build_server(cfg: Config) -> MCPServer:
             JSON uses the ``{"sql_pairs": [...], "schema_docs": [...]}``
             shape accepted by ``add_memories``. Split larger exports into
             batches of at most 10,000 items per block before adding. Returns
-            ``{"format", "data", "warnings", "lossy"}``; when ``lossy`` is true
-            (data that exists was dropped) the result is an ``isError``, and a
+            ``{"format", "data", "warnings", "lossy"}``. JSON carries each
+            record's ``groups``; CSV carries none. When ``lossy`` is true (data
+            that exists was dropped, groups included) the result is an
+            ``isError``, and a
             wholesale-corrupt store fails loudly rather than exporting an empty
             success.
             """
@@ -868,10 +894,17 @@ def build_server(cfg: Config) -> MCPServer:
             """Return aggregate memory stats: counts, recent hits, top-hit pairs.
 
             Shape: ``{"tool_usage_count", "text_count", "total_hits_last_30d",
-            "top_hit_memories": [...]}``.
+            "unretrievable_count", "top_hit_memories": [...]}``.
+            ``unretrievable_count`` counts records whose groups no rule set's
+            ``memory_groups`` lists; it is 0 without a rule-set file.
             """
+            rule_sets = cfg.rule_sets.loaded
             try:
-                result = await run_memory_call(memory_admin.get_memory_stats, admin_store)
+                result = await run_memory_call(
+                    memory_admin.get_memory_stats,
+                    admin_store,
+                    known_groups=None if rule_sets is None else rule_sets.memory_groups,
+                )
             except Exception:
                 logger.exception("get_memory_stats tool failed")
                 raise RuntimeError(

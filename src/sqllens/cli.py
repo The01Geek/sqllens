@@ -460,7 +460,13 @@ def import_memory(
     import asyncio
 
     from sqllens.config import Config
-    from sqllens.memory import MemoryStore, import_bundle
+    from sqllens.memory import (
+        MemoryStore,
+        UnknownMemoryGroupsError,
+        configured_groups,
+        import_bundle,
+    )
+    from sqllens.memory.importer import unknown_groups
     from sqllens.memory.io import VALID_FORMATS, BundleFormatError, parse_csv, parse_json
 
     if fmt not in VALID_FORMATS:
@@ -482,6 +488,14 @@ def import_memory(
     except BundleFormatError as e:
         err_console.print(f"[red]Invalid bundle:[/red] {escape(str(e))}")
         raise typer.Exit(code=1) from e
+    known_groups = configured_groups(cfg)
+    # Before the --clear prompt and the store open, so a refused import touches nothing.
+    unknown = unknown_groups(bundle, known_groups)
+    if unknown:
+        err_console.print(
+            f"[red]Import refused:[/red] {escape(str(UnknownMemoryGroupsError(unknown)))}"
+        )
+        raise typer.Exit(code=1)
 
     if clear and not dry_run:
         typer.confirm(
@@ -502,7 +516,12 @@ def import_memory(
     try:
         report = asyncio.run(
             import_bundle(
-                store, bundle, dry_run=dry_run, clear=clear, batch_size=batch_size
+                store,
+                bundle,
+                dry_run=dry_run,
+                clear=clear,
+                batch_size=batch_size,
+                known_groups=known_groups,
             )
         )
     except Exception as e:
@@ -526,6 +545,7 @@ def import_memory(
     prefix = "[yellow](dry-run)[/yellow] " if dry_run else ""
     console.print(
         f"{prefix}saved={report.saved} "
+        f"updated={report.updated} "
         f"skipped_duplicate={report.skipped_duplicate} "
         f"errors={len(report.errors)}"
     )

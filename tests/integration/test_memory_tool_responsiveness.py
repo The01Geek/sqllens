@@ -30,14 +30,14 @@ async def test_health_answers_while_a_memory_store_call_is_held(
     patch_fake_embeddings(monkeypatch)
     entered = threading.Event()
     release = threading.Event()
-    iter_all = MemoryStore.iter_all
+    dedup_entries = MemoryStore.dedup_entries
 
-    def held_iter_all(self: MemoryStore):  # type: ignore[no-untyped-def]
+    def held_dedup_entries(self: MemoryStore):  # type: ignore[no-untyped-def]
         entered.set()
         release.wait(HOLD_LIMIT_S)
-        return iter_all(self)
+        return dedup_entries(self)
 
-    monkeypatch.setattr(MemoryStore, "iter_all", held_iter_all)
+    monkeypatch.setattr(MemoryStore, "dedup_entries", held_dedup_entries)
     handle = make_server(AuthConfig(mode="none", insecure=True), allow_import=True)
 
     async with streamable_http_client(handle.mcp_url) as (read, write), \

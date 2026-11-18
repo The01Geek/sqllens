@@ -25,12 +25,15 @@ from __future__ import annotations
 import heapq
 import json
 import logging
+from collections.abc import Collection
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import ValidationError
 
 from sqllens._errors import validation_error_lines
+from sqllens._memory_groups import is_tagged, record_groups
+from sqllens.memory.exporter import csv_groups_dropped_warning
 from sqllens.memory.importer import import_bundle
 from sqllens.memory.io import serialize_csv
 from sqllens.memory.schema import (
@@ -40,6 +43,7 @@ from sqllens.memory.schema import (
     SchemaDoc,
     SqlPair,
     SqlPairsBlock,
+    UnknownMemoryGroupsError,
 )
 from sqllens.memory.store import MemoryRecord, MemoryStore
 
@@ -85,6 +89,8 @@ def _record_to_wire(
         "memory_id": record.memory_id,
         "memory_type": memory_type,
         "timestamp": metadata.get("timestamp"),
+        # None, not [], so a corrupt tagged record is not shown as untagged.
+        "groups": record_groups(metadata) or (None if is_tagged(metadata) else []),
     }
 
     if memory_type == "text":
@@ -227,21 +233,36 @@ async def add_memories(
     *,
     sql_pairs: list[dict[str, Any]] | None = None,
     schema_docs: list[dict[str, Any]] | None = None,
+    known_groups: Collection[str] = frozenset(),
 ) -> dict[str, Any]:
     """Bulk-add curated SQL pairs and schema docs with server-side dedup.
 
     Per-item validation failures are collected into ``errors`` (with the
     original input index) rather than aborting the batch. Valid items go
-    through :func:`import_bundle`, which dedups exact ``(question, sql)`` /
-    ``content`` matches against the store and within the batch.
+    through :func:`import_bundle`, which merges duplicates (against the store
+    and within the batch) and raises
+    :class:`~sqllens.memory.schema.UnknownMemoryGroupsError`, writing nothing,
+    when an item names a group outside ``known_groups``.
 
-    Returns ``{saved_count, duplicate_count, skipped_count, errors}``. The
-    caller is responsible for treating a non-empty ``errors`` list as a tool
-    failure (partial failure is failure — see the server wiring).
+    Returns ``{saved_count, updated_count, duplicate_count, skipped_count,
+    errors}``. The caller is responsible for treating a non-empty ``errors``
+    list as a tool failure (partial failure is failure — see the server wiring).
     """
     for name, items in (("sql_pairs", sql_pairs), ("schema_docs", schema_docs)):
         if items is not None and len(items) > MAX_BUNDLE_ITEMS:
             raise MemoryInputError(f"{name} exceeds the {MAX_BUNDLE_ITEMS}-item cap")
+    # Refuse unknown groups on every item, an item that fails validation
+    # included, before anything is written.
+    raw_groups = {
+        group
+        for raw in (*(sql_pairs or []), *(schema_docs or []))
+        if isinstance(raw, dict) and isinstance(raw.get("groups"), list)
+        for group in raw["groups"]
+        if isinstance(group, str)
+    }
+    unknown = sorted(raw_groups.difference(known_groups))
+    if unknown:
+        raise UnknownMemoryGroupsError(unknown)
     errors: list[dict[str, Any]] = []
 
     def validation_message(exc: Exception) -> str:
@@ -284,7 +305,7 @@ async def add_memories(
         sql_pairs=SqlPairsBlock(pairs=valid_pairs) if valid_pairs else None,
         schema_docs=valid_docs or None,
     )
-    report = await import_bundle(store, bundle)
+    report = await import_bundle(store, bundle, known_groups=known_groups)
 
     # import_bundle indexes errors within the section list it received; map
     # those back to the caller's original input indices.
@@ -302,6 +323,7 @@ async def add_memories(
 
     return {
         "saved_count": report.saved,
+        "updated_count": report.updated,
         "duplicate_count": report.skipped_duplicate,
         "skipped_count": 0,
         "errors": errors,
@@ -311,11 +333,14 @@ async def add_memories(
 def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str, Any]:
     """Serialize the store to a JSON or CSV blob.
 
-    JSON emits ``{"sql_pairs": [{question, sql}], "schema_docs": [{content}]}``
-    — the argument shape ``add_memories`` accepts, subject to its per-block
-    item cap. Split larger exports into batches before adding. CSV carries SQL pairs
-    only (a ``question,sql`` sheet); schema docs are reported as a warning since
-    they are not representable.
+    JSON emits ``{"sql_pairs": [{question, sql, groups?}], "schema_docs":
+    [{content, groups?}]}`` — the argument shape ``add_memories`` accepts,
+    subject to its per-block item cap. It is not the ``import_memory`` /
+    ``import-memory`` bundle shape (``sql_pairs`` there is a ``{pairs}`` block),
+    so feed it to ``add_memories``, not to the bundle parser. Split larger
+    exports into batches before adding. CSV carries SQL pairs only (a
+    ``question,sql`` sheet); schema docs are reported as a warning since they
+    are not representable.
 
     Returns ``{format, data, warnings, lossy}``. ``iter_all`` raises
     :class:`~sqllens.memory.store.MemoryCorruptionError` on a wholesale-corrupt
@@ -349,14 +374,18 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
                 f"CSV carries SQL pairs only — {len(docs)} schema doc(s) are NOT "
                 "in this export. Use format='json' for a lossless backup."
             )
+        dropped = csv_groups_dropped_warning(bundle, "format='json'")
+        if dropped:
+            lossy = True
+            warnings.append(dropped)
         data = serialize_csv(bundle, warnings=warnings)
     else:
         data = json.dumps(
             {
-                "sql_pairs": [
-                    {"question": p.question, "sql": p.sql} for p in pairs
+                "sql_pairs": [p.model_dump(exclude_none=True) for p in pairs],
+                "schema_docs": [
+                    d.model_dump(exclude_none=True, exclude={"training_type"}) for d in docs
                 ],
-                "schema_docs": [{"content": d.content} for d in docs],
             },
             indent=2,
             ensure_ascii=False,
@@ -365,12 +394,25 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
     return {"format": fmt, "data": data, "warnings": warnings, "lossy": lossy}
 
 
-def get_memory_stats(store: MemoryStore) -> dict[str, Any]:
-    """Aggregate counts, recent-hit volume, and the top-hit memories."""
+def get_memory_stats(
+    store: MemoryStore, *, known_groups: Collection[str] | None = None
+) -> dict[str, Any]:
+    """Aggregate counts, recent-hit volume, and the top-hit memories.
+
+    ``unretrievable_count`` is the number of tagged records none of whose groups
+    is in ``known_groups`` (the loaded rule sets' groups); ``None`` (no rule-set
+    file, so every record is retrievable) makes it 0.
+    """
     records = store.get_all()
     tool_usage_count = 0
     text_count = 0
     total_hits_last_30d = 0
+    unretrievable_count = 0
+    if known_groups is not None:
+        for record in records:
+            groups = record_groups(record.metadata)
+            if is_tagged(record.metadata) and not any(group in known_groups for group in groups):
+                unretrievable_count += 1
     # last_hit_date is stored as a naive-local datetime.now().isoformat() (see
     # ChromaAgentMemory.search_similar_usage), so the cutoff must use the same
     # naive-local format for the lexical ISO-8601 comparison below to be valid.
@@ -404,5 +446,6 @@ def get_memory_stats(store: MemoryStore) -> dict[str, Any]:
         "tool_usage_count": tool_usage_count,
         "text_count": text_count,
         "total_hits_last_30d": total_hits_last_30d,
+        "unretrievable_count": unretrievable_count,
         "top_hit_memories": top_hit_memories,
     }

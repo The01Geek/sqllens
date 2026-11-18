@@ -12,7 +12,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
+
+from sqllens._memory_groups import GroupName
 
 QUESTION_MAX = 1000
 SQL_MAX = 10000
@@ -25,8 +32,8 @@ CONTENT_MAX = 50000
 # inside the held ``import_lock``). The two caps below — both enforced in
 # ``memory.io`` at the parse boundary, *not* as model-level ``Field``
 # constraints — reject such payloads on the way in while leaving in-process
-# constructors (notably ``MemoryStore.iter_all``, which is the dedup baseline
-# for ``import_bundle`` and the source for ``export_bundle``) unrestricted.
+# constructors (notably ``MemoryStore.iter_all``, the source for ``export_bundle``,
+# and ``MemoryStore.dedup_entries``, the ``import_bundle`` baseline) unrestricted.
 # Enforcing as a ``Field`` constraint would propagate the cap to every
 # construction, breaking export and import-baseline reads on a healthy store
 # that legitimately holds more than ``MAX_BUNDLE_ITEMS`` rows.
@@ -52,6 +59,14 @@ def _require_non_blank(value: str, field: str) -> str:
     return value
 
 
+
+
+def _distinct_groups(value: list[str] | None) -> list[str] | None:
+    if value is not None and len(set(value)) != len(value):
+        raise ValueError("groups must not repeat a group")
+    return value
+
+
 class SqlPair(BaseModel):
     """A single curated question→SQL training pair."""
 
@@ -59,6 +74,12 @@ class SqlPair(BaseModel):
 
     question: str = Field(max_length=QUESTION_MAX)
     sql: str = Field(max_length=SQL_MAX)
+    groups: list[GroupName] | None = Field(default=None, min_length=1)
+
+    @field_validator("groups")
+    @classmethod
+    def _g(cls, v: list[str] | None) -> list[str] | None:
+        return _distinct_groups(v)
 
     @field_validator("question")
     @classmethod
@@ -87,6 +108,12 @@ class SchemaDoc(BaseModel):
 
     training_type: Literal["schema_docs"] = "schema_docs"
     content: str = Field(max_length=CONTENT_MAX)
+    groups: list[GroupName] | None = Field(default=None, min_length=1)
+
+    @field_validator("groups")
+    @classmethod
+    def _g(cls, v: list[str] | None) -> list[str] | None:
+        return _distinct_groups(v)
 
     @field_validator("content")
     @classmethod
@@ -103,6 +130,18 @@ class MemoryBundle(BaseModel):
     schema_docs: list[SchemaDoc] | None = None
 
 
+class UnknownMemoryGroupsError(ValueError):
+    """An import names groups no loaded rule set's ``memory_groups`` lists."""
+
+    def __init__(self, groups: list[str]) -> None:
+        self.groups = sorted(set(groups))
+        super().__init__(
+            "the bundle names memory group(s) that no rule set's memory_groups lists: "
+            + ", ".join(repr(group) for group in self.groups)
+            + ". Nothing was imported."
+        )
+
+
 class ImportItemError(BaseModel):
     """A single rejected item, surfaced in the report rather than aborting."""
 
@@ -115,15 +154,21 @@ class ImportReport(BaseModel):
     """Outcome of an import run."""
 
     saved: int = 0
+    # Duplicates that changed the groups of a record they matched.
+    updated: int = 0
     skipped_duplicate: int = 0
     errors: list[ImportItemError] = Field(default_factory=list)
 
     def to_markdown(self) -> str:
         """Render as a compact Markdown summary (used by the MCP tool)."""
         lines = [
+            f"saved={self.saved} updated={self.updated} "
+            f"skipped_duplicate={self.skipped_duplicate} errors={len(self.errors)}",
+            "",
             "| metric | count |",
             "| --- | --- |",
             f"| saved | {self.saved} |",
+            f"| updated | {self.updated} |",
             f"| skipped (duplicate) | {self.skipped_duplicate} |",
             f"| errors | {len(self.errors)} |",
         ]

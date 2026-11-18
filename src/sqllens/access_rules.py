@@ -99,6 +99,7 @@ def _rule_set(rule_set: RuleSet) -> dict[str, Any]:
         "scope": rule_set.scope,
         "source": _source(rule_set),
         "refused_unconfirmed": not rule_set.confirmed,
+        "memory_groups": list(rule_set.memory_groups or ()),
         "tables": [
             {
                 "name": table.name,

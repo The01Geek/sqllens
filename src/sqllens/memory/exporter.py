@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from sqllens.memory.io import serialize_csv, serialize_json
+from sqllens.memory.schema import MemoryBundle
 from sqllens.memory.store import MemoryStore
 
 
@@ -26,6 +27,22 @@ class ExportResult:
 
     text: str
     warnings: list[str] = field(default_factory=list)
+
+
+def csv_groups_dropped_warning(bundle: MemoryBundle, json_option: str) -> str | None:
+    """The warning for a CSV export of ``bundle``, which drops every record's groups.
+
+    Counts tagged SQL pairs and tagged schema docs (CSV drops the docs whole).
+    ``None`` when no record is tagged.
+    """
+    pairs = bundle.sql_pairs.pairs if bundle.sql_pairs else []
+    count = sum(1 for item in (*pairs, *(bundle.schema_docs or [])) if item.groups)
+    if not count:
+        return None
+    return (
+        f"CSV carries no memory groups — the groups of {count} record(s) are NOT "
+        f"in this export. Use {json_option} for a lossless backup."
+    )
 
 
 def export_bundle(store: MemoryStore, fmt: Literal["json", "csv"]) -> ExportResult:
@@ -56,6 +73,10 @@ def export_bundle(store: MemoryStore, fmt: Literal["json", "csv"]) -> ExportResu
             f"CSV carries SQL pairs only — {n_docs} schema doc(s) are NOT in "
             "this export. Use --format json for a lossless backup."
         )
+    if fmt == "csv":
+        dropped = csv_groups_dropped_warning(bundle, "--format json")
+        if dropped:
+            warnings.append(dropped)
 
     text = serialize_json(bundle) if fmt == "json" else serialize_csv(bundle, warnings=warnings)
     return ExportResult(text=text, warnings=warnings)
