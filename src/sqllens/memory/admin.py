@@ -332,11 +332,14 @@ async def add_memories(
 def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str, Any]:
     """Serialize the store to a JSON or CSV blob.
 
-    JSON emits ``{"sql_pairs": [{question, sql}], "schema_docs": [{content}]}``
-    — the argument shape ``add_memories`` accepts, subject to its per-block
-    item cap. Split larger exports into batches before adding. CSV carries SQL pairs
-    only (a ``question,sql`` sheet); schema docs are reported as a warning since
-    they are not representable.
+    JSON emits ``{"sql_pairs": [{question, sql, groups?}], "schema_docs":
+    [{content, groups?}]}`` — the argument shape ``add_memories`` accepts,
+    subject to its per-block item cap. It is not the ``import_memory`` /
+    ``import-memory`` bundle shape (``sql_pairs`` there is a ``{pairs}`` block),
+    so feed it to ``add_memories``, not to the bundle parser. Split larger
+    exports into batches before adding. CSV carries SQL pairs only (a
+    ``question,sql`` sheet); schema docs are reported as a warning since they
+    are not representable.
 
     Returns ``{format, data, warnings, lossy}``. ``iter_all`` raises
     :class:`~sqllens.memory.store.MemoryCorruptionError` on a wholesale-corrupt
