@@ -63,7 +63,7 @@ var App = class { connect() { return Promise.resolve(); }
     let body;
     if (req.name === "list_memories") {
       const mems = window.__lists.length > 1 ? window.__lists.shift() : window.__lists[0];
-      // Like the server: newest first, at most `limit` rows, `total` counts all.
+      // Newest first, at most `limit` rows, `total` counts all; ignores memory_type.
       body = {memories: mems.slice(0, req.arguments.limit), total: mems.length};
     } else if (req.name === "get_memory_stats") {
       body = {tool_usage_count: 0, text_count: 0, total_hits_last_30d: 0, top_hit_memories: []};
@@ -130,6 +130,10 @@ const clickName = (text) => {
   // toolbar order
   out.toolbar = [...q("#pane-browse .bar").querySelectorAll(":scope > *")]
     .map((e) => e.id || (e.querySelector("button") && e.querySelector("button").id));
+  // The checklist opens only through its button.
+  out.menuHiddenBefore = getComputedStyle(q("#groupMenu")).display === "none";
+  q("#groupBtn").click();
+  out.menuShownAfterClick = getComputedStyle(q("#groupMenu")).display !== "none";
   out.menu = menuLabels().map((l) => ({
     text: l.children[1].textContent,
     chip: l.children[1].classList.contains("chip"),
@@ -197,6 +201,9 @@ const clickName = (text) => {
     l.querySelector("input").checked]);
   out.reloadBody = q("#browseBody").textContent;
   out.reloadBtn = q("#groupBtn").textContent;
+  // A click outside the checklist closes it.
+  document.body.click();
+  out.menuHiddenAfterOutsideClick = getComputedStyle(q("#groupMenu")).display === "none";
   const pre = document.createElement("pre");
   pre.id = "probe";
   pre.textContent = JSON.stringify(out);
@@ -302,7 +309,9 @@ def test_checklist_choices_and_labels(renders: dict[int, dict[str, Any]]) -> Non
     assert not menu[0]["chip"] and not menu[1]["chip"]
     assert menu[0]["color"] == out["mutedColor"] and menu[1]["color"] == out["errColor"]
     assert all(m["chip"] for m in menu[2:])
-    assert sorted(m["text"] for m in menu[2:]) == sorted(names)
+    assert [m["text"] for m in menu[2:]] == sorted(names)
+    assert out["menuHiddenBefore"] and out["menuShownAfterClick"]
+    assert out["menuHiddenAfterOutsideClick"]
     assert len(menu) == 2 + len(names)
 
 
