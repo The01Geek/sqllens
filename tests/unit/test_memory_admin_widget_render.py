@@ -63,8 +63,10 @@ var App = class { connect() { return Promise.resolve(); }
     let body;
     if (req.name === "list_memories") {
       const mems = window.__lists.length > 1 ? window.__lists.shift() : window.__lists[0];
-      // Newest first, at most `limit` rows, `total` counts all; ignores memory_type.
-      body = {memories: mems.slice(0, req.arguments.limit), total: mems.length};
+      // Filters by memory_type, keeps at most `limit` rows, `total` counts the type.
+      const typed = req.arguments.memory_type
+        ? mems.filter((m) => m.memory_type === req.arguments.memory_type) : mems;
+      body = {memories: typed.slice(0, req.arguments.limit), total: typed.length};
     } else if (req.name === "get_memory_stats") {
       body = {tool_usage_count: 0, text_count: 0, total_hits_last_30d: 0, top_hit_memories: []};
     } else if (req.name === "get_memory") {
@@ -309,7 +311,10 @@ def test_checklist_choices_and_labels(renders: dict[int, dict[str, Any]]) -> Non
     assert not menu[0]["chip"] and not menu[1]["chip"]
     assert menu[0]["color"] == out["mutedColor"] and menu[1]["color"] == out["errColor"]
     assert all(m["chip"] for m in menu[2:])
-    assert [m["text"] for m in menu[2:]] == sorted(names)
+    assert sorted(m["text"] for m in menu[2:]) == sorted(names)
+    # Letter-initial names only: where punctuation sorts depends on Chromium's ICU data.
+    letters = [m["text"] for m in menu[2:] if m["text"][0].isalpha()]
+    assert letters == sorted(letters)
     assert out["menuHiddenBefore"] and out["menuShownAfterClick"]
     assert out["menuHiddenAfterOutsideClick"]
     assert len(menu) == 2 + len(names)
@@ -371,3 +376,52 @@ def test_filter_covers_only_the_loaded_window(tmp_path: Path) -> None:
     assert "recent" in out["menu"]
     assert "old-only" not in out["menu"]
     assert "store has 1001" in out["meta"]
+
+
+_TYPE_PROBE = """
+(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const rows = () => [...document.querySelectorAll("#browseBody tbody tr")]
+    .map((tr) => tr.querySelector("td.trunc").textContent);
+  for (let i = 0; i < 100 && !document.querySelector("#browseBody tbody tr"); i++) await sleep(20);
+  const out = {};
+  const cell = [...document.querySelectorAll("#browseBody tbody tr")]
+    .find((tr) => tr.querySelector("td.trunc").textContent === "no key")
+    .querySelector("td.groups");
+  out.missingText = cell.textContent;
+  out.missingTitle = cell.firstElementChild.firstElementChild.title;
+  const lab = [...document.querySelectorAll("#groupMenu label")]
+    .find((l) => l.children[1].classList.contains("chip") && l.children[1].textContent === "sales");
+  lab.querySelector("input").click();
+  out.salesAll = rows();
+  const sel = document.querySelector("#typeFilter");
+  sel.value = "text";
+  sel.dispatchEvent(new Event("change"));
+  for (let i = 0; i < 50 && rows().includes("sql sales"); i++) await sleep(20);
+  await sleep(50);
+  out.salesText = rows();
+  out.btn = document.querySelector("#groupBtn").textContent;
+  const pre = document.createElement("pre");
+  pre.id = "probe";
+  pre.textContent = JSON.stringify(out);
+  document.body.append(pre);
+})();
+"""
+
+
+def test_missing_groups_key_and_type_dropdown(tmp_path: Path) -> None:
+    no_key = _mem(1, None, "no key")
+    del no_key["groups"]
+    doc = {**_mem(2, ["sales"], "doc sales"), "memory_type": "text",
+           "question": None, "sql": None, "content": "doc sales"}
+    store = [_mem(3, ["sales"], "sql sales"), doc, _mem(4, ["other"], "doc other"), no_key]
+    store[2]["memory_type"] = "text"
+    page = _page([store]).replace(_PROBE, _TYPE_PROBE)
+    out = _render(tmp_path, page, 1000)
+    # A missing key is not evidence of "untagged".
+    assert out["missingText"] == "⚠ unreadable"
+    assert out["missingTitle"] == UNREADABLE_TITLE
+    assert out["salesAll"] == ["sql sales", "doc sales"]
+    # The type dropdown reloads from the server; the kept group selection still applies.
+    assert out["salesText"] == ["doc sales"]
+    assert out["btn"] == "groups: 1 selected ▾"

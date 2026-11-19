@@ -620,14 +620,14 @@ function stateLabel(kind) {
   return s;
 }
 
-// `groups` arrives in one of three states (src/sqllens/memory/admin.py): a list
-// of names, [] (untagged) or null (tagged, list unreadable).
+// Anything but an array (null, a missing key, another type) is "unreadable":
+// "untagged" claims every rule set can read the memory, so it needs a real [].
 function renderGroups(groups, capped) {
   const box = document.createElement("span");
   box.className = capped ? "groups-cap" : "groups-full";
-  if (groups === null || (groups !== undefined && !Array.isArray(groups))) {
+  if (!Array.isArray(groups)) {
     box.appendChild(stateLabel("unreadable"));
-  } else if (!groups || groups.length === 0) {
+  } else if (groups.length === 0) {
     box.appendChild(stateLabel("untagged"));
   } else {
     for (const g of groups) box.appendChild(makeChip(String(g)));
@@ -637,8 +637,8 @@ function renderGroups(groups, capped) {
 }
 
 function groupKind(m) {
-  if (m.groups === null || (m.groups !== undefined && !Array.isArray(m.groups))) return "unreadable";
-  if (!m.groups || m.groups.length === 0) return "untagged";
+  if (!Array.isArray(m.groups)) return "unreadable";
+  if (m.groups.length === 0) return "untagged";
   return "names";
 }
 
@@ -691,7 +691,9 @@ function renderGroupMenu() {
   const clear = document.createElement("a");
   clear.id = "groupClear";
   clear.textContent = "clear";
-  clear.addEventListener("click", () => {
+  clear.href = "#";
+  clear.addEventListener("click", (ev) => {
+    ev.preventDefault();
     s.untagged = false;
     s.unreadable = false;
     s.names.clear();
