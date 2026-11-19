@@ -1,0 +1,338 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "_join_pairs and _Compiler._node fall back to '' for a missing source_column/source_id_column instead of encoding the variant in the type; only load-time validation guarantees presence.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": [
+     1150,
+     1165
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "_catalog_reads returns an unnamed three-value tuple and _Column is an unnamed pair, read as left[0]/left[1] in check_catalog.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": [
+     1168,
+     1219
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "_Compiler resets mutable _depth/_slots by hand in compile(); another entry point or re-entrant compile would inherit stale counters.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": [
+     617,
+     656
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-4",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "description": "TOML recursion test asserts only the file path in RuleSetFileError, so it can pass without reaching the except RecursionError branch; assert the branch's own wording.",
+   "defect_signature": {
+    "file": "tests/unit/test_row_rule_limits.py",
+    "line_range": [
+     146,
+     156
+    ],
+    "kind": "test_gap"
+   }
+  },
+  {
+   "finding_id": "F-5",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "description": "EXISTS-depth counting is untested for owner_via and direct referenced_by hops; removing their _deeper() wrappers fails no test.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": null,
+    "kind": "test_gap"
+   }
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (suggestions only)\nThe PR is ready to merge: no reviewer or checklist item found a Critical or Important problem, and every acceptance criterion has a passing checklist item.\nRule applied: rule 6 — only findings below the threshold and one INCONCLUSIVE item remain → APPROVE with notes\n\n## Code Review Findings\n### 🟡 Suggestion / Minor (5)\n<details><summary>5 items</summary>\n\n1. `src/sqllens/rule_sets.py` lines 1150-1165 (`_join_pairs`) and the matching `_Compiler._node` arms use `node.source_column or \"\"` and `node.source_id_column or \"\"`. Only load-time validation guarantees these fields are set, so the model can still hold a direct or linked `referenced_by` without its column, and each new consumer repeats the empty-string fallback. (raised by 1/6 agents)\n2. `src/sqllens/rule_sets.py` lines 1168-1219: `_catalog_reads` now returns an unnamed three-value tuple, and the `_Column` alias is an unnamed `(table, column)` pair, so `check_catalog` reads `left[0]` and `left[1]`. A named tuple would make each position clear. (raised by 1/6 agents)\n3. `src/sqllens/rule_sets.py` lines 617-656: `_Compiler` keeps `_depth` and `_slots` as mutable fields that `compile()` resets by hand. An entry point that skips `compile()`, or a re-entrant compile, would inherit stale counters. (raised by 1/6 agents)\n4. `tests/unit/test_row_rule_limits.py` lines 146-156: the TOML recursion test only checks that the file path appears in the `RuleSetFileError`. Every `RuleSetFileError` from `load_rule_sets` names the path, so the test can pass without reaching the new `except RecursionError` branch. Asserting the branch's own wording (\"nests its values too deeply to be parsed\") would pin it. (raised by 1/6 agents)\n5. `src/sqllens/rule_sets.py` `_Compiler._node`: no limit test builds a chain ending in `owner_via` or a direct `referenced_by`. Removing either arm's `with self._deeper()` wrapper would make no test fail, and the documented level counts would become false. (raised by 1/6 agents)\n</details>\n\n### ℹ️ Informational — Deferred\n- VC-4: INCONCLUSIVE (suggestion) — _rule_nodes yields every node of a row rule, including nodes inside any_of/all_of and inside an inherit's parent_rule, so _join_pairs sees every inherit, referenced_by and owner_via join (and a parent_rule's joins are typed against the right table) [src/sqllens/rule_sets.py]\n\n  <details><summary>Evidence</summary>\n\n  FAIL stored INCONCLUSIVE (requirement quote is missing): The claim is wrong as worded. _rule_nodes (rule_sets.py:338-352) walks any_of/all_of children but deliberately does NOT walk an inherit's parent_rule; its docstring says so (lines 339-345). So it does not yield parent_rule nodes. Compensating facts: parent_rule may hold only _COLUMN_LOCAL kinds (compare, is_null, is_not_null, any_of, all_of), enforced at lines 444-450, so it can hold no inherit, referenced_by or owner_via joins. _join_pairs therefore misses no join. _catalog_reads (1193-1202) walks parent_rule separately and types its compare nodes against node.parent_table, not table.name, and never calls _join_pairs on parent_rule nodes, so there is no misattribution. Behaviour is correct, but the claim's statement that _rule_nodes yields nodes inside parent_rule is false. any_of/all_of coverage and the join pairs for inherit, owner_via and referenced_by hold.\n\n  </details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant, 8 changed files; Phase 1+2 ran.\n- Working tree: skipped (PR mode with head override reviews the PR head).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass `requesting-code-review` extension: content-present.\n- CI evidence: none held for head 20be3af; no test suite was run in this review.\n- Verdict threshold: important (from `prflow_review.verdict_severity_threshold`).\n- Normalized (wording-only): 0\n- Dirty-tree check: clean.\n- prior-report: none\n- Phase 2: eight verifier dispatches were refused by the concurrent-subagent limit on the first wave and dispatched in a second wave; all 26 items returned.\n- Checklist: 25 passed, 0 failed, 1 inconclusive\n- <details><summary>✅ Passed items (25 of 26)</summary>\n\n  - VC-1: tomllib.loads raises RecursionError (not TOMLDecodeError) on deeply nested inline tables/arrays, and load_rule_sets catches it and raises RuleSetFileError naming the path; the test's depth 5000 triggers that path on every CI Python version (3.11-3.14) rather than being rejected by a tomllib nesting limit as TOMLDecodeError [src/sqllens/rule_sets.py]\n  - VC-2: check_catalog's columns map and kinds map are keyed so that columns.get(table).get(column) returns the INFORMATION_SCHEMA DATA_TYPE in lowercase as listed in VALUE_TYPE_DATA_TYPES, and kinds values equal 'BASE TABLE' for base tables, so _join_family compares like with like [src/sqllens/rule_sets.py]\n  - VC-3: Every caller of _catalog_reads unpacks its new three-element return (reads, typed, joins); no other caller still unpacks two values [src/sqllens/rule_sets.py]\n  - VC-5: The _deeper depth count matches the actual exp.Exists nesting _exists produces: inherit, direct referenced_by and owner_via each add one EXISTS, a linked referenced_by adds two, and _own_rule/parent_rule/any_of/all_of add no EXISTS beyond the nodes they compile [src/sqllens/rule_sets.py]\n  - VC-6: _RuleLimitError raised in _Compiler is caught by the `except _RuleLimitError` clause in _compile_all before the generic `except Exception`, producing '<where>: the row rule is over a load limit: ...'; and the compiler's _slots/_depth state is reset per compile so a prior failure does not leak [src/sqllens/rule_sets.py]\n  - VC-7: The diamond test's monkeypatch of _Compiler._new_slot is effective because _Compiler calls self._new_slot (looked up on the class) for every allocation, including the base slot in compile() [tests/unit/test_row_rule_limits.py:116]\n  - VC-8: The unit fixtures _good_catalog, _check, _Connection and _Cursor in tests/unit/test_row_rules.py model the example document's tables (rates/currencies, orders/customers, regions, tags/order_tags, customer_reps) with columns the new join-type tests mutate, and the fake cursor returns rows in the shape check_catalog reads from INFORMATION_SCHEMA [tests/unit/test_row_rules.py]\n  - VC-9: The REFUSALS mutation paths (e.g. 'rules.0.column' on orders, 'id_column' on regions, 'source_id_column'/'link.source_column' on tags, 'rules.1.id_column' on customers) address the intended join fields in example_document, and the expected error tables match the table each _check_row_rules check names [tests/unit/test_row_rules.py]\n  - VC-10: The connector test imports _chain, _connect, _ids, _run, _url from tests.connectors.test_row_rules_mysql with signatures it uses: _chain(url, loaded), _run(runner, sql) returning a DataFrame, _ids(frame) returning a set of ints from the first column [tests/connectors/test_row_rule_joins_mysql.py:45]\n  - VC-11: The connector test's VISIBLE expectations follow from the seeded rows: rj_direct visible {1,5}, rj_linked visible {1,2}, rj_child {1}, given rj_link's own flag=1 rule and source owner 7 [tests/connectors/test_row_rule_joins_mysql.py:69]\n  - VC-12: The connector test's _document uses the user ID from RuleSetSelection(\"2\",\"5\",7) via user_id_compare, and rule set id \"2\" exists in example_document's first rule set [tests/connectors/test_row_rule_joins_mysql.py]\n  - VC-13: The external doc asserts a string pair with incompatible collations makes every query on that table fail with MySQL error 1267 [docs/external/rule-sets.md]\n  - VC-14: The external doc asserts the server refuses to start on a join type mismatch, naming both columns and their types [docs/external/rule-sets.md]\n  - VC-15: Every join-column declaration check in `_check_row_rules` has a unit test, and removing any one of them makes a test fail. Loading a rule-set file fails, with an error naming the column and its table, in each of these cases, at minimum: an `inherit` `column` not declared on its table; an `inherit` `parent_column` not declared on the parent table; a `referenced_by` `id_column` not declared on its table; a direct `referenced_by` `source_column` not declared on the source table; a linked `referenced_by` `source_id_column` not declared on the source table; a listed `referenced_by` link table missing `link.source_column`; an `owner_via` `id_column` not declared on its table; and a listed `owner_via` link table missing `link_row_column`. [tests/unit/test_row_rules.py]\n  - VC-16: Against live MySQL, a listed link table whose own row rule hides a link row hides the `referenced_by` target row reachable only through that link row, while the source row that link row points to stays visible. [src/sqllens/rule_sets.py:731-751]\n  - VC-17: Against live MySQL, a child row whose `inherit` key is `NULL` is hidden even when a visible parent row's `parent_column` is `NULL`, and a target row whose `id_column` is `NULL` is hidden even when a visible source row's direct `referenced_by` `source_column` is `NULL`. For a linked `referenced_by`, a target row is hidden when its only link row reaches it through a `NULL` `link.target_column` matched against a `NULL` `id_column`, and also when its only link row has a `NULL` `link.source_column` matched against a visible source row whose `source_id_column` is `NULL`. [src/sqllens/rule_sets.py:706-752]\n  - VC-18: Against live MySQL, a `referenced_by` target row reached through two link rows, or from two visible source rows, is returned exactly once, and `COUNT(*)` over the table equals the number of distinct visible rows. [src/sqllens/rule_sets.py:564-574]\n  - VC-19: Against live MySQL, each of these query shapes, at minimum, returns only visible rows when it reads a direct `referenced_by` table and a linked `referenced_by` table: a plain alias, a self-join, a `UNION`, a CTE, a `LATERAL` derived table and a scalar subquery. [tests/connectors/test_row_rule_joins_mysql.py]\n  - VC-20: The catalog check gives each join pair, as Desired Behavior defines it, the outcome its type-family table states. A refused pair is reported as a catalog problem naming both columns as `table.column` and both `DATA_TYPE` values. Live MySQL tests cover at minimum an `int`↔`bigint` pair, a `char`↔`varchar` pair and a `decimal`↔`decimal` pair that pass, and a `varchar`↔`int` pair and a `decimal`↔`bigint` pair that the catalog check refuses. [src/sqllens/rule_sets.py]\n  - VC-21: A rule-set file loads when its deepest compiled rule nests exactly 16 `EXISTS` levels, measured as the largest number of `exp.Exists` nodes enclosing one another in the rule's compiled sqlglot condition. A file whose rule nests 17 levels fails to load with a `RuleSetFileError` naming the rule's `rule_sets[i].tables[j].row_rule` place and the 16-level limit. Both tests run on every Python version CI runs. [src/sqllens/rule_sets.py:932-940]\n  - VC-22: A rule-set file loads when a compiled rule uses exactly 64 slots, counted as the rule's `CompiledRule.slots`. A file whose rule needs 65 slots fails to load with a `RuleSetFileError` naming the rule's place and the 64-slot limit. A rule shaped as a two-path diamond 16 levels deep (each level an `any_of` of two `inherit` nodes to the level below), whose full compile would need 131,071 slots, fails to load with the same error after allocating no more than 65 slots, counted by wrapping `_Compiler._new_slot` in the test. [tests/unit/test_row_rule_limits.py]\n  - VC-23: Loading a rule-set file whose nesting makes TOML parsing raise `RecursionError` fails with a `RuleSetFileError` naming the file path, not a bare `RecursionError`. [src/sqllens/rule_sets.py]\n  - VC-24: The change leaves the per-query SQL rewrite in `RuleSetGuardRunner.run_sql` running on the event loop. It leaves string join matches subject to the columns' collation, and does not check join-pair collations at startup, so a string pair with incompatible collations still fails each query on that table with MySQL error 1267. It does not count `any_of`/`all_of` or `parent_rule` nesting toward the 16-level `EXISTS` limit, so a rule within both limits whose compile or proof still exhausts Python recursion (for example a 13-hop `inherit` chain whose every hop is `all_of[compare, inherit]` with a single-`compare` `parent_rule`) keeps failing to load with today's \"the row rule could not be compiled (RecursionError: …)\" error. It adds no macOS or Windows CI run for the limit tests. [src/sqllens/rule_sets.py]\n  - VC-25: `docs/internal/database-connectors/rule-sets.md` and `docs/external/rule-sets.md` state the join-pair type rule with its two families and the identical-type rule for other types, and state the 16-level `EXISTS` limit and the 64-slot limit with how each is counted. Both pages also say that a rule within both limits can still fail to load with a `RecursionError` compile error, because every `any_of`, `all_of` and `parent_rule` along a chain adds to how deeply the compiled SQL nests. They say that even one `all_of` and one single-`compare` `parent_rule` per hop has failed from 13 `inherit` hops on Python 3.12, and that the fix is fewer hops or less nesting per hop. `docs/internal/glossary.md`'s Catalog check entry says the check also covers join pairs. [docs/internal/database-connectors/rule-sets.md:42-59]\n  - VC-26: A `changelog.d` fragment tells operators that a join pair whose types differ now stops startup, and that a row rule over 16 `EXISTS` levels or 64 slots now fails to load, and says to run `sqllens validate --check-db` with the new release before switching to it. [changelog.d/417.changed.md]\n\n  </details>\n- Reviewed against issue #416 — criteria from the workpad; scope unchanged.\n</details>\n",
+ "acceptance_criteria": "- [ ] Every join-column declaration check in `_check_row_rules` has a unit test, and removing any one of them makes a test fail. Loading a rule-set file fails, with an error naming the column and its table, in each of these cases, at minimum: an `inherit` `column` not declared on its table; an `inherit` `parent_column` not declared on the parent table; a `referenced_by` `id_column` not declared on its table; a direct `referenced_by` `source_column` not declared on the source table; a linked `referenced_by` `source_id_column` not declared on the source table; a listed `referenced_by` link table missing `link.source_column`; an `owner_via` `id_column` not declared on its table; and a listed `owner_via` link table missing `link_row_column`.\n- [ ] Against live MySQL, a listed link table whose own row rule hides a link row hides the `referenced_by` target row reachable only through that link row, while the source row that link row points to stays visible.\n- [ ] Against live MySQL, a child row whose `inherit` key is `NULL` is hidden even when a visible parent row's `parent_column` is `NULL`, and a target row whose `id_column` is `NULL` is hidden even when a visible source row's direct `referenced_by` `source_column` is `NULL`. For a linked `referenced_by`, a target row is hidden when its only link row reaches it through a `NULL` `link.target_column` matched against a `NULL` `id_column`, and also when its only link row has a `NULL` `link.source_column` matched against a visible source row whose `source_id_column` is `NULL`.\n- [ ] Against live MySQL, a `referenced_by` target row reached through two link rows, or from two visible source rows, is returned exactly once, and `COUNT(*)` over the table equals the number of distinct visible rows.\n- [ ] Against live MySQL, each of these query shapes, at minimum, returns only visible rows when it reads a direct `referenced_by` table and a linked `referenced_by` table: a plain alias, a self-join, a `UNION`, a CTE, a `LATERAL` derived table and a scalar subquery.\n- [ ] The catalog check gives each join pair, as Desired Behavior defines it, the outcome its type-family table states. A refused pair is reported as a catalog problem naming both columns as `table.column` and both `DATA_TYPE` values. Live MySQL tests cover at minimum an `int`↔`bigint` pair, a `char`↔`varchar` pair and a `decimal`↔`decimal` pair that pass, and a `varchar`↔`int` pair and a `decimal`↔`bigint` pair that the catalog check refuses.\n- [ ] A rule-set file loads when its deepest compiled rule nests exactly 16 `EXISTS` levels, measured as the largest number of `exp.Exists` nodes enclosing one another in the rule's compiled sqlglot condition. A file whose rule nests 17 levels fails to load with a `RuleSetFileError` naming the rule's `rule_sets[i].tables[j].row_rule` place and the 16-level limit. Both tests run on every Python version CI runs.\n- [ ] A rule-set file loads when a compiled rule uses exactly 64 slots, counted as the rule's `CompiledRule.slots`. A file whose rule needs 65 slots fails to load with a `RuleSetFileError` naming the rule's place and the 64-slot limit. A rule shaped as a two-path diamond 16 levels deep (each level an `any_of` of two `inherit` nodes to the level below), whose full compile would need 131,071 slots, fails to load with the same error after allocating no more than 65 slots, counted by wrapping `_Compiler._new_slot` in the test.\n- [ ] Loading a rule-set file whose nesting makes TOML parsing raise `RecursionError` fails with a `RuleSetFileError` naming the file path, not a bare `RecursionError`.\n- [ ] The change leaves the per-query SQL rewrite in `RuleSetGuardRunner.run_sql` running on the event loop. It leaves string join matches subject to the columns' collation, and does not check join-pair collations at startup, so a string pair with incompatible collations still fails each query on that table with MySQL error 1267. It does not count `any_of`/`all_of` or `parent_rule` nesting toward the 16-level `EXISTS` limit, so a rule within both limits whose compile or proof still exhausts Python recursion (for example a 13-hop `inherit` chain whose every hop is `all_of[compare, inherit]` with a single-`compare` `parent_rule`) keeps failing to load with today's \"the row rule could not be compiled (RecursionError: …)\" error. It adds no macOS or Windows CI run for the limit tests.\n- [ ] `docs/internal/database-connectors/rule-sets.md` and `docs/external/rule-sets.md` state the join-pair type rule with its two families and the identical-type rule for other types, and state the 16-level `EXISTS` limit and the 64-slot limit with how each is counted. Both pages also say that a rule within both limits can still fail to load with a `RecursionError` compile error, because every `any_of`, `all_of` and `parent_rule` along a chain adds to how deeply the compiled SQL nests. They say that even one `all_of` and one single-`compare` `parent_rule` per hop has failed from 13 `inherit` hops on Python 3.12, and that the fix is fewer hops or less nesting per hop. `docs/internal/glossary.md`'s Catalog check entry says the check also covers join pairs.\n- [ ] A `changelog.d` fragment tells operators that a join pair whose types differ now stops startup, and that a row rule over 16 `EXISTS` levels or 64 slots now fails to load, and says to run `sqllens validate --check-db` with the new release before switching to it.",
+ "diff_produced_at_head": "20be3af892dea7b4b4fa85c012edd4acfc6d7669",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:rule_sets.py:tomllib-recursionerror-caught",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "data_format_assumption:rule_sets.py:catalog-datatype-keys",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "api_contract:rule_sets.py:catalog-reads-arity",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "category": "dependency_interaction",
+   "claim": "_rule_nodes yields every node of a row rule, including nodes inside any_of/all_of and inside an inherit's parent_rule, so _join_pairs sees every inherit, referenced_by and owner_via join (and a parent_rule's joins are typed against the right table)",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/rule_sets.py",
+   "verify_against": "_rule_nodes in src/sqllens/rule_sets.py",
+   "verify_hint": "Read _rule_nodes and the _catalog_reads loop that calls _join_pairs(table.name, node); check whether parent_rule nodes would be attributed to table.name instead of the parent table",
+   "claim_signature": "dependency_interaction:rule_sets.py:rule-nodes-covers-joins",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "FAIL stored INCONCLUSIVE (requirement quote is missing): The claim is wrong as worded. _rule_nodes (rule_sets.py:338-352) walks any_of/all_of children but deliberately does NOT walk an inherit's parent_rule; its docstring says so (lines 339-345). So it does not yield parent_rule nodes. Compensating facts: parent_rule may hold only _COLUMN_LOCAL kinds (compare, is_null, is_not_null, any_of, all_of), enforced at lines 444-450, so it can hold no inherit, referenced_by or owner_via joins. _join_pairs therefore misses no join. _catalog_reads (1193-1202) walks parent_rule separately and types its compare nodes against node.parent_table, not table.name, and never calls _join_pairs on parent_rule nodes, so there is no misattribution. Behaviour is correct, but the claim's statement that _rule_nodes yields nodes inside parent_rule is false. any_of/all_of coverage and the join pairs for inherit, owner_via and referenced_by hold.",
+   "file_checked": "src/sqllens/rule_sets.py:338-352",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:rule_sets.py:deeper-matches-exists",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:rule_sets.py:limit-error-reporting",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "test_mock_alignment:test_row_rule_limits.py:new-slot-wrap:116",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "test_mock_alignment:test_row_rules.py:fake-catalog-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "test_mock_alignment:test_row_rules.py:refusal-mutation-paths",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "dependency_interaction:test_row_rule_joins_mysql.py:helper-imports:45",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "data_format_assumption:test_row_rule_joins_mysql.py:visible-rows:69",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "api_contract:test_row_rule_joins_mysql.py:selection-set-id",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "absolute_claim:rule-sets.md:collation-1267-every-query",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "absolute_claim:rule-sets.md:refuses-to-start",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-15",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-16",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-17",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-18",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-20",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-21",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-22",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-23",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-25",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-12",
+   "id": "VC-26",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
