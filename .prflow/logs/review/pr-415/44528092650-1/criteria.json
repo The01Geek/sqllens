@@ -1,0 +1,90 @@
+[
+  {
+    "criterion": 1,
+    "text": "The Browse table's header cells read, in order: `id`, `type`, `groups`, `preview`, `hits`, `created`."
+  },
+  {
+    "criterion": 2,
+    "text": "For a memory whose `groups` is a list of names, its `groups` cell holds exactly one chip element per name, in the list's order. Each chip's text is the name exactly as sent, so a name containing a comma (for example `a, b`) is one chip. The cell's hover text lists every name, one per line."
+  },
+  {
+    "criterion": 3,
+    "text": "For a memory whose `groups` is `[]`, its `groups` cell shows `untagged` in the muted text colour, with the hover text `No groups: every rule set can read it.`"
+  },
+  {
+    "criterion": 4,
+    "text": "For a memory whose `groups` is `null`, its `groups` cell shows `⚠ unreadable` in the widget's error text colour (`--err-fg`), with the hover text `Marked tagged but its group list is unreadable. With a rule-set file, no rule set retrieves it.`"
+  },
+  {
+    "criterion": 5,
+    "text": "In the render test, at window widths of 700px and 1400px, the content of a `groups` cell whose chips need more than 220px is at most 220px wide (measured with `getBoundingClientRect().width` on the element holding the chips), and that element's computed `overflow` is `hidden` and `text-overflow` is `ellipsis`. The `preview` cell keeps the truncation style and the `hits` cell stays right-aligned, as before."
+  },
+  {
+    "criterion": 6,
+    "text": "Group names reach the page as text only. A name such as `<img src=x onerror=alert(1)>` is shown literally and adds no element to the page."
+  },
+  {
+    "criterion": 7,
+    "text": "The row-detail view shows a `groups` row for every memory: chips for a list of names (no width cap), `untagged` for `[]`, and `⚠ unreadable` for `null`, each with the same hover text as the table cell."
+  },
+  {
+    "criterion": 8,
+    "text": "The Browse toolbar has a `groups ▾` button between the type dropdown and Refresh. It opens a checklist whose choices are, in order, `untagged`, `⚠ unreadable`, then, sorted A–Z together, each distinct group name in the loaded memories and each selected name kept from an earlier load."
+  },
+  {
+    "criterion": 9,
+    "text": "With the choices `untagged` and `sales` selected, Browse shows exactly the loaded rows whose `groups` is `[]` or contains `sales`. With `⚠ unreadable` selected alone, it shows exactly the rows whose `groups` is `null`. With nothing selected, no row is hidden by groups."
+  },
+  {
+    "criterion": 10,
+    "text": "A row is shown only when it passes the group filter, the search box and the type dropdown together."
+  },
+  {
+    "criterion": 11,
+    "text": "In the checklist, every group-name choice's label is a chip element of the same kind as the table's chips, and the `untagged` and `⚠ unreadable` state choices' labels are not chips and use the muted and error text colours. A group literally named `untagged` or `unreadable` appears as its own name choice (a chip), sorted among the other names after `⚠ unreadable`. Selecting that name matches only rows whose list contains it, and selecting the `untagged` or `⚠ unreadable` state choice does not match those rows."
+  },
+  {
+    "criterion": 12,
+    "text": "While at least one choice is selected, the button reads `groups: N selected`, N being the number of selected choices. The checklist's `clear` link deselects every choice and shows every row the search box and type dropdown allow."
+  },
+  {
+    "criterion": 13,
+    "text": "Changing the group selection returns Browse to page 1."
+  },
+  {
+    "criterion": 14,
+    "text": "After a reload of Browse that brings back no memory carrying a selected group name, that name is still listed and still selected. When that reload brought back at least one memory and none matches any selected choice, Browse shows `No memories match the current filter.`"
+  },
+  {
+    "criterion": 15,
+    "text": "The Import pane's description says that a duplicate is not saved again, that its groups are added to every entry it matches and it is counted as updated, and that a duplicate that changes no entry's groups is skipped. It does not contain the word \"exact\" and no longer says \"Exact duplicates are skipped server-side.\""
+  },
+  {
+    "criterion": 16,
+    "text": "The Export pane's CSV note says the export is marked `lossy:true` when it would drop schema docs or SQL pairs' groups."
+  },
+  {
+    "criterion": 17,
+    "text": "`docs/external/managing-memory.md`'s Browse bullet says Browse shows each memory's groups, can be filtered by one or more groups (and by untagged or unreadable), and shows the groups in the row-detail view. Its Import bullet says a duplicate's groups are added to every entry it matches (counted as updated) and a duplicate that changes nothing is skipped, matching that page's \"Duplicate entries\" paragraph, instead of \"duplicates skipped automatically\"."
+  },
+  {
+    "criterion": 18,
+    "text": "`docs/internal/mcp-server/tools.md`'s memory-admin widget section describes the `groups` column, the detail view's `groups` row and the group filter, says that the filter runs in the widget over the loaded memories, and lists `groups` among the wire field names the widget reads. Its `get_memory` table row says the returned memory carries `groups` in the same three states as `list_memories`."
+  },
+  {
+    "criterion": 19,
+    "text": "`scripts/memory_admin_preview.html`'s mock store has at least one memory with a list of groups, one with `[]` and one with `null`. Its `add_memories` handler stores each item's `groups` (or `[]` when the item has none) on rows it creates, and for an exact duplicate SQL pair adds the item's new groups to the existing row and counts it in `updated_count`."
+  },
+  {
+    "criterion": 20,
+    "text": "In a store with more than 1,000 memories of the selected type, the group filter and its choices cover only the newest 1,000 that Browse loads. Older memories are not matched. A group name that appears only on older memories is not listed, unless it is a selected choice kept from an earlier load."
+  },
+  {
+    "criterion": 21,
+    "text": "The Browse search box matches the same fields as before (id, type, question, sql, content and date) and does not match group names."
+  },
+  {
+    "criterion": 22,
+    "text": "A headless-Chromium render test of `memory_admin.html`, with a stub host that answers `list_memories`, `get_memory_stats` and `get_memory` by tool name, passes. Its fixture memories cover at minimum: two names, a list of names whose chips need more than 220px, a name containing a comma, names literally `untagged` and `unreadable`, a name holding HTML, `[]` and `null`. It asserts the header order, each cell state, the `hits` and `preview` cell classes, the detail-view `groups` row for all three states, the checklist's chip and state-choice labels, and the filter results named above. Like `tests/unit/test_access_rules_widget_render.py`, it skips where no Chromium is found."
+  }
+]
