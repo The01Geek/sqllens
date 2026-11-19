@@ -63,7 +63,8 @@ var App = class { connect() { return Promise.resolve(); }
     let body;
     if (req.name === "list_memories") {
       const mems = window.__lists.length > 1 ? window.__lists.shift() : window.__lists[0];
-      body = {memories: mems, total: mems.length};
+      // Like the server: newest first, at most `limit` rows, `total` counts all.
+      body = {memories: mems.slice(0, req.arguments.limit), total: mems.length};
     } else if (req.name === "get_memory_stats") {
       body = {tool_usage_count: 0, text_count: 0, total_hits_last_30d: 0, top_hit_memories: []};
     } else if (req.name === "get_memory") {
@@ -335,3 +336,29 @@ def test_selected_name_kept_after_reload(renders: dict[int, dict[str, Any]]) -> 
     assert ["other", False] in out["reloadMenu"]
     assert "No memories match the current filter." in out["reloadBody"]
     assert out["reloadBtn"] == "groups: 1 selected ▾"
+
+
+_WINDOW_PROBE = """
+(async () => {
+  for (let i = 0; i < 100 && !document.querySelector("#browseBody tbody tr"); i++)
+    await new Promise((r) => setTimeout(r, 20));
+  const out = {};
+  out.menu = [...document.querySelectorAll("#groupMenu label")]
+    .map((l) => l.children[1].textContent);
+  out.meta = document.querySelector("#browseMeta").textContent;
+  const pre = document.createElement("pre");
+  pre.id = "probe";
+  pre.textContent = JSON.stringify(out);
+  document.body.append(pre);
+})();
+"""
+
+
+def test_filter_covers_only_the_loaded_window(tmp_path: Path) -> None:
+    newest = [_mem(1, ["recent"], f"recent {i}") for i in range(1000)]
+    oldest = _mem(2, ["old-only"], "oldest")
+    page = _page([[*newest, oldest]]).replace(_PROBE, _WINDOW_PROBE)
+    out = _render(tmp_path, page, 1000)
+    assert "recent" in out["menu"]
+    assert "old-only" not in out["menu"]
+    assert "store has 1001" in out["meta"]
