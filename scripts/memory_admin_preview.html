@@ -43,18 +43,21 @@ const STORE = {
     { memory_id: "11111111-aaaa-bbbb-cccc-000000000001", memory_type: "tool_usage",
       question: "How many orders last week?",
       sql: "SELECT COUNT(*) FROM orders WHERE created_at >= now() - interval '7 days';",
-      timestamp: "2026-05-01T08:32:00Z", hit_count: 12, last_hit_date: "2026-05-29T10:00:00Z" },
+      timestamp: "2026-05-01T08:32:00Z", hit_count: 12, last_hit_date: "2026-05-29T10:00:00Z",
+      groups: ["finance", "sales"] },
     { memory_id: "22222222-aaaa-bbbb-cccc-000000000002", memory_type: "tool_usage",
       question: "Top 10 customers by revenue",
       sql: "SELECT customer_id, SUM(amount) AS revenue FROM orders GROUP BY 1 ORDER BY 2 DESC LIMIT 10;",
-      timestamp: "2026-05-02T09:00:00Z", hit_count: 8, last_hit_date: "2026-05-28T14:00:00Z" },
+      timestamp: "2026-05-02T09:00:00Z", hit_count: 8, last_hit_date: "2026-05-28T14:00:00Z",
+      groups: [] },
     { memory_id: "33333333-aaaa-bbbb-cccc-000000000003", memory_type: "text",
       content: "orders.created_at is UTC. status is one of new/paid/shipped/cancelled.",
-      timestamp: "2026-05-03T10:00:00Z", hit_count: 4 },
+      timestamp: "2026-05-03T10:00:00Z", hit_count: 4, groups: null },
     { memory_id: "44444444-aaaa-bbbb-cccc-000000000004", memory_type: "tool_usage",
       question: "Daily revenue over the last 30 days",
       sql: "SELECT date_trunc('day', created_at) d, SUM(amount) r FROM orders WHERE created_at > now() - interval '30 days' GROUP BY 1 ORDER BY 1;",
-      timestamp: "2026-05-04T11:00:00Z", hit_count: 22, last_hit_date: "2026-05-30T08:00:00Z" },
+      timestamp: "2026-05-04T11:00:00Z", hit_count: 22, last_hit_date: "2026-05-30T08:00:00Z",
+      groups: ["finance"] },
   ],
 };
 
@@ -113,12 +116,23 @@ function handleCallTool(name, args) {
       });
     }
     let saved = 0;
+    let updated = 0;
     for (const p of pairs) {
-      if (STORE.memories.some((m) => m.question === p.question && m.sql === p.sql)) continue;
+      // Simplified duplicate check (identical text); the server matches loosely.
+      const dup = STORE.memories.find((m) => m.question === p.question && m.sql === p.sql);
+      if (dup) {
+        const have = Array.isArray(dup.groups) ? dup.groups : [];
+        const add = (p.groups || []).filter((g) => !have.includes(g));
+        if (add.length > 0) {
+          dup.groups = [...have, ...add].sort();
+          updated += 1;
+        }
+        continue;
+      }
       STORE.memories.push({
         memory_id: "new-" + Math.random().toString(36).slice(2, 10),
         memory_type: "tool_usage", question: p.question, sql: p.sql,
-        timestamp: new Date().toISOString(), hit_count: 0,
+        timestamp: new Date().toISOString(), hit_count: 0, groups: p.groups || [],
       });
       saved += 1;
     }
@@ -126,12 +140,13 @@ function handleCallTool(name, args) {
       STORE.memories.push({
         memory_id: "new-" + Math.random().toString(36).slice(2, 10),
         memory_type: "text", content: d.content,
-        timestamp: new Date().toISOString(), hit_count: 0,
+        timestamp: new Date().toISOString(), hit_count: 0, groups: d.groups || [],
       });
       saved += 1;
     }
     return jsonResult({
-      saved_count: saved, duplicate_count: pairs.length + docs.length - saved,
+      saved_count: saved, updated_count: updated,
+      duplicate_count: pairs.length + docs.length - saved - updated,
       skipped_count: 0, errors: [],
     });
   }

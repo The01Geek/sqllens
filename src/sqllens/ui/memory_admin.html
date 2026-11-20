@@ -124,6 +124,29 @@
   tbody tr.click:hover { background: var(--control-bg); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   td.trunc { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+  /* The cap sits on a block inside the td: a td's own max-width is ignored by
+     this 100%-wide nowrap table and renders wider than 220px. */
+  .groups-cap { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .groups-full { white-space: normal; }
+  .chip {
+    display: inline-block; margin: 0 4px 0 0; padding: 0 6px;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: var(--control-bg); color: var(--fg);
+    font-size: 11px; line-height: 16px;
+  }
+  .g-untagged { color: var(--muted); }
+  .g-unreadable { color: var(--err-fg); }
+  .gfilter { position: relative; }
+  .gmenu {
+    display: none; position: absolute; top: 100%; left: 0; z-index: 50;
+    margin-top: 4px; padding: 6px 8px; min-width: 180px; max-height: 300px; overflow: auto;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  }
+  .gmenu.on { display: block; }
+  .gmenu label { display: flex; gap: 6px; align-items: center; padding: 2px 0; cursor: pointer; white-space: nowrap; }
+  .bar .gmenu input { padding: 0; border: 0; border-radius: 0; background: none; }
+  .gmenu a { color: var(--accent); cursor: pointer; display: inline-block; margin-top: 4px; }
   .pager { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .pager button[disabled] { opacity: 0.4; cursor: default; }
   .empty { color: var(--muted); padding: 16px; }
@@ -243,6 +266,10 @@
       <option value="tool_usage">SQL pair</option>
       <option value="text">Schema doc</option>
     </select>
+    <span class="gfilter">
+      <button id="groupBtn" type="button" aria-haspopup="true">groups ▾</button>
+      <div id="groupMenu" class="gmenu" role="menu"></div>
+    </span>
     <button id="refresh">Refresh</button>
     <span class="meta" id="browseMeta"></span>
   </div>
@@ -254,7 +281,8 @@
     <h3>Import a memory bundle</h3>
     <p class="meta">
       Paste or load a JSON bundle with optional <code>sql_pairs</code> and <code>schema_docs</code>
-      blocks. Exact duplicates are skipped server-side. Partial failures (errors[] non-empty) are
+      blocks. A duplicate is not saved again: its groups are added to every entry it matches and
+      it is counted as updated, and a duplicate that changes no entry's groups is skipped. Partial failures (errors[] non-empty) are
       reported as an error, never as success.
     </p>
     <div class="bar">
@@ -289,8 +317,8 @@
   <div class="section-block">
     <h3>Export the store</h3>
     <p class="meta">
-      JSON export round-trips back into Import. CSV exports SQL pairs only; if schema docs
-      would be dropped the server marks the response <code>lossy:true</code> and the widget
+      JSON export round-trips back into Import. CSV exports SQL pairs only; if it would drop schema docs
+      or SQL pairs' groups the server marks the response <code>lossy:true</code> and the widget
       paints it red.
     </p>
     <div class="bar">
@@ -378,6 +406,9 @@ const state = {
   total: 0,
   filter: "",
   typeFilter: "",
+  // Group filter: the two state choices are flags, separate from `names`, so a
+  // group literally named "untagged" or "unreadable" never aliases them.
+  groupSel: { untagged: false, unreadable: false, names: new Set() },
   page: 0,
   // Stats
   stats: null,
@@ -562,10 +593,133 @@ typeFilterSelect.addEventListener("change", () => {
 });
 document.getElementById("refresh").addEventListener("click", loadBrowse);
 
+// ── groups: cell rendering and the group filter ──
+
+const UNTAGGED_TITLE = "No groups: every rule set can read it.";
+const UNREADABLE_TITLE =
+  "Marked tagged but its group list is unreadable. With a rule-set file, no rule set retrieves it.";
+
+function makeChip(name) {
+  const c = document.createElement("span");
+  c.className = "chip";
+  c.textContent = name;
+  return c;
+}
+
+function stateLabel(kind) {
+  const s = document.createElement("span");
+  if (kind === "untagged") {
+    s.className = "g-untagged";
+    s.textContent = "untagged";
+    s.title = UNTAGGED_TITLE;
+  } else {
+    s.className = "g-unreadable";
+    s.textContent = "⚠ unreadable";
+    s.title = UNREADABLE_TITLE;
+  }
+  return s;
+}
+
+// Anything but an array (null, a missing key, another type) is "unreadable":
+// "untagged" claims every rule set can read the memory, so it needs a real [].
+function renderGroups(groups, capped) {
+  const box = document.createElement("span");
+  box.className = capped ? "groups-cap" : "groups-full";
+  if (!Array.isArray(groups)) {
+    box.appendChild(stateLabel("unreadable"));
+  } else if (groups.length === 0) {
+    box.appendChild(stateLabel("untagged"));
+  } else {
+    for (const g of groups) box.appendChild(makeChip(String(g)));
+    box.title = groups.map(String).join("\n");
+  }
+  return box;
+}
+
+function groupKind(m) {
+  if (!Array.isArray(m.groups)) return "unreadable";
+  if (m.groups.length === 0) return "untagged";
+  return "names";
+}
+
+function groupSelCount() {
+  const s = state.groupSel;
+  return (s.untagged ? 1 : 0) + (s.unreadable ? 1 : 0) + s.names.size;
+}
+
+function passesGroups(m) {
+  const s = state.groupSel;
+  if (groupSelCount() === 0) return true;
+  const kind = groupKind(m);
+  if (kind === "untagged") return s.untagged;
+  if (kind === "unreadable") return s.unreadable;
+  return m.groups.some((g) => s.names.has(String(g)));
+}
+
+const groupBtn = document.getElementById("groupBtn");
+const groupMenu = document.getElementById("groupMenu");
+
+function groupNameChoices() {
+  const names = new Set(state.groupSel.names);
+  for (const m of state.memories) {
+    if (groupKind(m) === "names") for (const g of m.groups) names.add(String(g));
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+function renderGroupMenu() {
+  const n = groupSelCount();
+  groupBtn.textContent = n > 0 ? "groups: " + n + " selected ▾" : "groups ▾";
+  groupMenu.textContent = "";
+  const addChoice = (labelEl, checked, onChange) => {
+    const lab = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = checked;
+    box.addEventListener("change", () => { onChange(box.checked); groupSelChanged(); });
+    lab.append(box, labelEl);
+    groupMenu.appendChild(lab);
+  };
+  const s = state.groupSel;
+  addChoice(stateLabel("untagged"), s.untagged, (v) => { s.untagged = v; });
+  addChoice(stateLabel("unreadable"), s.unreadable, (v) => { s.unreadable = v; });
+  for (const name of groupNameChoices()) {
+    addChoice(makeChip(name), s.names.has(name), (v) => {
+      if (v) s.names.add(name); else s.names.delete(name);
+    });
+  }
+  const clear = document.createElement("a");
+  clear.id = "groupClear";
+  clear.textContent = "clear";
+  clear.href = "#";
+  clear.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    s.untagged = false;
+    s.unreadable = false;
+    s.names.clear();
+    groupSelChanged();
+  });
+  groupMenu.appendChild(clear);
+}
+
+function groupSelChanged() {
+  state.page = 0;
+  renderGroupMenu();
+  renderBrowse();
+}
+
+groupBtn.addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  groupMenu.classList.toggle("on");
+});
+groupMenu.addEventListener("click", (ev) => ev.stopPropagation());
+document.addEventListener("click", () => groupMenu.classList.remove("on"));
+
 function filteredMemories() {
-  if (!state.filter) return state.memories;
+  const rows = state.memories.filter(passesGroups);
+  if (!state.filter) return rows;
   const needle = state.filter.toLowerCase();
-  return state.memories.filter((m) => {
+  return rows.filter((m) => {
     // Field names match the wire shape produced by _record_to_wire in
     // src/sqllens/memory/admin.py: memory_id, memory_type, timestamp,
     // last_hit_date. NOT id/type/created_at/last_hit_at — those exist only
@@ -576,6 +730,17 @@ function filteredMemories() {
     return fields.some((s) => s.includes(needle));
   });
 }
+
+// A cell class belongs to its column entry, not a position, so adding or moving
+// a column cannot shift `num`/`trunc` onto the wrong cell.
+const BROWSE_COLUMNS = [
+  { header: "id", render: (m) => shortId(m.memory_id) },
+  { header: "type", render: (m) => typeLabel(m.memory_type) },
+  { header: "groups", cls: "groups", render: (m) => renderGroups(m.groups, true) },
+  { header: "preview", cls: "trunc", render: (m) => previewOf(m) },
+  { header: "hits", cls: "num", render: (m) => (m.hit_count == null ? "" : String(m.hit_count)) },
+  { header: "created", render: (m) => m.timestamp || "" },
+];
 
 function renderBrowse() {
   const filtered = filteredMemories();
@@ -606,31 +771,25 @@ function renderBrowse() {
   const tbl = document.createElement("table");
   const thead = document.createElement("thead");
   const htr = document.createElement("tr");
-  ["id", "type", "preview", "hits", "created"].forEach((name) => {
+  for (const col of BROWSE_COLUMNS) {
     const th = document.createElement("th");
-    th.textContent = name;
+    th.textContent = col.header;
     htr.appendChild(th);
-  });
+  }
   thead.appendChild(htr);
   tbl.appendChild(thead);
   const tbody = document.createElement("tbody");
   for (const m of pageRows) {
     const tr = document.createElement("tr");
     tr.className = "click";
-    const cells = [
-      shortId(m.memory_id),
-      typeLabel(m.memory_type),
-      previewOf(m),
-      m.hit_count == null ? "" : String(m.hit_count),
-      m.timestamp || "",
-    ];
-    cells.forEach((cell, i) => {
+    for (const col of BROWSE_COLUMNS) {
       const td = document.createElement("td");
-      if (i === 3) td.className = "num";
-      else if (i === 2) td.className = "trunc";
-      td.textContent = cell;
+      if (col.cls) td.className = col.cls;
+      const v = col.render(m);
+      if (typeof v === "string") td.textContent = v;
+      else td.appendChild(v);
       tr.appendChild(td);
-    });
+    }
     tr.addEventListener("click", () => openRow(m.memory_id));
     tbody.appendChild(tr);
   }
@@ -731,6 +890,7 @@ async function loadBrowse(opts) {
   state.memories = Array.isArray(payload.memories) ? payload.memories : [];
   state.total = typeof payload.total === "number" ? payload.total : state.memories.length;
   state.page = 0;
+  renderGroupMenu();
   renderBrowse();
 }
 
@@ -854,6 +1014,19 @@ function renderRow(host, m) {
     row.append(kd, vd);
     host.appendChild(row);
   }
+  // Outside the loop: it would hide null and print [] as a blank value, and both
+  // are meaningful group states.
+  const grow = document.createElement("div");
+  grow.className = "row";
+  grow.id = "detailGroups";
+  const gk = document.createElement("div");
+  gk.className = "k";
+  gk.textContent = "groups";
+  const gv = document.createElement("div");
+  gv.className = "v";
+  gv.appendChild(renderGroups(m.groups, false));
+  grow.append(gk, gv);
+  host.appendChild(grow);
   if (m.embedding && Array.isArray(m.embedding)) {
     const row = document.createElement("div");
     row.className = "row";

@@ -249,8 +249,8 @@ memory directory; Chroma does not support that deployment.
 
 When `allow_admin_tools` is enabled, SQL Lens also ships a packaged interactive panel that compatible assistants can render inline alongside the chat. The panel groups the seven tools into four sections:
 
-- **Browse**: lists saved memories newest first with a search filter and a row-detail view that exposes a per-row delete action.
-- **Import**: accepts a pasted or uploaded JSON bundle and adds it through the same add-memories path as the tool, with duplicates skipped automatically and any failures surfaced as an explicit error.
+- **Browse**: lists saved memories newest first with a search filter and a row-detail view that exposes a per-row delete action. A groups column shows each memory's [memory groups](#memory-groups) (`untagged` when it has none, `⚠ unreadable` when its stored group list is damaged), the row-detail view shows its groups, and a groups filter lists only the memories in one or more chosen groups, untagged memories or unreadable ones. The filter covers the memories Browse has loaded (the newest 1,000 of the selected type).
+- **Import**: accepts a pasted or uploaded JSON bundle and adds it through the same add-memories path as the tool, where a duplicate is not saved again: its groups are added to every entry it matches and it is counted as updated, and a duplicate that changes nothing is skipped (see the duplicate rule above). Any failures are surfaced as an explicit error.
 - **Stats**: shows count cards for each kind of entry and a top-hits chart for the last 30 days.
 - **Danger zone**: exposes export (JSON or CSV), delete one memory by identifier, and clear all or one type. Destructive actions are gated by a type-`CLEAR`-to-confirm box for clear-all and a click-to-confirm dialog for every delete.
 
