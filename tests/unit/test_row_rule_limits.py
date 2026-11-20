@@ -199,6 +199,6 @@ def test_row_rules_nested_too_deeply_to_validate_fail_as_a_rule_set_error(
     path = write_rule_set_file(tmp_path, _document([{"name": "t", "columns": ["id"]}]))
     with pytest.raises(RuleSetFileError) as info:
         load_rule_sets(path, database_url=MYSQL_URL)
-    assert f"rule-set file {path} nests its row rules too deeply to be validated" in str(
+    assert f"rule-set file {path} nests its values too deeply to be validated" in str(
         info.value
     )

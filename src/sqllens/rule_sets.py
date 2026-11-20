@@ -900,7 +900,7 @@ def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:
         raise RuleSetFileError(f"rule-set file {path} is invalid:\n  {problems}") from None
     except RecursionError as exc:
         raise RuleSetFileError(
-            f"rule-set file {path} nests its row rules too deeply to be validated"
+            f"rule-set file {path} nests its values too deeply to be validated"
         ) from exc
     scheme = database_url.split("://", 1)[0].lower() if "://" in database_url else ""
     if not (scheme == "mysql" or scheme.startswith("mysql+")):
