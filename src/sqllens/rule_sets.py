@@ -17,6 +17,7 @@ row rules can compare. The SQL guard that enforces a selected set lives in
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import datetime
 import hashlib
@@ -602,23 +603,57 @@ class CompiledRule:
         return tree
 
 
+MAX_EXISTS_DEPTH = 16
+"""The most ``EXISTS`` subqueries a compiled row rule may nest inside one another."""
+
+MAX_SLOTS = 64
+"""The most slots (aliased tables, the filtered table included) a compiled row rule may use."""
+
+
+class _RuleLimitError(Exception):
+    """A row rule passed :data:`MAX_EXISTS_DEPTH` or :data:`MAX_SLOTS` while compiling."""
+
+
 class _Compiler:
     def __init__(self, rule_set: RuleSet) -> None:
         self._rules = {table.name: table.row_rule for table in rule_set.tables}
         self._slots = 0
+        self._depth = 0
         self._tables: set[str] = set()
 
     def _new_slot(self, table: str) -> int:
+        # Checked before allocating, so a rule whose full compile is huge
+        # stops at the limit instead of compiling everything first.
+        if self._slots >= MAX_SLOTS:
+            raise _RuleLimitError(
+                f"the compiled rule needs more than {MAX_SLOTS} slots; use fewer hops "
+                "or less nesting per hop"
+            )
         self._tables.add(table)
         slot = self._slots
         self._slots += 1
         return slot
+
+    @contextlib.contextmanager
+    def _deeper(self) -> Iterator[None]:
+        """One more ``EXISTS`` level around whatever is compiled inside."""
+        if self._depth >= MAX_EXISTS_DEPTH:
+            raise _RuleLimitError(
+                f"the compiled rule nests more than {MAX_EXISTS_DEPTH} EXISTS "
+                "subqueries inside one another; use fewer hops or less nesting per hop"
+            )
+        self._depth += 1
+        try:
+            yield
+        finally:
+            self._depth -= 1
 
     def compile(self, table: str) -> CompiledRule:
         rule = self._rules[table]
         if rule is None:
             raise ValueError(f"table {table!r} has no row rule")
         self._slots = 0
+        self._depth = 0
         self._tables = set()
         base = self._new_slot(table)
         condition = self._node(rule, base)
@@ -657,57 +692,65 @@ class _Compiler:
         if isinstance(node, AllOfRule):
             return exp.and_(*(self._node(child, slot) for child in node.rules))
         if isinstance(node, OwnerViaRule):
-            link = self._new_slot(node.link_table)
-            return _exists(node.link_table, link, exp.and_(
-                exp.EQ(
-                    this=_slot_column(link, node.link_row_column),
-                    expression=_slot_column(slot, node.id_column),
-                ),
-                exp.EQ(
-                    this=_slot_column(link, node.link_user_column),
-                    expression=exp.Placeholder(this=_USER_ID),
-                ),
-            ))
+            with self._deeper():
+                link = self._new_slot(node.link_table)
+                return _exists(node.link_table, link, exp.and_(
+                    exp.EQ(
+                        this=_slot_column(link, node.link_row_column),
+                        expression=_slot_column(slot, node.id_column),
+                    ),
+                    exp.EQ(
+                        this=_slot_column(link, node.link_user_column),
+                        expression=exp.Placeholder(this=_USER_ID),
+                    ),
+                ))
         if isinstance(node, InheritRule):
-            parent = self._new_slot(node.parent_table)
-            match = exp.EQ(
-                this=_slot_column(parent, node.parent_column),
-                expression=_slot_column(slot, node.column),
-            )
-            condition = self._own_rule(node.parent_table, parent, match)
-            if node.parent_rule is not None:
-                condition = exp.and_(condition, self._node(node.parent_rule, parent))
-            return _exists(node.parent_table, parent, condition)
+            with self._deeper():
+                parent = self._new_slot(node.parent_table)
+                match = exp.EQ(
+                    this=_slot_column(parent, node.parent_column),
+                    expression=_slot_column(slot, node.column),
+                )
+                condition = self._own_rule(node.parent_table, parent, match)
+                if node.parent_rule is not None:
+                    condition = exp.and_(condition, self._node(node.parent_rule, parent))
+                return _exists(node.parent_table, parent, condition)
         if isinstance(node, ReferencedByRule):
             if node.link is None:
-                source = self._new_slot(node.source_table)
-                match = exp.EQ(
-                    this=_slot_column(source, node.source_column or ""),
+                with self._deeper():
+                    source = self._new_slot(node.source_table)
+                    match = exp.EQ(
+                        this=_slot_column(source, node.source_column or ""),
+                        expression=_slot_column(slot, node.id_column),
+                    )
+                    return _exists(
+                        node.source_table,
+                        source,
+                        self._own_rule(node.source_table, source, match),
+                    )
+            with self._deeper():
+                link = self._new_slot(node.link.table)
+                # The source EXISTS sits inside the link EXISTS: two levels.
+                with self._deeper():
+                    source = self._new_slot(node.source_table)
+                    source_match = exp.EQ(
+                        this=_slot_column(source, node.source_id_column or ""),
+                        expression=_slot_column(link, node.link.source_column),
+                    )
+                    source_exists = _exists(
+                        node.source_table,
+                        source,
+                        self._own_rule(node.source_table, source, source_match),
+                    )
+                link_match = exp.EQ(
+                    this=_slot_column(link, node.link.target_column),
                     expression=_slot_column(slot, node.id_column),
                 )
                 return _exists(
-                    node.source_table, source, self._own_rule(node.source_table, source, match)
+                    node.link.table,
+                    link,
+                    exp.and_(self._own_rule(node.link.table, link, link_match), source_exists),
                 )
-            link = self._new_slot(node.link.table)
-            source = self._new_slot(node.source_table)
-            source_match = exp.EQ(
-                this=_slot_column(source, node.source_id_column or ""),
-                expression=_slot_column(link, node.link.source_column),
-            )
-            source_exists = _exists(
-                node.source_table,
-                source,
-                self._own_rule(node.source_table, source, source_match),
-            )
-            link_match = exp.EQ(
-                this=_slot_column(link, node.link.target_column),
-                expression=_slot_column(slot, node.id_column),
-            )
-            return _exists(
-                node.link.table,
-                link,
-                exp.and_(self._own_rule(node.link.table, link, link_match), source_exists),
-            )
         raise TypeError(f"unknown row-rule node {type(node).__name__}")
 
 
@@ -822,11 +865,13 @@ def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:
     """Read, parse and validate the rule-set file at ``path`` against ``database_url``.
 
     Raises ``RuleSetFileError`` for an unreadable file, a file that is not
-    UTF-8 text, invalid TOML, a format violation (each problem named by its
-    record path), a ``database_url`` that is not a MySQL URL, a
-    ``binding.database`` that differs, byte for byte, from the database the
-    URL's path names, or a row rule that raises any exception while it is
-    compiled (named by its record path).
+    UTF-8 text, invalid TOML, TOML nested too deeply to parse (``RecursionError``),
+    a format violation (each problem named by its record path), a ``database_url``
+    that is not a MySQL URL, a ``binding.database`` that differs, byte for byte,
+    from the database the URL's path names, a row rule that passes
+    :data:`MAX_EXISTS_DEPTH` or :data:`MAX_SLOTS` while it is compiled, or a row
+    rule that raises any other exception while it is compiled or proved (each
+    named by its record path).
     """
     try:
         raw = path.read_bytes()
@@ -844,11 +889,19 @@ def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:
         raise RuleSetFileError(f"rule-set file {path} is not UTF-8 text") from exc
     except tomllib.TOMLDecodeError as exc:
         raise RuleSetFileError(f"rule-set file {path} is not valid TOML: {exc}") from exc
+    except RecursionError as exc:
+        raise RuleSetFileError(
+            f"rule-set file {path} nests its values too deeply to be parsed"
+        ) from exc
     try:
         rule_set_file = RuleSetFile.model_validate(data)
     except ValidationError as exc:
         problems = "\n  ".join(_validation_problems(exc))
         raise RuleSetFileError(f"rule-set file {path} is invalid:\n  {problems}") from None
+    except RecursionError as exc:
+        raise RuleSetFileError(
+            f"rule-set file {path} nests its values too deeply to be validated"
+        ) from exc
     scheme = database_url.split("://", 1)[0].lower() if "://" in database_url else ""
     if not (scheme == "mysql" or scheme.startswith("mysql+")):
         raise RuleSetFileError(
@@ -881,11 +934,16 @@ def _compile_all(path: Path, rule_set_file: RuleSetFile) -> dict[str, dict[str, 
         for table_index, table in enumerate(rule_set.tables):
             if table.row_rule is None:
                 continue
+            where = f"rule_sets[{set_index}].tables[{table_index}].row_rule"
             try:
                 rule = compiler.compile(table.name)
                 prove_compiled_rule(table.name, tables[table.name], rule)
+            except _RuleLimitError as exc:
+                raise RuleSetFileError(
+                    f"rule-set file {path} is invalid:\n  {where}: the row rule is over a "
+                    f"load limit: {exc}"
+                ) from exc
             except Exception as exc:
-                where = f"rule_sets[{set_index}].tables[{table_index}].row_rule"
                 raise RuleSetFileError(
                     f"rule-set file {path} is invalid:\n  {where}: the row rule could not "
                     f"be compiled ({type(exc).__name__}: {exc})"
@@ -1091,20 +1149,46 @@ def _text(value: object) -> str:
     return value.decode() if isinstance(value, bytes) else str(value)
 
 
+_Column = tuple[str, str]
+
+
+def _join_pairs(table: str, node: RowRule) -> list[tuple[_Column, _Column]]:
+    """The (table, column) pairs ``node`` compares with each other; none for a non-join node."""
+    if isinstance(node, InheritRule):
+        return [((table, node.column), (node.parent_table, node.parent_column))]
+    if isinstance(node, OwnerViaRule):
+        return [((table, node.id_column), (node.link_table, node.link_row_column))]
+    if isinstance(node, ReferencedByRule):
+        if node.link is None:
+            return [((table, node.id_column), (node.source_table, node.source_column or ""))]
+        return [
+            ((table, node.id_column), (node.link.table, node.link.target_column)),
+            ((node.source_table, node.source_id_column or ""),
+             (node.link.table, node.link.source_column)),
+        ]
+    return []
+
+
 def _catalog_reads(loaded: LoadedRuleSets) -> tuple[
-    dict[str, list[str]], list[tuple[str, str, str]]
+    dict[str, list[str]], list[tuple[str, str, str]], list[tuple[_Column, _Column]]
 ]:
-    """The tables and columns to check, in file order, and each typed comparison.
+    """The tables and columns to check, in file order, each typed comparison and each join.
 
     The first value maps every listed table, then every unlisted ``owner_via``
     or ``referenced_by`` link table, to its columns; the second lists (table,
     column, value_type) for every ``compare`` column, ``parent_rule`` ones
     included, and every ``owner_via`` ``link_user_column`` (compared with the
-    integer user ID).
+    integer user ID); the third lists every join pair: an ``inherit``
+    ``column`` and its ``parent_column``, a direct ``referenced_by``
+    ``id_column`` and its ``source_column``, a linked ``referenced_by``
+    ``id_column`` and ``link.target_column`` and its ``source_id_column`` and
+    ``link.source_column``, and an ``owner_via`` ``id_column`` and its
+    ``link_row_column``.
     """
     reads: dict[str, list[str]] = {}
     links: dict[str, list[str]] = {}
     typed: list[tuple[str, str, str]] = []
+    joins: list[tuple[_Column, _Column]] = []
     for rule_set in loaded.file.rule_sets:
         listed = {table.name for table in rule_set.tables}
         for table in rule_set.tables:
@@ -1112,6 +1196,7 @@ def _catalog_reads(loaded: LoadedRuleSets) -> tuple[
             if table.row_rule is None:
                 continue
             for node, _ in _rule_nodes(table.row_rule, ""):
+                joins.extend(_join_pairs(table.name, node))
                 if isinstance(node, CompareRule):
                     typed.append((table.name, node.column, node.value_type))
                 elif isinstance(node, InheritRule) and node.parent_rule is not None:
@@ -1136,7 +1221,15 @@ def _catalog_reads(loaded: LoadedRuleSets) -> tuple[
                     )
     for table, columns in links.items():
         reads.setdefault(table, []).extend(columns)
-    return reads, typed
+    return reads, typed, joins
+
+
+def _join_family(data_type: str) -> str:
+    """``data_type``'s join family: ``integer``, ``string``, or the type itself."""
+    for family in ("integer", "string"):
+        if data_type in VALUE_TYPE_DATA_TYPES[family]:
+            return family
+    return data_type
 
 
 def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
@@ -1151,7 +1244,13 @@ def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
     ``compare`` column's ``DATA_TYPE`` (a ``parent_rule``'s ``compare``
     columns read on its ``parent_table``) must be one :data:`VALUE_TYPE_DATA_TYPES` accepts for its
     ``value_type``, and every ``owner_via`` ``link_user_column``'s one it
-    accepts for ``integer``. Raises ``RuleSetCatalogError`` naming each
+    accepts for ``integer``. The two columns of every join pair (see
+    :func:`_catalog_reads`) must both be in the integer family
+    (``VALUE_TYPE_DATA_TYPES["integer"]``), both in the string family
+    (``VALUE_TYPE_DATA_TYPES["string"]``), or, when either is outside both
+    families, have identical ``DATA_TYPE`` values; a column with no
+    ``DATA_TYPE``, or on a table that is not a base table, is left to the
+    existence check. Raises ``RuleSetCatalogError`` naming each
     mismatch; a catalog read that fails raises the driver's exception.
     """
     cursor = connection.cursor()
@@ -1171,7 +1270,7 @@ def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
     finally:
         cursor.close()
 
-    reads, typed = _catalog_reads(loaded)
+    reads, typed, joins = _catalog_reads(loaded)
     problems: list[str] = []
     for table, wanted in reads.items():
         kind = kinds.get(table)
@@ -1207,6 +1306,22 @@ def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
             problems.append(
                 f"column {table}.{column} has type {data_type!r}, which a row rule's "
                 f"value_type {value_type!r} does not accept"
+            )
+    for left, right in dict.fromkeys(joins):
+        left_type = columns.get(left[0], {}).get(left[1])
+        right_type = columns.get(right[0], {}).get(right[1])
+        if (
+            kinds.get(left[0]) != "BASE TABLE"
+            or kinds.get(right[0]) != "BASE TABLE"
+            or left_type is None
+            or right_type is None
+        ):
+            continue
+        if _join_family(left_type) != _join_family(right_type):
+            problems.append(
+                f"join columns {left[0]}.{left[1]} (type {left_type!r}) and "
+                f"{right[0]}.{right[1]} (type {right_type!r}) have types a row rule "
+                "cannot join"
             )
     if problems:
         raise RuleSetCatalogError(

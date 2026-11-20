@@ -109,11 +109,11 @@ def test_a_file_without_row_rules_has_no_compiled_rules(tmp_path: Path) -> None:
     assert dict(loaded.guard_spec("2").rules) == {}
 
 
-def _mutation(path: str, value: Any):
-    """Set ``value`` at ``path`` inside the customers rule (keys and list indexes)."""
+def _mutation(path: str, value: Any, table: str = "customers"):
+    """Set ``value`` at ``path`` inside ``table``'s rule (keys and list indexes)."""
 
     def mutate(document: dict[str, Any]) -> None:
-        node = _rule(document, "customers")["row_rule"]
+        node = _rule(document, table)["row_rule"]
         *parents, last = path.split(".")
         for part in parents:
             node = node[int(part)] if part.isdigit() else node[part]
@@ -204,6 +204,52 @@ REFUSALS = [
         "undeclared column",
         _customers(_compare(column="email", value=1)),
         "column 'email' is not declared on table 'customers'",
+    ),
+    # Join-column declaration checks in ``_check_row_rules``; the listed link tables'
+    # target and user columns are covered in test_row_rule_additions.py and below.
+    (
+        "inherit column undeclared",
+        _mutation("rules.0.column", "nope", "orders"),
+        "column 'nope' is not declared on table 'orders'",
+    ),
+    (
+        "inherit parent_column undeclared",
+        _mutation("rules.0.parent_column", "nope", "orders"),
+        "column 'nope' is not declared on table 'customers'",
+    ),
+    (
+        "referenced_by id_column undeclared",
+        _mutation("id_column", "nope", "regions"),
+        "column 'nope' is not declared on table 'regions'",
+    ),
+    (
+        "direct referenced_by source_column undeclared",
+        _mutation("source_column", "nope", "regions"),
+        "column 'nope' is not declared on table 'customers'",
+    ),
+    (
+        "linked referenced_by source_id_column undeclared",
+        _mutation("source_id_column", "nope", "tags"),
+        "column 'nope' is not declared on table 'orders'",
+    ),
+    (
+        "listed referenced_by link missing source_column",
+        _mutation("link.source_column", "nope", "tags"),
+        "column 'nope' is not declared on table 'order_tags'",
+    ),
+    (
+        "owner_via id_column undeclared",
+        _mutation("rules.1.id_column", "nope"),
+        "column 'nope' is not declared on table 'customers'",
+    ),
+    (
+        "listed owner_via link missing link_row_column",
+        _mutation(
+            "rules.1",
+            {"kind": "owner_via", "id_column": "id", "link_table": "order_tags",
+             "link_row_column": "nope", "link_user_column": "tag_id"},
+        ),
+        "column 'nope' is not declared on table 'order_tags'",
     ),
     (
         "inherit unlisted",
@@ -823,3 +869,81 @@ def test_a_file_without_row_rules_reads_no_link_table(tmp_path: Path) -> None:
         "orders": {"id": "int", "customer_id": "int", "total": "int"},
     }
     check_catalog(_Connection(_Cursor(tables, columns)), loaded)
+
+
+# --- join-pair types (#416) -----------------------------------------------------------
+
+_JOIN_REFUSED = "have types a row rule cannot join"
+
+
+@pytest.mark.parametrize(
+    ("child", "parent", "accepted"),
+    [
+        ("int", "bigint", True),
+        ("tinyint", "int", True),
+        ("char", "varchar", True),
+        ("enum", "text", True),
+        ("decimal", "decimal", True),
+        ("datetime", "datetime", True),
+        ("varchar", "int", False),
+        ("int", "char", False),
+        ("binary", "varbinary", False),
+        ("bigint", "decimal", False),
+    ],
+)
+def test_a_join_pair_follows_the_type_family_rule(
+    tmp_path: Path, child: str, parent: str, accepted: bool
+) -> None:
+    tables, columns = _good_catalog()
+    columns["rates"]["currency_id"] = child
+    columns["currencies"]["id"] = parent
+    if accepted:
+        _check(tmp_path, tables, columns)
+        return
+    with pytest.raises(RuleSetCatalogError) as info:
+        _check(tmp_path, tables, columns)
+    assert (
+        f"join columns rates.currency_id (type {child!r}) and currencies.id "
+        f"(type {parent!r}) {_JOIN_REFUSED}"
+    ) in str(info.value)
+
+
+@pytest.mark.parametrize(
+    ("table", "column", "pair"),
+    [
+        ("orders", "customer_id", "orders.customer_id (type 'varchar') and customers.id"),
+        ("regions", "id", "regions.id (type 'varchar') and customers.region_id"),
+        ("tags", "id", "tags.id (type 'varchar') and order_tags.tag_id"),
+        ("order_tags", "order_id", "orders.id (type 'int') and order_tags.order_id"),
+        ("customer_reps", "customer_id", "customers.id (type 'int') and customer_reps.customer_id"),
+    ],
+    ids=["inherit", "direct referenced_by", "linked target", "linked source", "owner_via"],
+)
+def test_each_join_kind_is_type_checked(
+    tmp_path: Path, table: str, column: str, pair: str
+) -> None:
+    tables, columns = _good_catalog()
+    columns[table][column] = "varchar"
+    with pytest.raises(RuleSetCatalogError) as info:
+        _check(tmp_path, tables, columns)
+    assert pair in str(info.value)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (lambda t, c: c["rates"].pop("currency_id"), "column rates.currency_id does not exist"),
+        (lambda t, c: t.update(currencies="VIEW"), "table 'currencies' is a view"),
+    ],
+    ids=["no DATA_TYPE", "view"],
+)
+def test_a_join_column_the_existence_check_refuses_adds_no_type_problem(
+    tmp_path: Path, mutate, expected: str
+) -> None:
+    tables, columns = _good_catalog()
+    columns["currencies"]["id"] = "varchar"
+    mutate(tables, columns)
+    with pytest.raises(RuleSetCatalogError) as info:
+        _check(tmp_path, tables, columns)
+    assert expected in str(info.value)
+    assert _JOIN_REFUSED not in str(info.value)
