@@ -387,7 +387,8 @@ def test_memory_admin_widget_reads_real_wire_field_names() -> None:
     # Pin the canonical field names so this drift cannot return; absence
     # of the legacy names is asserted via a separate guard below.
     html = ui.load_widget_html("memory_admin.html")
-    for canonical in ("m.memory_id", "m.memory_type", "m.timestamp", "m.last_hit_date"):
+    for canonical in ("m.memory_id", "m.memory_type", "m.timestamp", "m.last_hit_date",
+                      "m.groups"):
         assert canonical in html, f"widget no longer reads wire field {canonical}"
     # The legacy mock-only names must NOT appear as widget reads. Use a
     # word-boundary regex so `m.id` doesn't match `m.identifier` or
