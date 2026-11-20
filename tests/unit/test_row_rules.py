@@ -205,7 +205,8 @@ REFUSALS = [
         _customers(_compare(column="email", value=1)),
         "column 'email' is not declared on table 'customers'",
     ),
-    # One case per join-column declaration check in ``_check_row_rules``.
+    # Join-column declaration checks in ``_check_row_rules``; the listed link tables'
+    # target and user columns are covered in test_row_rule_additions.py and below.
     (
         "inherit column undeclared",
         _mutation("rules.0.column", "nope", "orders"),

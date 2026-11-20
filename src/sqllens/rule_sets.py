@@ -626,7 +626,8 @@ class _Compiler:
         # stops at the limit instead of compiling everything first.
         if self._slots >= MAX_SLOTS:
             raise _RuleLimitError(
-                f"the compiled rule needs more than {MAX_SLOTS} slots, the limit"
+                f"the compiled rule needs more than {MAX_SLOTS} slots; use fewer hops "
+                "or less nesting per hop"
             )
         self._tables.add(table)
         slot = self._slots
@@ -639,7 +640,7 @@ class _Compiler:
         if self._depth >= MAX_EXISTS_DEPTH:
             raise _RuleLimitError(
                 f"the compiled rule nests more than {MAX_EXISTS_DEPTH} EXISTS "
-                "subqueries inside one another, the limit"
+                "subqueries inside one another; use fewer hops or less nesting per hop"
             )
         self._depth += 1
         try:
@@ -897,6 +898,10 @@ def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:
     except ValidationError as exc:
         problems = "\n  ".join(_validation_problems(exc))
         raise RuleSetFileError(f"rule-set file {path} is invalid:\n  {problems}") from None
+    except RecursionError as exc:
+        raise RuleSetFileError(
+            f"rule-set file {path} nests its row rules too deeply to be validated"
+        ) from exc
     scheme = database_url.split("://", 1)[0].lower() if "://" in database_url else ""
     if not (scheme == "mysql" or scheme.startswith("mysql+")):
         raise RuleSetFileError(

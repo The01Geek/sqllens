@@ -96,6 +96,38 @@ def test_a_linked_referenced_by_hop_counts_two_levels(tmp_path: Path) -> None:
         _load(tmp_path, tables)
 
 
+def _owner_via_at_the_bottom(hops: int) -> list[dict[str, Any]]:
+    tables = _chain(hops)
+    tables[0]["row_rule"] = _owner_vias(1)["rules"][0]
+    tables.append({"name": "links", "columns": ["row_id", "user_id"]})
+    return tables
+
+
+def test_an_owner_via_node_counts_one_level(tmp_path: Path) -> None:
+    tables = _owner_via_at_the_bottom(MAX_EXISTS_DEPTH - 1)
+    rule = _load(tmp_path, tables).guard_spec("2").rules[f"c{MAX_EXISTS_DEPTH - 1:02d}"]
+    assert _exists_depth(rule) == MAX_EXISTS_DEPTH
+    with pytest.raises(RuleSetFileError, match="more than 16 EXISTS subqueries"):
+        _load(tmp_path, _owner_via_at_the_bottom(MAX_EXISTS_DEPTH))
+
+
+def _direct_referenced_by_on_top(source: str) -> list[dict[str, Any]]:
+    tables = _chain(int(source[1:]))
+    tables.append({"name": "top", "columns": ["id"], "row_rule": {
+        "kind": "referenced_by", "id_column": "id", "source_table": source,
+        "source_column": "pid",
+    }})
+    return tables
+
+
+def test_a_direct_referenced_by_hop_counts_one_level(tmp_path: Path) -> None:
+    tables = _direct_referenced_by_on_top(f"c{MAX_EXISTS_DEPTH - 1:02d}")
+    rule = _load(tmp_path, tables).guard_spec("2").rules["top"]
+    assert _exists_depth(rule) == MAX_EXISTS_DEPTH
+    with pytest.raises(RuleSetFileError, match="more than 16 EXISTS subqueries"):
+        _load(tmp_path, _direct_referenced_by_on_top(f"c{MAX_EXISTS_DEPTH:02d}"))
+
+
 def test_a_rule_using_exactly_64_slots_loads(tmp_path: Path) -> None:
     tables = [{"name": "big", "columns": ["id"], "row_rule": _owner_vias(MAX_SLOTS - 1)}]
     assert _load(tmp_path, tables).guard_spec("2").rules["big"].slots == MAX_SLOTS == 64
@@ -154,3 +186,19 @@ def test_toml_nested_too_deeply_to_parse_fails_as_a_rule_set_error(tmp_path: Pat
     with pytest.raises(RuleSetFileError) as info:
         load_rule_sets(path, database_url=MYSQL_URL)
     assert str(path) in str(info.value)
+    assert "nests its values too deeply to be parsed" in str(info.value)
+
+
+def test_row_rules_nested_too_deeply_to_validate_fail_as_a_rule_set_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def overflow(data: object) -> None:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(rule_sets.RuleSetFile, "model_validate", overflow)
+    path = write_rule_set_file(tmp_path, _document([{"name": "t", "columns": ["id"]}]))
+    with pytest.raises(RuleSetFileError) as info:
+        load_rule_sets(path, database_url=MYSQL_URL)
+    assert f"rule-set file {path} nests its row rules too deeply to be validated" in str(
+        info.value
+    )
