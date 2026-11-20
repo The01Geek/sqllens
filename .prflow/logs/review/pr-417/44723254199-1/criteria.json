@@ -1,0 +1,50 @@
+[
+  {
+    "criterion": 1,
+    "text": "Every join-column declaration check in `_check_row_rules` has a unit test, and removing any one of them makes a test fail. Loading a rule-set file fails, with an error naming the column and its table, in each of these cases, at minimum: an `inherit` `column` not declared on its table; an `inherit` `parent_column` not declared on the parent table; a `referenced_by` `id_column` not declared on its table; a direct `referenced_by` `source_column` not declared on the source table; a linked `referenced_by` `source_id_column` not declared on the source table; a listed `referenced_by` link table missing `link.source_column`; an `owner_via` `id_column` not declared on its table; and a listed `owner_via` link table missing `link_row_column`."
+  },
+  {
+    "criterion": 2,
+    "text": "Against live MySQL, a listed link table whose own row rule hides a link row hides the `referenced_by` target row reachable only through that link row, while the source row that link row points to stays visible."
+  },
+  {
+    "criterion": 3,
+    "text": "Against live MySQL, a child row whose `inherit` key is `NULL` is hidden even when a visible parent row's `parent_column` is `NULL`, and a target row whose `id_column` is `NULL` is hidden even when a visible source row's direct `referenced_by` `source_column` is `NULL`. For a linked `referenced_by`, a target row is hidden when its only link row reaches it through a `NULL` `link.target_column` matched against a `NULL` `id_column`, and also when its only link row has a `NULL` `link.source_column` matched against a visible source row whose `source_id_column` is `NULL`."
+  },
+  {
+    "criterion": 4,
+    "text": "Against live MySQL, a `referenced_by` target row reached through two link rows, or from two visible source rows, is returned exactly once, and `COUNT(*)` over the table equals the number of distinct visible rows."
+  },
+  {
+    "criterion": 5,
+    "text": "Against live MySQL, each of these query shapes, at minimum, returns only visible rows when it reads a direct `referenced_by` table and a linked `referenced_by` table: a plain alias, a self-join, a `UNION`, a CTE, a `LATERAL` derived table and a scalar subquery."
+  },
+  {
+    "criterion": 6,
+    "text": "The catalog check gives each join pair, as Desired Behavior defines it, the outcome its type-family table states. A refused pair is reported as a catalog problem naming both columns as `table.column` and both `DATA_TYPE` values. Live MySQL tests cover at minimum an `int`↔`bigint` pair, a `char`↔`varchar` pair and a `decimal`↔`decimal` pair that pass, and a `varchar`↔`int` pair and a `decimal`↔`bigint` pair that the catalog check refuses."
+  },
+  {
+    "criterion": 7,
+    "text": "A rule-set file loads when its deepest compiled rule nests exactly 16 `EXISTS` levels, measured as the largest number of `exp.Exists` nodes enclosing one another in the rule's compiled sqlglot condition. A file whose rule nests 17 levels fails to load with a `RuleSetFileError` naming the rule's `rule_sets[i].tables[j].row_rule` place and the 16-level limit. Both tests run on every Python version CI runs."
+  },
+  {
+    "criterion": 8,
+    "text": "A rule-set file loads when a compiled rule uses exactly 64 slots, counted as the rule's `CompiledRule.slots`. A file whose rule needs 65 slots fails to load with a `RuleSetFileError` naming the rule's place and the 64-slot limit. A rule shaped as a two-path diamond 16 levels deep (each level an `any_of` of two `inherit` nodes to the level below), whose full compile would need 131,071 slots, fails to load with the same error after allocating no more than 65 slots, counted by wrapping `_Compiler._new_slot` in the test."
+  },
+  {
+    "criterion": 9,
+    "text": "Loading a rule-set file whose nesting makes TOML parsing raise `RecursionError` fails with a `RuleSetFileError` naming the file path, not a bare `RecursionError`."
+  },
+  {
+    "criterion": 10,
+    "text": "The change leaves the per-query SQL rewrite in `RuleSetGuardRunner.run_sql` running on the event loop. It leaves string join matches subject to the columns' collation, and does not check join-pair collations at startup, so a string pair with incompatible collations still fails each query on that table with MySQL error 1267. It does not count `any_of`/`all_of` or `parent_rule` nesting toward the 16-level `EXISTS` limit, so a rule within both limits whose compile or proof still exhausts Python recursion (for example a 13-hop `inherit` chain whose every hop is `all_of[compare, inherit]` with a single-`compare` `parent_rule`) keeps failing to load with today's \"the row rule could not be compiled (RecursionError: …)\" error. It adds no macOS or Windows CI run for the limit tests."
+  },
+  {
+    "criterion": 11,
+    "text": "`docs/internal/database-connectors/rule-sets.md` and `docs/external/rule-sets.md` state the join-pair type rule with its two families and the identical-type rule for other types, and state the 16-level `EXISTS` limit and the 64-slot limit with how each is counted. Both pages also say that a rule within both limits can still fail to load with a `RecursionError` compile error, because every `any_of`, `all_of` and `parent_rule` along a chain adds to how deeply the compiled SQL nests. They say that even one `all_of` and one single-`compare` `parent_rule` per hop has failed from 13 `inherit` hops on Python 3.12, and that the fix is fewer hops or less nesting per hop. `docs/internal/glossary.md`'s Catalog check entry says the check also covers join pairs."
+  },
+  {
+    "criterion": 12,
+    "text": "A `changelog.d` fragment tells operators that a join pair whose types differ now stops startup, and that a row rule over 16 `EXISTS` levels or 64 slots now fails to load, and says to run `sqllens validate --check-db` with the new release before switching to it."
+  }
+]
