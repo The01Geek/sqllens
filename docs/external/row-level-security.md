@@ -166,7 +166,6 @@ If any `[[rls]]` block is malformed, validation fails with a clear message namin
 - **Views are unavailable while RLS is active.** SQL Lens checks referenced relations on the connection that will execute the query and requires base tables. It does not expand stored view definitions, so this also blocks views over unprotected tables. Use base-table queries when RLS rules are configured. Views remain available when RLS is off.
 - **Schema lookups use a fixed set of system views.** While RLS is active, the assistant can still read these metadata-only views to find table and column names: on MySQL, `information_schema.schemata`, `tables`, `columns`, `views`, `statistics`, `table_constraints`, `key_column_usage`, `referential_constraints` and `check_constraints`, written with the `information_schema.` prefix. Statistics views that expose sampled column values, such as MySQL `information_schema.COLUMN_STATISTICS`, stay blocked. Catalog metadata is not row-scoped: table-wide figures such as estimated row counts cover every tenant.
 - **Database functions are unavailable while RLS is active.** On MySQL, calls to stored functions are blocked while RLS is active. SQL Lens matches these calls by name alone, so a built-in call is also blocked when such a function shares its name. SQL Lens checks only names written as calls (`name(...)`) and does not inspect every other way the database can run stored code. Grant the SQL Lens database user `EXECUTE` only on functions you have reviewed.
-- **SQLite RLS requires SQLite 3.37 or newer.** Virtual tables and their shadow tables are blocked, and unavailable relation metadata blocks the query.
 - **One process, one database, one configuration.** The rules in `sqllens.toml` apply to every request handled by that SQL Lens process. If you need per-database rules, run one SQL Lens process per database.
 - **No schema-qualified table names.** `table = "orders"` is supported; `table = "public.orders"` is not.
 - **Dynamic rules require caller-supplied metadata.** Both HTTP and stdio carry MCP metadata, but the calling application must supply the required keys.
@@ -177,4 +176,4 @@ If any `[[rls]]` block is malformed, validation fails with a clear message namin
 ## See also
 
 - **[Configuration reference](configuration.md)** for the full schema of `sqllens.toml`, including the `[[rls]]` section.
-- **[Getting started](getting-started.md)** for the minimal configuration needed to run SQL Lens against the bundled demo database.
+- **[Getting started](getting-started.md)** for the minimal configuration needed to run SQL Lens against the Chinook MySQL demo database.

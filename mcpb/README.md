@@ -27,7 +27,7 @@ Drag the `.mcpb` matching your platform onto Claude Desktop. It'll prompt for th
 
 | Field | Required | Description |
 |---|---|---|
-| Database URL | yes | SQLAlchemy DSN. Examples: `mysql+pymysql://user:pw@host/db`, `sqlite:////absolute/path/to/db.sqlite` |
+| Database URL | yes | SQLAlchemy DSN. MySQL 8.0+ only. Example: `mysql+pymysql://user:pw@host:3306/db` (or `mysql://...`) |
 | Database display name | no | Defaults to `primary` |
 | Enforce read-only | no | Defaults to on. Strongly recommended |
 | Let the assistant save free-form notes | no | Defaults to off. Turn it on to let the assistant write its own schema notes into memory |

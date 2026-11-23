@@ -31,21 +31,14 @@ _METADATA_VIEWS: dict[str, frozenset[tuple[str, str]]] = {
     ),
 }
 
-# Relation kinds in each dialect's own catalog vocabulary: SQLite
-# ``pragma_table_list.type`` and MySQL ``information_schema.TABLES.TABLE_TYPE``.
-# Anything outside both sets is refused.
+# Relation kinds in MySQL's ``information_schema.TABLES.TABLE_TYPE``
+# vocabulary. A kind in neither the view set nor the base-table set is refused.
 _VIEW_KINDS: dict[str, frozenset[str]] = {
-    "sqlite": frozenset({"view"}),
     "mysql": frozenset({"VIEW", "SYSTEM VIEW"}),
 }
 _BASE_TABLE_KINDS: dict[str, frozenset[str]] = {
-    "sqlite": frozenset({"table"}),
     "mysql": frozenset({"BASE TABLE"}),
 }
-
-_SQLITE_SCHEMA_TABLES = frozenset(
-    {"sqlite_master", "sqlite_schema", "sqlite_temp_master", "sqlite_temp_schema"}
-)
 
 
 def _relations(sql: str, dialect: str) -> list[exp.Table]:
@@ -125,7 +118,6 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
     except Exception as exc:
         # The client sees only the sanitized message; log the cause so a guard
         # bug, a revoked catalog grant and a lost connection stay distinguishable.
-        # SQLite runs no function-call check, so its message names relations only.
         checked = "relation types or function calls" if dialect == "mysql" else "relation types"
         logger.warning(
             "row-level-security check of %s raised an unexpected %s; failing closed",
@@ -154,9 +146,7 @@ def _verify_relations(cursor: Any, relations: list[exp.Table], dialect: str) -> 
     for relation in relations:
         if relation.catalog:
             raise RlsError("row-level security cannot verify catalog-qualified relations")
-        if dialect == "sqlite":
-            kind = _sqlite_kind(cursor, relation)
-        elif dialect == "mysql":
+        if dialect == "mysql":
             # information_schema cannot hold user objects and its names
             # are case-insensitive, so a qualified name identifies it.
             if (
@@ -211,21 +201,3 @@ def _refuse_database_routines(cursor: Any, names: list[str]) -> None:
             f"function {str(row[0])!r} (names are compared ignoring case)"
         )
 
-
-def _sqlite_kind(cursor: Any, relation: exp.Table) -> str | None:
-    if relation.name.lower() in _SQLITE_SCHEMA_TABLES:
-        return "table"
-    if relation.db:
-        schemas = [relation.db]
-    else:
-        cursor.execute("PRAGMA database_list")
-        schemas = ["temp", "main"] + [row[1] for row in cursor.fetchall() if row[1] != "main"]
-    for schema in schemas:
-        cursor.execute(
-            "SELECT type FROM pragma_table_list(?) WHERE schema = ? COLLATE NOCASE",
-            (relation.name, schema),
-        )
-        row = cursor.fetchone()
-        if row:
-            return row[0]
-    return None

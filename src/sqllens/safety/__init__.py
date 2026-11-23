@@ -25,8 +25,8 @@ Seven orthogonal protections, composed at the factory:
   also applies the function denylist and the relation check whatever
   ``[[rls]]`` and ``database.read_only`` are, and ``RefusalRedactingRunner``
   keeps table, column and function names out of every guard's refusal text.
-* Per-runner statement timeouts (``SET SESSION MAX_EXECUTION_TIME`` on MySQL,
-  ``set_progress_handler`` deadline on SQLite) — server- or driver-side time bound.
+* Per-runner statement timeout (``SET SESSION MAX_EXECUTION_TIME`` on MySQL) —
+  a server-side time bound.
 * ``RowCapRunner`` — per-runner streaming via ``fetchmany`` stops at
   ``max_rows``; this decorator is the secondary belt-and-suspenders check
   on the returned DataFrame.

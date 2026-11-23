@@ -147,9 +147,8 @@ def default_config_path(platform_name: str, env: Mapping[str, str]) -> Path | No
 def derive_default_name(db_url: str) -> str:
     """Pick a friendly entry name from the DSN.
 
-    For sqlite, use the database file's stem (``./chinook.db`` -> ``chinook``).
-    For other backends, use the database segment of the URL. Falls back to
-    ``sqllens`` for anything unparseable.
+    Use the database segment of the URL as written. Falls back to ``sqllens``
+    when the URL has no database segment or cannot be parsed.
     """
     from sqlalchemy.engine.url import make_url
     from sqlalchemy.exc import ArgumentError
@@ -159,14 +158,7 @@ def derive_default_name(db_url: str) -> str:
         database = url.database or ""
     except (ArgumentError, ValueError):
         return "sqllens"
-    if not database:
-        return "sqllens"
-    stem = Path(database).name or database
-    for ext in (".db", ".sqlite", ".sqlite3"):
-        if stem.endswith(ext):
-            stem = stem[: -len(ext)]
-            break
-    return stem or "sqllens"
+    return database or "sqllens"
 
 
 def resolve_invocation(

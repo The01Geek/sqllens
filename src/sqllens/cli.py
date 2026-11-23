@@ -831,7 +831,7 @@ _SAMPLE_CONFIG = """\
 # SQL Lens configuration. See https://github.com/The01Geek/sqllens for docs.
 
 [database]
-url = "sqlite:///./demo.db"
+url = "mysql+pymysql://user:password@127.0.0.1:3306/database"
 name = "primary"
 read_only = true
 

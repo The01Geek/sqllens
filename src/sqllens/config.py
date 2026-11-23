@@ -69,8 +69,7 @@ class DatabaseConfig(BaseModel):
         description=(
             "SQLAlchemy-style DSN whose scheme is mysql or starts with mysql+, e.g. "
             "mysql+pymysql://u:p@h:3306/db. Any other scheme, or a value with no "
-            "'://', is refused at load (a scheme starting with sqlite is still accepted "
-            "until SQLite's removal)."
+            "'://', is refused at load."
         ),
     )
     name: str = Field(default="primary", description="Display name shown via list_data_sources")
@@ -95,8 +94,7 @@ class DatabaseConfig(BaseModel):
         le=24 * 60 * 60 * 1000,
         description=(
             "Server-side statement timeout in milliseconds. Applied via "
-            "SET SESSION MAX_EXECUTION_TIME (MySQL) "
-            "or a progress-handler deadline (SQLite). 0 disables. "
+            "SET SESSION MAX_EXECUTION_TIME (MySQL). 0 disables. "
             "Upper bound is 24h (86_400_000) to catch unit-confusion typos."
         ),
     )
@@ -116,7 +114,7 @@ class DatabaseConfig(BaseModel):
     def _supported_url_scheme(cls, value: str) -> str:
         if "://" in value:
             scheme = value.split("://", 1)[0].lower()
-            if scheme == "mysql" or scheme.startswith(("mysql+", "sqlite")):
+            if scheme == "mysql" or scheme.startswith("mysql+"):
                 return value
         raise ValueError(UNSUPPORTED_DATABASE_URL_MESSAGE)
 
@@ -124,7 +122,7 @@ class DatabaseConfig(BaseModel):
     def dialect(self) -> str:
         """SQLAlchemy URL scheme with any ``+driver`` suffix stripped.
 
-        ``sqlite:///demo.db`` → ``sqlite``; ``mysql+pymysql://...`` → ``mysql``.
+        ``mysql+pymysql://...`` → ``mysql``.
         """
         scheme = self.url.split("://", 1)[0]
         return scheme.split("+", 1)[0]

@@ -151,7 +151,6 @@ def test_database_url_diagnostics_withhold_values(url: str) -> None:
 @pytest.mark.parametrize(
     "module,url,error_name",
     [
-        ("sqlite3", "sqlite:///:memory:", "OperationalError"),
         ("pymysql", "mysql://user:pw@localhost/db", "MySQLError"),
     ],
 )

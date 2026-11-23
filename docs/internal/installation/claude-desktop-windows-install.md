@@ -13,13 +13,19 @@ The fast path is `sqllens claude-desktop install` — one command that replaces 
 - **Python 3.11+** on PATH. Verify in PowerShell: `python --version`. If missing, install from [python.org](https://www.python.org/downloads/windows/) and tick "Add python.exe to PATH" during install.
 - **Claude Desktop** installed (Start menu → Claude).
 - **Anthropic API key** from [console.anthropic.com](https://console.anthropic.com/).
+- **Docker Desktop** (includes Compose), running, for the Chinook MySQL demo database. SQL Lens itself needs a MySQL 8.0+ server.
 
 ## Fast path: one command
 
 ```powershell
 pip install "sqllens[all]"
+mkdir $env:USERPROFILE\sqllens\mysql-demo
+cd $env:USERPROFILE\sqllens\mysql-demo
+$demo = "https://github.com/The01Geek/sqllens/raw/main/examples/mysql-demo"
+foreach ($f in "compose.yaml", "Chinook_MySql.sql", "demo-user.sql") { curl.exe -L -o $f "$demo/$f" }
+docker compose up -d --wait
 $env:SQLLENS_LLM__API_KEY = "sk-ant-..."
-sqllens claude-desktop install --db "sqlite:///C:/Users/USERNAME/sqllens/chinook.db"
+sqllens claude-desktop install --db "mysql+pymysql://chinook_reader:chinook_reader@127.0.0.1:3306/Chinook" --name chinook
 ```
 
 That single `claude-desktop install` call:
@@ -39,14 +45,14 @@ Get-Process Claude -ErrorAction SilentlyContinue | Stop-Process -Force
 
 Reopen from the Start menu. See [Verify](#verify) and [Troubleshooting](#troubleshooting) below.
 
-> The Chinook SQLite demo (~1 MB) is the safest first DSN. Grab it once with `curl.exe -L -o $env:USERPROFILE\sqllens\chinook.db https://github.com/The01Geek/sqllens/raw/main/examples/sqlite-demo/chinook.db` and re-run the installer pointing at a real database when ready.
+> The Chinook MySQL demo (`examples/mysql-demo`, started with `docker compose`) is the safest first DSN. Its first start pulls `mysql:8.0` and loads the data, which takes a few minutes. Re-run the installer pointing at a real database when ready.
 
 ### Useful installer flags
 
 | Flag | What it does |
 |---|---|
 | `--dry-run` | Print the TOML, the `.cmd` body, and a unified diff of the JSON change. No filesystem writes. The best first invocation against an already-configured machine. |
-| `--name <key>` | Override the `mcpServers` key. Defaults to the SQLite file stem (`chinook` for `chinook.db`) or the database segment of the DSN. |
+| `--name <key>` | Override the `mcpServers` key. Defaults to the database segment of the DSN as written (`Chinook` for the demo URL), or `sqllens` when there is none. |
 | `--api-key sk-ant-...` | Pass the key inline instead of via env. |
 | `--model claude-...` | Choose a different Anthropic model. Defaults to `claude-opus-5-5`. |
 | `--working-dir <path>` | Where `sqllens.toml` and the `.cmd` launcher land. Defaults to `%USERPROFILE%\sqllens`. |
@@ -60,7 +66,7 @@ See [claude-desktop-installer.md](claude-desktop-installer.md) for the installer
 ## Verify
 
 - Bottom-right of the chat input → MCP indicator should show your configured server name (e.g. `chinook`) with 2 tools (`query_database`, `list_data_sources`).
-- New chat: *"Using sqllens, how many albums did AC/DC release in the chinook database?"*
+- New chat: *"Using sqllens, how many albums did AC/DC release in the chinook database?"* The expected answer is 2 albums.
 - Approve the tool call when prompted. **First query takes 30–60 seconds** — ChromaDB downloads ~80 MB of embedding model weights into `C:\Users\USERNAME\sqllens\chroma\`. Subsequent queries are fast.
 - After success, a `C:\Users\USERNAME\sqllens\<16-hex-chars>\` directory will appear containing `query_results_*.csv`. That's the agent's scratch space — harmless, safe to delete periodically.
 
@@ -78,8 +84,7 @@ This regenerates `sqllens.toml`, regenerates the `.cmd`, and replaces the `mcpSe
 
 | Dialect | URL form |
 |---|---|
-| MySQL 8.0+ | `mysql+pymysql://user:pw@host:3306/dbname` |
-| SQLite | `sqlite:///C:/path/to/file.db` (forward slashes) |
+| MySQL 8.0+ | `mysql+pymysql://user:pw@host:3306/dbname` (or `mysql://...`) |
 
 ## Troubleshooting
 
@@ -108,10 +113,14 @@ If `sqllens` is "not recognized" after install, close and reopen PowerShell so t
 
 ### 2. Working folder + demo database
 
+With Docker Desktop running:
+
 ```powershell
-mkdir $env:USERPROFILE\sqllens
-cd $env:USERPROFILE\sqllens
-curl.exe -L -o chinook.db https://github.com/The01Geek/sqllens/raw/main/examples/sqlite-demo/chinook.db
+mkdir $env:USERPROFILE\sqllens\mysql-demo
+cd $env:USERPROFILE\sqllens\mysql-demo
+$demo = "https://github.com/The01Geek/sqllens/raw/main/examples/mysql-demo"
+foreach ($f in "compose.yaml", "Chinook_MySql.sql", "demo-user.sql") { curl.exe -L -o $f "$demo/$f" }
+docker compose up -d --wait
 ```
 
 ### 3. Write `sqllens.toml` (BOM-free)
@@ -121,7 +130,7 @@ curl.exe -L -o chinook.db https://github.com/The01Geek/sqllens/raw/main/examples
 ```powershell
 $toml = @'
 [database]
-url = "sqlite:///C:/Users/USERNAME/sqllens/chinook.db"
+url = "mysql+pymysql://chinook_reader:chinook_reader@127.0.0.1:3306/Chinook"
 name = "chinook"
 read_only = true
 

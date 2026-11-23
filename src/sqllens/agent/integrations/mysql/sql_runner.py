@@ -7,7 +7,8 @@ import pandas as pd
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.integrations.sql_threads import run_blocking_sql
-# See the sqlite runner for the rationale on this shared helper.
+# The row cap is read per call through effective_row_cap, not fixed at construction,
+# because a per-request profile can narrow it without rebuilding the agent.
 from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
 from sqllens.safety.relations import verify_base_tables

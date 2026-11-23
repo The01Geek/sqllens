@@ -95,7 +95,6 @@ async def test_uncut_result_gets_no_display_line() -> None:
 @pytest.mark.parametrize(
     ("dialect", "sql"),
     [
-        ("sqlite", "SELECT name FROM sqlite_master"),
         ("mysql", "SELECT table_name FROM information_schema.tables"),
     ],
 )

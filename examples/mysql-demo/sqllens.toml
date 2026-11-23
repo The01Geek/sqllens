@@ -1,0 +1,34 @@
+# SQL Lens demo config: points at the Chinook MySQL database that
+# examples/mysql-demo/compose.yaml starts. From the repository root:
+#
+#     docker compose -f examples/mysql-demo/compose.yaml up -d --wait
+#     export SQLLENS_LLM__API_KEY=sk-ant-...
+#     sqllens serve -c examples/mysql-demo/sqllens.toml
+#
+# The server speaks MCP on stdio. Point your MCP client (Cursor, Claude Desktop,
+# MCP Inspector, etc.) at the resulting process.
+
+[database]
+# Database names are case-sensitive on Linux: the demo database is `Chinook`.
+# If you changed the published host port in compose.yaml, change 3306 here too.
+url = "mysql+pymysql://chinook_reader:chinook_reader@127.0.0.1:3306/Chinook"
+name = "chinook"
+read_only = true
+
+[llm]
+provider = "anthropic"
+model = "claude-opus-5-5"
+# api_key intentionally omitted — set SQLLENS_LLM__API_KEY in your shell.
+
+[memory]
+persist_dir = "./examples/mysql-demo/chroma"
+collection = "chinook"
+
+[auth]
+mode = "none"
+
+[agent]
+show_details = false   # do not expose the generated SQL to MCP clients
+
+[server]
+transport = "stdio"

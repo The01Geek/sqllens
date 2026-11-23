@@ -427,7 +427,6 @@ async def _prompt(dialect: str | None, tools: list | None = None) -> str:
     ("dialect", "engine", "catalog_example", "no_ilike"),
     [
         ("mysql", "MySQL", "(e.g. information_schema.columns)", True),
-        ("sqlite", "SQLite", "(e.g. sqlite_master)", True),
     ],
 )
 async def test_database_section_names_the_engine(
@@ -454,7 +453,7 @@ async def test_no_engine_keeps_todays_catalog_example_and_no_database_section() 
     assert "Database:" not in prompt.splitlines()
     assert (
         "Express introspection as a SELECT against the catalog"
-        " (e.g. information_schema.columns or sqlite_master);"
+        " (e.g. information_schema.columns);"
     ) in prompt
 
 
@@ -473,9 +472,9 @@ async def test_tool_errors_bullets(dialect: str | None, with_memory_tools: bool)
     assert not lines[start + 4].startswith("- ")
 
 
-@pytest.mark.parametrize("dialect", ["oracle", "postgres"])
+@pytest.mark.parametrize("dialect", ["oracle", "postgres", "sqlite"])
 async def test_unknown_dialect_is_rejected(dialect: str) -> None:
-    """A dialect with no engine entry, ``postgres`` included, is refused."""
+    """A dialect with no engine entry, ``postgres`` and ``sqlite`` included, is refused."""
     with pytest.raises(ValueError, match=f"unsupported dialect '{dialect}'"):
         DefaultSystemPromptBuilder(dialect=dialect)
 

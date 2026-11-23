@@ -42,8 +42,7 @@ def test_changed_on_different_table() -> None:
 
 @pytest.mark.parametrize(
     ("dialect", "expected"),
-    # ``#`` opens a comment under mysql, so its malformed input carries none.
-    [("sqlite", "this is not sql ## ?? !!"), ("mysql", "this is not sql ?? !!")],
+    [("mysql", "this is not sql ?? !!")],
 )
 def test_error_when_expected_unparseable(dialect: str, expected: str) -> None:
     actual = "SELECT 1"
